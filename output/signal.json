@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-04-19T16:52:57.904767+00:00",
+  "symbol": "XAUUSD",
+  "close": 4833.06,
+  "atr": 19.35,
+  "atr_ratio": 1.13,
+  "rsi": 52.4,
+  "bb_pct": 0.096,
+  "sl_multi": 1.5,
+  "action": "none",
+  "sl_price": 4804.04,
+  "tp_price": 4891.12,
+  "rsi_exit_thr": 70,
+  "trail_multi": 1.5,
+  "max_slip_pt": 9675,
+  "signal_active": false,
+  "n_signals_buy": 0,
+  "n_signals_sell": 2
+}
