@@ -28,6 +28,7 @@ CTrade        g_trade;
 CPositionInfo g_pos;
 datetime      g_last_ts     = 0;
 string        g_last_action = "none";
+double        g_lot_size    = 0.0;   // signal.json から更新（0 の場合 InpLotSize を使用）
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -49,17 +50,18 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    string action, sig_ts;
-   double sl_price, tp_price, atr_v, atr_ratio, sl_multi, rsi_exit, trail_m;
+   double sl_price, tp_price, atr_v, atr_ratio, sl_multi, rsi_exit, trail_m, lot_sig;
    int    max_slip;
 
    if(!ReadSignal(action, sl_price, tp_price, atr_v, atr_ratio,
-                  sl_multi, max_slip, rsi_exit, trail_m, sig_ts))
+                  sl_multi, max_slip, rsi_exit, trail_m, lot_sig, sig_ts))
    { if(InpDebugLog) Print("[EA] signal.json 読み込み失敗"); return; }
 
    datetime sig_dt = StringToTime(sig_ts);
    if(sig_dt <= g_last_ts) return;   // 同タイムスタンプはスキップ
    g_last_ts = sig_dt;
 
+   g_lot_size = (lot_sig > 0.0) ? lot_sig : InpLotSize;
    g_trade.SetDeviationInPoints(max_slip);
 
    // トレーリング SL 更新（毎ティック）
@@ -80,20 +82,20 @@ void OpenBuy(double sl, double tp)
 {
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    if(sl >= ask) { Print("[EA] Buy スキップ: SL(", sl, ") >= Ask(", ask, ")"); return; }
-   if(!g_trade.Buy(InpLotSize, _Symbol, ask, sl, tp, "XAUUSD_BUY"))
+   if(!g_trade.Buy(g_lot_size, _Symbol, ask, sl, tp, "XAUUSD_BUY"))
       Print("[EA] Buy 失敗: ", g_trade.ResultRetcode());
    else
-      Print("[EA] Buy 執行  ask=", ask, " SL=", sl, " TP=", tp);
+      Print("[EA] Buy 執行  lot=", g_lot_size, " ask=", ask, " SL=", sl, " TP=", tp);
 }
 
 void OpenSell(double sl, double tp)
 {
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    if(sl <= bid) { Print("[EA] Sell スキップ: SL(", sl, ") <= Bid(", bid, ")"); return; }
-   if(!g_trade.Sell(InpLotSize, _Symbol, bid, sl, tp, "XAUUSD_SELL"))
+   if(!g_trade.Sell(g_lot_size, _Symbol, bid, sl, tp, "XAUUSD_SELL"))
       Print("[EA] Sell 失敗: ", g_trade.ResultRetcode());
    else
-      Print("[EA] Sell 執行  bid=", bid, " SL=", sl, " TP=", tp);
+      Print("[EA] Sell 執行  lot=", g_lot_size, " bid=", bid, " SL=", sl, " TP=", tp);
 }
 
 //+------------------------------------------------------------------+
@@ -147,7 +149,7 @@ int CountPos()
 bool ReadSignal(string &action, double &sl, double &tp,
                 double &atr, double &atr_ratio, double &sl_multi,
                 int &max_slip, double &rsi_exit, double &trail_m,
-                string &ts)
+                double &lot_size, string &ts)
 {
    int fh = FileOpen(InpSignalFile, FILE_READ|FILE_TXT|FILE_ANSI);
    if(fh == INVALID_HANDLE) return false;
@@ -165,6 +167,7 @@ bool ReadSignal(string &action, double &sl, double &tp,
    max_slip  = (int)JDbl(raw, "max_slip_pt");
    rsi_exit  = JDbl(raw, "rsi_exit_thr");
    trail_m   = JDbl(raw, "trail_multi");
+   lot_size  = JDbl(raw, "lot_size");
    ts        = JStr(raw, "timestamp");
    return StringLen(action) > 0;
 }

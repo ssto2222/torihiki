@@ -54,10 +54,9 @@ EXECUTION = dict(
 # ── SL & イグジット ────────────────────────────────────────
 SL = dict(
     spread_usd      = 0.30,
-    unit_lot        = 1.0,
     hold_max_h1     = 48,
     tp_atr_multi    = 3.0,      # 保険TP = ATR × N
-    rsi_exit_thr    = 70,     # RSI≥75 でトレーリング起動
+    rsi_exit_thr    = 75,       # RSI≥75 でトレーリング起動（最適値）
     trail_multi     = 1.5,
     # ボラ適応型SL 倍率
     sl_multi_low    = 1.0,      # ATR_ratio < 0.8
@@ -94,6 +93,7 @@ BRIDGE = dict(
     signal_file = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json",
     status_file ="C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
     poll_sec    = 5,
+    lot_size    = 0.01,         # 1回の取引ロット数（--lot で上書き可）
 )
 
 # ── 可視化 ────────────────────────────────────────────────
