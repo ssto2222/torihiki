@@ -5,7 +5,7 @@ config.py — 全設定の一元管理
 
 # ── MT5 接続 ──────────────────────────────────────────────
 MT5 = dict(
-    symbol    = "BTCUSD",       # GOLD / XAUUSDm など要確認
+    symbol    = "XAUUSD",       # GOLD / XAUUSDm など要確認
     h1_bars   = 5000,
     m1_bars   = 100_000,
     magic     = 20240101,
