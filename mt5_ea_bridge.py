@@ -134,11 +134,25 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
 # ── ファイル I/O ───────────────────────────────────────────
 
 def write_signal(data: dict, path: str):
-    """signal.json をアトミックに書き込む"""
+    """signal.json をアトミックに書き込む (Windows ファイルロック対応)"""
     tmp = path + '.tmp'
     with open(tmp, 'w', encoding='ascii') as f:
         json.dump(data, f, ensure_ascii=True, indent=2)
-    Path(tmp).replace(Path(path))
+
+    retries = 5
+    for attempt in range(retries):
+        try:
+            Path(tmp).replace(Path(path))
+            return
+        except PermissionError:
+            if attempt < retries - 1:
+                time.sleep(0.1)
+            else:
+                try:
+                    Path(tmp).unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
 
 
 def read_ea_state(path: str) -> dict:
