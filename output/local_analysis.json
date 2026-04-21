@@ -20,9 +20,9 @@
       "crash_survival": 0.0,
       "max_consec_loss": 10,
       "reason_counts": {
-        "tp": 1,
+        "sl_slip": 2,
         "sl": 15,
-        "sl_slip": 2
+        "tp": 1
       }
     },
     {
@@ -42,8 +42,8 @@
       "max_consec_loss": 10,
       "reason_counts": {
         "sl_slip": 6,
-        "sl": 7,
         "timeout": 3,
+        "sl": 7,
         "tp": 2
       }
     },
@@ -85,8 +85,8 @@
       "crash_survival": 0.0,
       "max_consec_loss": 10,
       "reason_counts": {
-        "sl_slip": 3,
         "sl": 14,
+        "sl_slip": 3,
         "tp": 1
       }
     },
@@ -106,9 +106,9 @@
       "crash_survival": 0.0,
       "max_consec_loss": 10,
       "reason_counts": {
+        "timeout": 1,
         "sl_slip": 7,
         "sl": 8,
-        "timeout": 1,
         "tp": 2
       }
     }
@@ -121,7 +121,77 @@
       "ATR_ratio 1.5〜2.5": "×2.5",
       "ATR_ratio>2.5": "×4.0 (急落)"
     },
-    "rsi_exit_thr": 75.0,
+    "rsi_exit_thr": 75,
     "trail_multi": 1.5
+  },
+  "optimization": {
+    "buy": {
+      "params": {
+        "rsi_thr": 38,
+        "bb_touch": 0.85,
+        "lookback": 20,
+        "depth_tol": 4.0,
+        "neck_th": 1.5,
+        "touch_m": 0.1,
+        "rsi_offset": 25.0,
+        "rsi_exit": 70.0,
+        "trail_m": 1.5
+      },
+      "metrics": {
+        "strategy": "E. ボラ適応型SL★",
+        "color": "#f85149",
+        "n_trades": 13,
+        "total_pnl": -35685.36655517619,
+        "win_rate": 0.07692307692307693,
+        "profit_factor": 0.07652667096718496,
+        "max_dd": 33395.65458889651,
+        "sharpe": -116.09858036903631,
+        "sl_hit_rate": 1.0,
+        "slip_rate": 0.5384615384615384,
+        "avg_sl_dist": 31.062083809504358,
+        "avg_slip_usd": 2.5764534069448577,
+        "crash_survival": 0.0,
+        "max_consec_loss": 12,
+        "reason_counts": {
+          "sl_slip": 7,
+          "sl": 6
+        }
+      }
+    },
+    "sell": {
+      "params": {
+        "rsi_thr": 42,
+        "bb_touch": 0.85,
+        "lookback": 35,
+        "depth_tol": 4.0,
+        "neck_th": 2.0,
+        "touch_m": 0.2,
+        "rsi_offset": 15.0,
+        "rsi_exit": 75.0,
+        "trail_m": 2.0
+      },
+      "metrics": {
+        "strategy": "E. ボラ適応型SL★",
+        "color": "#f85149",
+        "n_trades": 18,
+        "total_pnl": 30723.364321013694,
+        "win_rate": 0.5,
+        "profit_factor": 2.1228154532497396,
+        "max_dd": 6282.486029260166,
+        "sharpe": 26.78231049463424,
+        "sl_hit_rate": 0.5,
+        "slip_rate": 0.16666666666666666,
+        "avg_sl_dist": 32.446949193329246,
+        "avg_slip_usd": 0.5888553333127093,
+        "crash_survival": 0.0,
+        "max_consec_loss": 2,
+        "reason_counts": {
+          "sl_slip": 3,
+          "sl": 6,
+          "tp": 8,
+          "timeout": 1
+        }
+      }
+    }
   }
 }
