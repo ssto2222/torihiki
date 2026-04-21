@@ -81,11 +81,12 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         sigs_buy  = detect_h1_signals(df_h1, cfg['SIGNAL'], 'buy')
         sigs_sell = detect_h1_signals(df_h1, cfg['SIGNAL'], 'sell')
 
-        # 直近4H以内のシグナルを有効とみなす
+        # 直近 signal_valid_m1 本（M1）以内のシグナルを有効とみなす
+        valid_sec   = cfg['EXECUTION']['signal_valid_m1'] * 60
         now         = df_h1.index[-1]
-        active_buy  = any((now - s['signal_time']).total_seconds() <= 4 * 3600
+        active_buy  = any((now - s['signal_time']).total_seconds() <= valid_sec
                           for s in sigs_buy)
-        active_sell = any((now - s['signal_time']).total_seconds() <= 4 * 3600
+        active_sell = any((now - s['signal_time']).total_seconds() <= valid_sec
                           for s in sigs_sell)
 
         # アクション決定（買いと売りが同時発光なら none）
@@ -122,6 +123,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             'rsi_exit_thr':   cfg['SL']['rsi_exit_thr'],
             'trail_multi':    cfg['SL']['trail_multi'],
             'max_slip_pt':    max_pt,
+            'lot_size':       cfg['BRIDGE']['lot_size'],
             'signal_active':  active_buy or active_sell,
             'n_signals_buy':  len(sigs_buy),
             'n_signals_sell': len(sigs_sell),
@@ -173,11 +175,14 @@ def run_bridge(cfg: dict, once: bool = False):
 
     Path(sig_path).parent.mkdir(parents=True, exist_ok=True)
 
+    lot_size   = cfg['BRIDGE']['lot_size']
+
     print("=" * 58)
     print(f"  MT5 EA ブリッジ  [{symbol}]")
     print(f"  signal.json  → {sig_path}")
     print(f"  ea_state.json← {state_path}")
     print(f"  ポーリング   : {poll_sec}秒  （Ctrl+C で終了）")
+    print(f"  ロット数     : {lot_size}")
     print("=" * 58)
 
     if not connect_mt5(symbol):
@@ -204,7 +209,7 @@ def run_bridge(cfg: dict, once: bool = False):
                 print(f"  SL=ATR×{data['sl_multi']}  "
                       f"action={data['action'].upper():4s}  "
                       f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
-                      f"max_slip={data['max_slip_pt']}pt")
+                      f"lot={data['lot_size']}  max_slip={data['max_slip_pt']}pt")
                 print(f"  signal={data['n_signals_buy']}買/{data['n_signals_sell']}売  "
                       f"残高={bal}  ポジション={pos}件")
             else:
@@ -227,10 +232,14 @@ if __name__ == '__main__':
     ap.add_argument('--once',   action='store_true', help='1回だけ計算して終了')
     ap.add_argument('--symbol', default=C.MT5['symbol'])
     ap.add_argument('--output', default='./output')
+    ap.add_argument('--lot',    type=float, default=None,
+                    help=f'1回の取引ロット数（省略時: {C.BRIDGE["lot_size"]}）')
     args = ap.parse_args()
 
     CFG['MT5']['symbol']          = args.symbol
     CFG['BRIDGE']['signal_file']  = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json"
     CFG['BRIDGE']['status_file']  = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json"
+    if args.lot is not None:
+        CFG['BRIDGE']['lot_size'] = args.lot
 
     run_bridge(CFG, once=args.once)
