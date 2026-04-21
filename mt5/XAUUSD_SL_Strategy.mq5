@@ -151,7 +151,7 @@ bool ReadSignal(string &action, double &sl, double &tp,
                 int &max_slip, double &rsi_exit, double &trail_m,
                 double &lot_size, string &ts)
 {
-   int fh = FileOpen(InpSignalFile, FILE_READ|FILE_TXT|FILE_ANSI);
+   int fh = FileOpen(InpSignalFile, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(fh == INVALID_HANDLE) return false;
    string raw = "";
    while(!FileIsEnding(fh)) raw += FileReadString(fh);
@@ -218,7 +218,7 @@ void WriteState()
       TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
       _Symbol, InpMagic);
 
-   int fh = FileOpen(InpStateFile, FILE_WRITE|FILE_TXT|FILE_ANSI);
+   int fh = FileOpen(InpStateFile, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(fh == INVALID_HANDLE) return;
    FileWriteString(fh, json);
    FileClose(fh);
