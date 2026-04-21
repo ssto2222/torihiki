@@ -174,10 +174,13 @@ bool ReadSignal(string &action, double &sl, double &tp,
 
 string JStr(const string &j, const string &k)
 {
-   string pat = "\"" + k + "\":\"";
+   string pat = "\"" + k + "\":";
    int p = StringFind(j, pat);
    if(p < 0) return "";
    int s = p + StringLen(pat);
+   while(s < StringLen(j) && StringSubstr(j,s,1)==" ") s++;  // コロン後スペースをスキップ
+   if(StringSubstr(j,s,1) != "\"") return "";
+   s++;  // 開始引用符をスキップ
    int e = StringFind(j, "\"", s);
    if(e < 0) return "";
    return StringSubstr(j, s, e-s);
@@ -189,6 +192,7 @@ double JDbl(const string &j, const string &k)
    int p = StringFind(j, pat);
    if(p < 0) return 0.0;
    int s = p + StringLen(pat);
+   while(s < StringLen(j) && StringSubstr(j,s,1)==" ") s++;  // コロン後スペースをスキップ
    int e = s;
    while(e < StringLen(j))
    {

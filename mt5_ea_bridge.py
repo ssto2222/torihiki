@@ -109,7 +109,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         max_pt = max(1, int(atr_v * 0.5 / point))
 
         return {
-            'timestamp':      datetime.now(timezone.utc).isoformat(),
+            'timestamp':      datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
             'symbol':         symbol,
             'close':          round(close_v, 2),
             'atr':            round(atr_v,   2),
