@@ -26,28 +26,32 @@ INDICATOR = dict(
 )
 
 # ── H1 シグナル検出 ────────────────────────────────────────
+# 最適化結果（local_analysis.py --optimize より）
 SIGNAL = dict(
+    # 買い：ダブルボトム
     buy_rsi_thr   = 38.0,
-    buy_bb_touch  = 0.80,       # BB_pct ≤ -この値 で -3σ タッチ判定
-    db_lookback   = 25,
+    buy_bb_touch  = 0.85,       # 最適値（0.80→0.85）
+    db_lookback   = 20,          # 最適値（25→20）
     db_min_int    = 2,
     db_max_int    = 16,
-    db_depth_tol  = 5.0,
-    db_neck_rise  = 2.0,
+    db_depth_tol  = 4.0,         # 最適値（5.0→4.0）
+    db_neck_rise  = 1.5,         # 最適値（2.0→1.5）
     local_order   = 2,
-    sell_rsi_thr  = 62.0,
-    sell_bb_touch = 0.80,
-    dt_lookback   = 25,
+    # 売り：ダブルトップ（勝率50%・PF2.12 を達成した最優秀パラメータ）
+    sell_rsi_thr  = 42.0,        # 最適値（62.0→42.0）
+    sell_bb_touch = 0.85,        # 最適値（0.80→0.85）
+    dt_lookback   = 35,          # 最適値（25→35）
     dt_min_int    = 2,
     dt_max_int    = 16,
-    dt_depth_tol  = 5.0,
+    dt_depth_tol  = 4.0,         # 最適値（5.0→4.0）
     dt_neck_drop  = 2.0,
 )
 
 # ── M1 執行 ────────────────────────────────────────────────
+# 最適値（売り方向の最適化より）
 EXECUTION = dict(
     touch_margin    = 0.20,
-    m1_rsi_offset   = 20.0,
+    m1_rsi_offset   = 15.0,     # 最適値（20.0→15.0）
     signal_valid_m1 = 240,      # シグナルON有効期限（M1本数）
 )
 
@@ -57,7 +61,7 @@ SL = dict(
     hold_max_h1     = 48,
     tp_atr_multi    = 3.0,      # 保険TP = ATR × N
     rsi_exit_thr    = 75,       # RSI≥75 でトレーリング起動（最適値）
-    trail_multi     = 1.5,
+    trail_multi     = 2.0,      # 最適値（1.5→2.0）
     # ボラ適応型SL 倍率
     sl_multi_low    = 1.0,      # ATR_ratio < 0.8
     sl_multi_normal = 1.5,      # 0.8 〜 1.5

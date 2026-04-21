@@ -81,11 +81,12 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         sigs_buy  = detect_h1_signals(df_h1, cfg['SIGNAL'], 'buy')
         sigs_sell = detect_h1_signals(df_h1, cfg['SIGNAL'], 'sell')
 
-        # 直近4H以内のシグナルを有効とみなす
+        # 直近 signal_valid_m1 本（M1）以内のシグナルを有効とみなす
+        valid_sec   = cfg['EXECUTION']['signal_valid_m1'] * 60
         now         = df_h1.index[-1]
-        active_buy  = any((now - s['signal_time']).total_seconds() <= 4 * 3600
+        active_buy  = any((now - s['signal_time']).total_seconds() <= valid_sec
                           for s in sigs_buy)
-        active_sell = any((now - s['signal_time']).total_seconds() <= 4 * 3600
+        active_sell = any((now - s['signal_time']).total_seconds() <= valid_sec
                           for s in sigs_sell)
 
         # アクション決定（買いと売りが同時発光なら none）
