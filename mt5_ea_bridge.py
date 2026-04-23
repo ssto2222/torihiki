@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import connect_mt5, fetch_ohlcv
 from core.indicators import add_h1_indicators, add_m1_indicators
-from core.strategy   import detect_h1_signals, VolAdaptiveSL
+from core.strategy   import detect_sma_rsi_signals
 
 CFG = {k: getattr(C, k) for k in
        ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','CRASH','LOCAL','PLOT','BRIDGE']}
@@ -32,64 +32,39 @@ CFG = {k: getattr(C, k) for k in
 
 def compute_signal(symbol: str, cfg: dict) -> dict | None:
     """
-    最新 H1 + M1 から現在の売買シグナルと SL 水準を計算
+    H1 SMA20 + RSI で現在の売買シグナルと SL 水準を計算して返す
 
-    戻り値フォーマット（signal.json と同一）:
-    {
-      "timestamp":      "2024-01-15T03:00:00+00:00",
-      "symbol":         "XAUUSD",
-      "close":          1950.20,
-      "atr":            12.34,
-      "atr_ratio":      1.05,
-      "rsi":            42.1,
-      "sl_multi":       1.5,          // ボラ適応型で決定したATR倍率
-      "action":         "buy",        // "buy" / "sell" / "none"
-      "sl_price":       1931.70,      // 推奨SL価格
-      "tp_price":       1987.22,      // 保険TP価格
-      "rsi_exit_thr":   75.0,
-      "trail_multi":    1.5,
-      "max_slip_pt":    617,          // MT5 deviation パラメータ相当
-      "signal_active":  true,
-      "n_signals_buy":  1,
-      "n_signals_sell": 0
-    }
+    signal.json フォーマット:
+      action       : "buy" / "sell" / "none"
+      sl_price     : Entry ± ATR × sl_multi
+      tp_price     : Entry ± ATR × tp_atr_multi
+      lot_size     : 発注ロット数
+      timestamp    : "YYYY.MM.DD HH:MM:SS"（MQL5 StringToTime 互換）
     """
     try:
         import MetaTrader5 as mt5
 
         df_h1_raw = fetch_ohlcv(symbol, 'H1', 200)
-        df_m1_raw = fetch_ohlcv(symbol, 'M1', 500)
-        if df_h1_raw is None or df_m1_raw is None:
+        if df_h1_raw is None:
             return None
 
         df_h1 = add_h1_indicators(df_h1_raw, cfg)
-        df_m1 = add_m1_indicators(df_m1_raw, cfg)
-        if df_h1.empty: return None
+        if df_h1.empty or 'SMA20' not in df_h1.columns:
+            return None
 
         last    = df_h1.iloc[-1]
-        atr_v   = float(last['ATR'])
-        ratio   = float(last['ATR_ratio']) if not np.isnan(last['ATR_ratio']) else 1.0
-        rsi_v   = float(last['RSI'])
-        bb_pct  = float(last['BB_pct'])
         close_v = float(last['Close'])
+        atr_v   = float(last['ATR'])
+        rsi_v   = float(last['RSI'])
+        sma20   = float(last['SMA20'])
 
-        # ボラ適応型 SL でマルチプライヤーを決定
-        strat    = VolAdaptiveSL(cfg=cfg)
-        sl_multi = strat._m(ratio)
+        sl_multi = cfg['SL']['sl_multi']
 
-        # シグナル検出（直近200本）
-        sigs_buy  = detect_h1_signals(df_h1, cfg['SIGNAL'], 'buy')
-        sigs_sell = detect_h1_signals(df_h1, cfg['SIGNAL'], 'sell')
+        # RSI が閾値ゾーンにある間シグナルを維持（SMA20 はログ・参考表示用）
+        active_buy  = rsi_v < cfg['SIGNAL']['buy_rsi_thr']
+        active_sell = rsi_v > cfg['SIGNAL']['sell_rsi_thr']
 
-        # 直近 signal_valid_m1 本（M1）以内のシグナルを有効とみなす
-        valid_sec   = cfg['EXECUTION']['signal_valid_m1'] * 60
-        now         = df_h1.index[-1]
-        active_buy  = any((now - s['signal_time']).total_seconds() <= valid_sec
-                          for s in sigs_buy)
-        active_sell = any((now - s['signal_time']).total_seconds() <= valid_sec
-                          for s in sigs_sell)
-
-        # アクション決定（買いと売りが同時発光なら none）
+        # 買い・売り同時は none
         if active_buy and not active_sell:
             action   = 'buy'
             sl_price = close_v - atr_v * sl_multi
@@ -100,33 +75,28 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             tp_price = close_v - atr_v * cfg['SL']['tp_atr_multi']
         else:
             action   = 'none'
-            sl_price = close_v - atr_v * sl_multi   # 参考値
+            sl_price = close_v - atr_v * sl_multi
             tp_price = close_v + atr_v * cfg['SL']['tp_atr_multi']
 
-        # MT5 deviation ポイント換算
         tick   = mt5.symbol_info(symbol)
         point  = tick.point if tick else 0.01
         max_pt = max(1, int(atr_v * 0.5 / point))
 
         return {
-            'timestamp':      datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
-            'symbol':         symbol,
-            'close':          round(close_v, 2),
-            'atr':            round(atr_v,   2),
-            'atr_ratio':      round(ratio,   3),
-            'rsi':            round(rsi_v,   1),
-            'bb_pct':         round(bb_pct,  3),
-            'sl_multi':       round(sl_multi, 2),
-            'action':         action,
-            'sl_price':       round(sl_price, 2),
-            'tp_price':       round(tp_price, 2),
-            'rsi_exit_thr':   cfg['SL']['rsi_exit_thr'],
-            'trail_multi':    cfg['SL']['trail_multi'],
-            'max_slip_pt':    max_pt,
-            'lot_size':       cfg['BRIDGE']['lot_size'],
-            'signal_active':  active_buy or active_sell,
-            'n_signals_buy':  len(sigs_buy),
-            'n_signals_sell': len(sigs_sell),
+            'timestamp':    datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
+            'symbol':       symbol,
+            'close':        round(close_v, 2),
+            'atr':          round(atr_v,   2),
+            'rsi':          round(rsi_v,   1),
+            'sma20':        round(sma20,   2),
+            'sl_multi':     round(sl_multi, 2),
+            'action':       action,
+            'sl_price':     round(sl_price, 2),
+            'tp_price':     round(tp_price, 2),
+            'rsi_exit_thr': cfg['SL']['rsi_exit_thr'],
+            'trail_multi':  cfg['SL']['trail_multi'],
+            'max_slip_pt':  max_pt,
+            'lot_size':     cfg['BRIDGE']['lot_size'],
         }
     except Exception as e:
         print(f"[ブリッジ] 計算エラー: {e}")
@@ -204,14 +174,13 @@ def run_bridge(cfg: dict, once: bool = False):
                 bal = ea.get('balance',   'N/A')
                 ts  = datetime.now().strftime('%H:%M:%S')
                 print(f"\n[{ts}] #{itr}  close=${data['close']:,.2f}  "
-                      f"ATR=${data['atr']:.2f}  ratio={data['atr_ratio']:.2f}  "
-                      f"RSI={data['rsi']:.1f}")
-                print(f"  SL=ATR×{data['sl_multi']}  "
-                      f"action={data['action'].upper():4s}  "
-                      f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
-                      f"lot={data['lot_size']}  max_slip={data['max_slip_pt']}pt")
-                print(f"  signal={data['n_signals_buy']}買/{data['n_signals_sell']}売  "
-                      f"残高={bal}  ポジション={pos}件")
+                      f"SMA20=${data['sma20']:,.2f}  RSI={data['rsi']:.1f}  "
+                      f"ATR=${data['atr']:.2f}")
+                print(f"  action={data['action'].upper():4s}  "
+                      f"SL=${data['sl_price']:,.2f}(×{data['sl_multi']})  "
+                      f"TP=${data['tp_price']:,.2f}  "
+                      f"lot={data['lot_size']}  slip={data['max_slip_pt']}pt")
+                print(f"  残高={bal}  ポジション={pos}件")
             else:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}  データ取得失敗")
 

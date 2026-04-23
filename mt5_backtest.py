@@ -15,14 +15,14 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import load_data
-from core.indicators import add_h1_indicators, add_m1_indicators, detect_crash_events
-from core.strategy   import detect_h1_signals, get_all_strategies, run_backtest
+from core.indicators import add_h1_indicators, add_m1_indicators
+from core.strategy   import detect_sma_rsi_signals, get_all_strategies, run_backtest
 from core.plot       import plot_crash_analysis, plot_sl_comparison
 
 
 def main(args):
     cfg = {k: getattr(C, k) for k in
-           ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','CRASH','OPTIMIZE','LOCAL','PLOT','BRIDGE']}
+           ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','OPTIMIZE','LOCAL','PLOT','BRIDGE']}
     cfg['MT5'] = {**cfg['MT5'], 'symbol': args.symbol,
                   'h1_bars': args.h1, 'm1_bars': args.m1}
     out = args.output
@@ -48,13 +48,8 @@ def main(args):
           f"${df_h1['Close'].min():,.0f}〜${df_h1['Close'].max():,.0f}")
     print(f"  M1: {len(df_m1)}本")
 
-    # 3. 急落検出
-    print("\n[3] 急落イベント検出")
-    df_crashes = detect_crash_events(df_h1, df_m1, cfg)
-    crash_set  = set(df_crashes['bar'].tolist()) if not df_crashes.empty else set()
-
-    # 4. 買い/売り × 5戦略
-    print("\n[4] SL戦略バックテスト（買い/売り × 5戦略）")
+    # 3. 買い/売り × 5戦略
+    print("\n[3] SL戦略バックテスト（買い/売り × 5戦略）")
     sig_p   = cfg['SIGNAL']
     strats  = get_all_strategies(cfg)
     results = {'buy': [], 'sell': []}
@@ -64,7 +59,7 @@ def main(args):
         print(f"\n  ── {lbl} ──")
         for strat in strats:
             res = run_backtest(df_h1, df_m1, strat, sig_p, cfg,
-                               direction=direction, crash_bar_set=crash_set)
+                               direction=direction)
             results[direction].append(res)
             rc = res.get('reason_counts', {})
             print(f"  {res['strategy'][:30]:<30} "
@@ -73,12 +68,11 @@ def main(args):
                   f"slip=${res['avg_slip_usd']:.2f}  "
                   f"crash_surv={res['crash_survival']*100:.0f}%")
 
-    # 5. グラフ（買いのみ）
-    print("\n[5] グラフ出力")
-    plot_crash_analysis(df_h1, df_crashes, cfg, out)
-    plot_sl_comparison(results['buy'], df_h1, df_crashes, cfg, out)
+    # 4. グラフ（買いのみ）
+    print("\n[4] グラフ出力")
+    plot_sl_comparison(results['buy'], df_h1, None, cfg, out)
 
-    # 6. JSON
+    # 5. JSON
     def san(v):
         if isinstance(v, (np.integer,)):  return int(v)
         if isinstance(v, (np.floating,)): return float(v)
@@ -89,7 +83,6 @@ def main(args):
         'is_real':   is_real,
         'period':    f"{df_h1.index[0]} 〜 {df_h1.index[-1]}",
         'atr_avg':   round(float(atr_a), 3),
-        'n_crashes': len(df_crashes),
         'results': {
             d: [{k: san(v) for k, v in r.items()
                  if k not in ('trades','equity','pnls')}

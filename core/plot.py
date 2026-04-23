@@ -156,8 +156,10 @@ def plot_crash_analysis(df_h1: pd.DataFrame, df_crashes: pd.DataFrame,
 # ── SL比較ダッシュボード（6パネル）───────────────────────────
 
 def plot_sl_comparison(results: list[dict], df_h1: pd.DataFrame,
-                        df_crashes: pd.DataFrame,
+                        df_crashes,
                         cfg: dict, out_dir: str = '.') -> str:
+    if df_crashes is None:
+        df_crashes = pd.DataFrame()
     _setup(cfg)
     p     = cfg.get('PLOT', {})
     DARK  = p.get('dark_bg', '#0d1117')
