@@ -251,6 +251,31 @@ def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
     crash_bars = crash_bar_set or set()
     signals    = detect_sma_rsi_signals(df_h1, sig_p, direction)
 
+    # trading_rules フィルタ（buy のみ有効、import 失敗時はスキップ）
+    try:
+        from trading_rules import RulesEngine as _RE
+        _rules_engine = _RE()
+        symbol    = cfg.get('MT5', {}).get('symbol', 'BTCUSD')
+        min_score = cfg.get('RULES', {}).get('min_score', 0)
+        rsi_d1    = df_h1.get('RSI_D1') if hasattr(df_h1, 'get') else df_h1['RSI_D1'] if 'RSI_D1' in df_h1.columns else None
+
+        filtered = []
+        for sig in signals:
+            st       = sig['signal_time']
+            hour_utc = st.hour
+            dow      = st.dayofweek
+            rsi_h1_v = float(df_h1['RSI'].iloc[sig['signal_bar']])
+            rsi_d1_v = float(rsi_d1.iloc[sig['signal_bar']]) if rsi_d1 is not None and not np.isnan(rsi_d1.iloc[sig['signal_bar']]) else 50.0
+            res = _rules_engine.evaluate(
+                symbol=symbol, rsi_h1=rsi_h1_v, rsi_d1=rsi_d1_v,
+                direction=direction, hour_utc=hour_utc, dow=dow,
+            )
+            if res.signal in ('BUY', 'SELL') and res.score >= min_score:
+                filtered.append(sig)
+        signals = filtered
+    except Exception:
+        pass  # trading_rules 未インストール / 使用不可の場合はフィルタなし
+
     m1_rsi_thr = (sig_p.get('buy_rsi_thr',  38.0) + rsi_off if direction == 'buy'
                   else sig_p.get('sell_rsi_thr', 62.0) - rsi_off)
 

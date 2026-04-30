@@ -48,6 +48,15 @@ SL = dict(
     trail_multi  = 1.5,         # トレーリング幅 = ATR × trail_multi
 )
 
+# ── トレードルール（trading_rules.json から導出）────────────────
+RULES = dict(
+    min_score                = 30,    # RulesEngine スコア閾値（以下はエントリースキップ）
+    max_consecutive_losses   = 3,     # 連続損失この回数でその日の取引停止
+    cooldown_large_loss_min  = 1440,  # 大損失後のクールダウン（分）= 翌日まで
+    large_loss_threshold_usd = -10000,
+    min_hold_minutes         = 15,
+)
+
 # ── 最適化 ────────────────────────────────────────────────
 OPTIMIZE = dict(
     n_samples  = 600,
@@ -66,7 +75,7 @@ BRIDGE = dict(
     signal_file = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json",
     status_file ="C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
     poll_sec    = 5,
-    lot_size    = 0.01,         # 1回の取引ロット数（--lot で上書き可）
+    lot_size    = 0.05,         # 1回の取引ロット数（推奨: 0.05〜0.10）（--lot で上書き可）
 )
 
 # ── 可視化 ────────────────────────────────────────────────

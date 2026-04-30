@@ -17,13 +17,13 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import load_data
-from core.indicators import add_h1_indicators, add_m1_indicators
+from core.indicators import add_h1_indicators, add_m1_indicators, add_d1_rsi_to_h1
 from core.strategy   import (detect_sma_rsi_signals, get_all_strategies,
                               run_backtest, AtrSL)
 from core.plot       import plot_crash_analysis, plot_sl_comparison
 
 CFG = {k: getattr(C, k) for k in
-       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','OPTIMIZE','LOCAL','PLOT','BRIDGE']}
+       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','OPTIMIZE','LOCAL','PLOT','BRIDGE']}
 
 
 # ── グリッド最適化 ─────────────────────────────────────────
@@ -105,6 +105,7 @@ def main(args):
     # 2. 指標
     print("\n[2] 指標計算")
     df_h1 = add_h1_indicators(df_h1_raw, CFG)
+    df_h1 = add_d1_rsi_to_h1(df_h1, CFG)      # D1 RSI を H1 に付加（ルールフィルタ用）
     df_m1 = add_m1_indicators(df_m1_raw, CFG)
     atr_a = df_h1['ATR'].mean()
     print(f"  H1: {len(df_h1)}本  ATR avg=${atr_a:.2f}  "

@@ -66,3 +66,26 @@ def add_m1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return df.dropna()
 
 
+def add_d1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """D1 データに RSI を付加して返す（MT5 D1取得データ用）"""
+    ind = cfg.get('INDICATOR', {})
+    df  = df.copy()
+    df['RSI'] = calc_rsi(df['Close'], ind.get('rsi_period', 14))
+    return df.dropna()
+
+
+def add_d1_rsi_to_h1(df_h1: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """
+    H1 DataFrame を D1 にリサンプルして RSI を計算し、
+    RSI_D1 カラムとして H1 に forward-fill でマージして返す。
+    バックテスト・ローカル分析で D1 RSI を使う際に呼ぶ。
+    """
+    ind = cfg.get('INDICATOR', {})
+    rp  = ind.get('rsi_period', 14)
+    d1_close = df_h1['Close'].resample('1D').last().dropna()
+    d1_rsi   = calc_rsi(d1_close, rp)
+    df_h1    = df_h1.copy()
+    df_h1['RSI_D1'] = d1_rsi.reindex(df_h1.index, method='ffill')
+    return df_h1
+
+
