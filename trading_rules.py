@@ -74,7 +74,7 @@ class SignalResult:
     score:           int            # 0〜100
 
     # ─ 判定根拠 ─
-    reasons:         list
+    reasons:         list[str]
     penalties:       int
     bonuses:         int
 
@@ -107,7 +107,7 @@ class RulesEngine:
         JSON ファイルパス。None の場合は同ディレクトリの trading_rules.json を使用。
     """
 
-    def __init__(self, rules_path=None):
+    def __init__(self, rules_path: "str | Path | None" = None):
         path = Path(rules_path) if rules_path else _DEFAULT_JSON
         with open(path, encoding="utf-8") as f:
             self._rules: dict = json.load(f)
@@ -174,13 +174,15 @@ class RulesEngine:
             key        = key,
         )
 
-    def _get_tp(self, symbol: str, rsi_h1: float):
+    def _get_tp(self, symbol: str, rsi_h1: float) -> tuple[Optional[int], Optional[str]]:
         sym   = symbol if symbol in self._tp else "BTCUSD"
         label = self._zone_label(rsi_h1)
+        # 完全一致がなければ範囲で近似探索
         tp_data = self._tp[sym]
         if label in tp_data:
             d = tp_data[label]
             return d.get("hold_minutes_median"), d.get("priority")
+        # 近傍探索（5ポイント以内）
         rsi_mid = (self._BINS[self._LABELS.index(label)] +
                    self._BINS[self._LABELS.index(label) + 1]) / 2
         best_key, best_dist = None, 999
@@ -224,7 +226,7 @@ class RulesEngine:
         d1z   = self._get_d1_zone(symbol, rsi_d1)
         cross = self._get_cross(symbol, rsi_h1, rsi_d1)
 
-        reasons  = []
+        reasons:  list[str] = []
         penalties = 0
         bonuses   = 0
         blocked   = dict(h1=False, d1=False, cross=False, hour=False, dow=False, dir=False)
@@ -282,6 +284,7 @@ class RulesEngine:
                 reasons.append(f"[DIR CAUTION] Sell WR {swr}% in H1 {h1z.zone}")
                 penalties += w["direction_unfavorable_penalty"]
                 blocked["dir"] = True
+            # Sell は構造的に禁止
             reasons.append("[DIR BLOCKED] Sell is structurally losing (total PnL: -$7.87M)")
             penalties += w["h1_zone_forbidden_penalty"]
             blocked["dir"] = True
@@ -386,6 +389,7 @@ class RulesEngine:
         return minutes
 
     def summary(self, result: SignalResult) -> str:
+        """1行サマリー文字列を返す"""
         lines = [
             f"signal={result.signal:4s}  strength={str(result.strength):6s}  "
             f"score={result.score:3d}  penalties={result.penalties}  bonuses={result.bonuses}",

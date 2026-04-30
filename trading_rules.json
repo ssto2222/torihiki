@@ -30,8 +30,8 @@
     "lot_notes": {
       "3.0": "WR=26.3%, avg -$86,430, max single loss -$443,815",
       "5.0": "WR=59.1% but avg -$28,586, max single loss -$1,289,349",
-      "0.05": "WR=70%, avg +$1,622 - best risk-adjusted lot",
-      "1.00": "WR=60%, avg +$723 - acceptable with strict rules"
+      "0.05": "WR=70%, avg +$1,622 â best risk-adjusted lot",
+      "1.00": "WR=60%, avg +$723 â acceptable with strict rules"
     }
   },
 
@@ -157,7 +157,7 @@
   },
 
   "cross_h1_d1": {
-    "_note": "Combined H1xD1 RSI filter. Buckets: <40 / 40-50 / 50-60 / 60-70 / >70.",
+    "_note": "Combined H1ÃD1 RSI filter. Buckets: <40 / 40-50 / 50-60 / 60-70 / >70.",
     "_verdict_scale": "best > good > ok > caution > forbidden",
     "BTCUSD": {
       "<40_x_<40":    {"verdict":"caution",  "avg_profit":-1060,"wr":60},
