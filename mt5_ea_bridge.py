@@ -29,7 +29,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import connect_mt5, fetch_ohlcv
-from core.indicators import add_h1_indicators, add_d1_indicators
+from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicators
+from core.strategy   import check_m5_entry_filter
 
 CFG = {k: getattr(C, k) for k in
        ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT','BRIDGE']}
@@ -66,6 +67,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
 
         df_h1_raw = fetch_ohlcv(symbol, 'H1', 200)
         df_d1_raw = fetch_ohlcv(symbol, 'D1', 50)
+        df_m5_raw = fetch_ohlcv(symbol, 'M5', 60)   # RSI(14) + 余裕分
         if df_h1_raw is None or df_d1_raw is None:
             return None
 
@@ -81,13 +83,24 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         sma20    = float(last['SMA20'])
         rsi_d1_v = float(df_d1['RSI'].iloc[-1])
 
+        # M5 RSI（直近2本で rising 判定）
+        rsi_m5_cur  = float('nan')
+        rsi_m5_prev = float('nan')
+        m5_ok       = False
+        if df_m5_raw is not None and len(df_m5_raw) >= 3:
+            df_m5 = add_m5_indicators(df_m5_raw, cfg)
+            if not df_m5.empty and len(df_m5) >= 2:
+                rsi_m5_cur  = float(df_m5['RSI'].iloc[-1])
+                rsi_m5_prev = float(df_m5['RSI'].iloc[-2])
+                m5_ok = check_m5_entry_filter(rsi_m5_cur, rsi_m5_prev, rsi_d1_v, symbol)
+
         sl_multi = cfg['SL']['sl_multi']
         now      = datetime.now(timezone.utc)
         hour_utc = now.hour
         dow      = now.weekday()   # 0=Mon, 6=Sun
 
-        # RSI 閾値ベースの生シグナル（買いのみ、売り禁止）
-        active_buy = rsi_h1_v < cfg['SIGNAL']['buy_rsi_thr']
+        # RSI 閾値ベースの生シグナル（買いのみ、売り禁止）+ M5 タイミング確認
+        active_buy = rsi_h1_v < cfg['SIGNAL']['buy_rsi_thr'] and m5_ok
 
         # RulesEngine でフィルタリング
         score           = 0
@@ -128,6 +141,9 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             'atr':             round(atr_v,    2),
             'rsi_h1':          round(rsi_h1_v, 1),
             'rsi_d1':          round(rsi_d1_v, 1),
+            'rsi_m5':          round(rsi_m5_cur, 1) if not np.isnan(rsi_m5_cur) else 0.0,
+            'rsi_m5_prev':     round(rsi_m5_prev, 1) if not np.isnan(rsi_m5_prev) else 0.0,
+            'm5_filter_ok':    m5_ok,
             'sma20':           round(sma20,    2),
             'sl_multi':        round(sl_multi,  2),
             'action':          action,
@@ -228,6 +244,7 @@ def run_bridge(cfg: dict, once: bool = False):
                 print(f"\n[{ts}] #{itr}  "
                       f"close=${data['close']:,.2f}  "
                       f"RSI_H1={data['rsi_h1']:.1f}  RSI_D1={data['rsi_d1']:.1f}  "
+                      f"RSI_M5={data['rsi_m5']:.1f}({'↑' if data['m5_filter_ok'] else '↓/NG'})  "
                       f"ATR=${data['atr']:.2f}")
                 print(f"  action={data['action'].upper():4s}  "
                       f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "

@@ -16,8 +16,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
-from core.data       import load_data
-from core.indicators import add_h1_indicators, add_m1_indicators, add_d1_rsi_to_h1
+from core.data       import load_data, generate_m5_from_h1
+from core.indicators import add_h1_indicators, add_m1_indicators, add_m5_indicators, add_d1_rsi_to_h1
 from core.strategy   import (detect_sma_rsi_signals, get_all_strategies,
                               run_backtest, AtrSL)
 from core.plot       import plot_crash_analysis, plot_sl_comparison
@@ -37,7 +37,7 @@ def _score(res, min_t=6):
     return float((res['total_pnl'] / dd) * pf * (1 + sh * 0.05) * nw)
 
 
-def optimize(df_h1, df_m1, direction, n_samples=None):
+def optimize(df_h1, df_m1, direction, n_samples=None, df_m5=None):
     rng = np.random.default_rng(CFG['OPTIMIZE']['seed'])
     ns  = n_samples or CFG['OPTIMIZE']['n_samples']
 
@@ -71,7 +71,7 @@ def optimize(df_h1, df_m1, direction, n_samples=None):
                                'trail_multi':   raw['trail_m']}}
 
         strat = AtrSL(multi=raw['sl_multi'])
-        res   = run_backtest(df_h1, df_m1, strat, sig_p, cfg_t, direction)
+        res   = run_backtest(df_h1, df_m1, strat, sig_p, cfg_t, direction, df_m5=df_m5)
         sc    = _score(res, CFG['OPTIMIZE']['min_trades'])
         cnt  += 1
 
@@ -101,16 +101,18 @@ def main(args):
     # 1. データ
     print("\n[1] データ生成")
     df_h1_raw, df_m1_raw, is_real = load_data(CFG, force_synthetic=True)
+    df_m5_raw = generate_m5_from_h1(df_h1_raw)
 
     # 2. 指標
     print("\n[2] 指標計算")
     df_h1 = add_h1_indicators(df_h1_raw, CFG)
-    df_h1 = add_d1_rsi_to_h1(df_h1, CFG)      # D1 RSI を H1 に付加（ルールフィルタ用）
+    df_h1 = add_d1_rsi_to_h1(df_h1, CFG)
     df_m1 = add_m1_indicators(df_m1_raw, CFG)
+    df_m5 = add_m5_indicators(df_m5_raw, CFG)
     atr_a = df_h1['ATR'].mean()
     print(f"  H1: {len(df_h1)}本  ATR avg=${atr_a:.2f}  "
           f"${df_h1['Close'].min():,.0f}〜${df_h1['Close'].max():,.0f}")
-    print(f"  M1: {len(df_m1)}本")
+    print(f"  M5: {len(df_m5)}本  M1: {len(df_m1)}本")
 
     # 3. SL戦略バックテスト比較
     print("\n[3] SL戦略バックテスト（買い・5戦略比較）")
@@ -119,7 +121,7 @@ def main(args):
     results = []
     for strat in strats:
         res = run_backtest(df_h1, df_m1, strat, sig_p, CFG,
-                           direction='buy')
+                           direction='buy', df_m5=df_m5)
         results.append(res)
         rc = res.get('reason_counts', {})
         print(f"\n  {res['strategy']}")
@@ -141,7 +143,7 @@ def main(args):
             lbl = '買い' if d == 'buy' else '売り'
             print(f"\n  [{lbl}]")
             t1 = time.time()
-            opt_results[d] = optimize(df_h1, df_m1, d)
+            opt_results[d] = optimize(df_h1, df_m1, d, df_m5=df_m5)
             print(f"  完了 {time.time()-t1:.1f}秒")
             r = opt_results[d]['result'] or {}
             if r:

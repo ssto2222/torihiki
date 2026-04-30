@@ -66,6 +66,15 @@ def add_m1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return df.dropna()
 
 
+def add_m5_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """M5 RSI・ATR を付加して返す（M5 エントリーフィルタ用）"""
+    ind = cfg.get('INDICATOR', {})
+    df  = df.copy()
+    df['RSI'] = calc_rsi(df['Close'], ind.get('rsi_period', 14))
+    df['ATR'] = calc_atr(df, ind.get('atr_period', 14))
+    return df.dropna()
+
+
 def add_d1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """D1 データに RSI を付加して返す（MT5 D1取得データ用）"""
     ind = cfg.get('INDICATOR', {})

@@ -62,6 +62,78 @@ def detect_sma_rsi_signals(df: pd.DataFrame, p: dict, direction: str) -> list[di
     return out
 
 
+# ── M5 エントリーフィルタ ──────────────────────────────────
+
+def check_m5_entry_filter(rsi_m5: float, rsi_m5_prev: float,
+                           rsi_d1: float, symbol: str) -> bool:
+    """
+    M5 RSI エントリータイミングフィルタ。
+    RSI が上昇中（rising）かつ指定ゾーンにある場合のみ True を返す。
+
+    BTCUSD:
+      - 押し目ゾーン  : 40〜55
+      - モメンタムゾーン: 70〜80
+      - D1 強い時のみ : >80（rsi_d1 > 70 が必要）
+      - 禁止ゾーン    : 60〜70（シグナル反転多発帯）
+
+    XAUUSD:
+      - 有効ゾーン    : 50〜70
+      - >80 は絶対禁止（急反転リスク）
+    """
+    if np.isnan(rsi_m5) or np.isnan(rsi_m5_prev):
+        return False
+    rising = rsi_m5 > rsi_m5_prev
+    if not rising:
+        return False
+
+    if symbol == 'BTCUSD':
+        zone_ok = (
+            (40 <= rsi_m5 <= 55) or
+            (70 <= rsi_m5 <= 80) or
+            (rsi_m5 > 80 and rsi_d1 > 70)
+        )
+        forbidden = (60 <= rsi_m5 <= 70)
+        return zone_ok and not forbidden
+    else:  # XAUUSD / default
+        return (50 <= rsi_m5 <= 70) and rsi_m5 < 80
+
+
+def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
+                  direction: str, cfg: dict,
+                  rsi_d1: float = 50.0,
+                  symbol: str = 'BTCUSD') -> dict | None:
+    """
+    H1 シグナル発火後、M5 RSI フィルタを最初に通過したバーをエントリーに使う。
+    方向は 'buy' のみ（sell は rules で禁止）。
+    """
+    exe    = cfg.get('EXECUTION', {})
+    sl_cfg = cfg.get('SL', {})
+    # signal_valid_m1 は M1 本数基準 → M5 換算（÷5）
+    valid  = max(cfg.get('EXECUTION', {}).get('signal_valid_m1', 240) // 5, 12)
+    spread = sl_cfg.get('spread_usd', 0.30)
+
+    slc = df_m5[df_m5.index >= signal_time].head(valid)
+    if len(slc) < 3:
+        return None
+
+    rsi   = slc['RSI'].values
+    close = slc['Close'].values
+    idx   = slc.index
+
+    for i in range(1, len(close)):
+        if np.isnan(rsi[i]) or np.isnan(rsi[i - 1]):
+            continue
+        if direction == 'buy' and check_m5_entry_filter(rsi[i], rsi[i - 1], rsi_d1, symbol):
+            ep = float(close[i]) + spread
+            return {
+                'entry_time':      idx[i],
+                'entry_price':     ep,
+                'sma_at_entry':    float(close[i]),
+                'rsi_at_entry':    float(rsi[i]),
+            }
+    return None
+
+
 # ── M1 執行ロジック ────────────────────────────────────────
 
 def find_m1_entry(df_m1: pd.DataFrame, signal_time: pd.Timestamp,
@@ -233,7 +305,8 @@ def get_all_strategies(cfg: dict | None = None) -> list[SLStrategy]:
 def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
                  strategy: SLStrategy, sig_p: dict, cfg: dict,
                  direction: str = 'buy',
-                 crash_bar_set: set | None = None) -> dict:
+                 crash_bar_set: set | None = None,
+                 df_m5: pd.DataFrame | None = None) -> dict:
     """
     H1 シグナル → M1 エントリー → H1 バーで SL/TP 判定
     M1 の Open でスリッページを精密再現
@@ -294,7 +367,18 @@ def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
         if sig['signal_time'] < used_until:
             continue
 
-        info = find_m1_entry(df_m1, sig['signal_time'], direction, cfg, m1_rsi_thr)
+        # D1 RSI（M5フィルタ + rules フィルタ共用）
+        sb       = sig['signal_bar']
+        rsi_d1_v = (float(df_h1['RSI_D1'].iloc[sb])
+                    if 'RSI_D1' in df_h1.columns and not np.isnan(df_h1['RSI_D1'].iloc[sb])
+                    else 50.0)
+        symbol   = cfg.get('MT5', {}).get('symbol', 'BTCUSD')
+
+        # M5 優先、なければ M1 フォールバック
+        if df_m5 is not None and not df_m5.empty:
+            info = find_m5_entry(df_m5, sig['signal_time'], direction, cfg, rsi_d1_v, symbol)
+        else:
+            info = find_m1_entry(df_m1, sig['signal_time'], direction, cfg, m1_rsi_thr)
         if info is None:
             continue
 

@@ -14,8 +14,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
-from core.data       import load_data
-from core.indicators import add_h1_indicators, add_m1_indicators, add_d1_rsi_to_h1
+from core.data       import load_data, fetch_ohlcv, generate_m5_from_h1
+from core.indicators import add_h1_indicators, add_m1_indicators, add_m5_indicators, add_d1_rsi_to_h1
 from core.strategy   import detect_sma_rsi_signals, get_all_strategies, run_backtest
 from core.plot       import plot_crash_analysis, plot_sl_comparison
 
@@ -38,16 +38,24 @@ def main(args):
     df_h1_raw, df_m1_raw, is_real = load_data(cfg, force_synthetic=False)
     src = "MT5実データ" if is_real else "合成データ（MT5未接続）"
     print(f"  ソース: {src}")
+    # M5: MT5実データなら直接取得、合成なら H1 から生成
+    if is_real:
+        df_m5_raw = fetch_ohlcv(cfg['MT5']['symbol'], 'M5', cfg['MT5']['m5_bars'])
+        if df_m5_raw is None:
+            df_m5_raw = generate_m5_from_h1(df_h1_raw)
+    else:
+        df_m5_raw = generate_m5_from_h1(df_h1_raw)
 
     # 2. 指標
     print("\n[2] 指標計算")
     df_h1 = add_h1_indicators(df_h1_raw, cfg)
-    df_h1 = add_d1_rsi_to_h1(df_h1, cfg)      # D1 RSI を H1 に付加（ルールフィルタ用）
+    df_h1 = add_d1_rsi_to_h1(df_h1, cfg)
     df_m1 = add_m1_indicators(df_m1_raw, cfg)
+    df_m5 = add_m5_indicators(df_m5_raw, cfg)
     atr_a = df_h1['ATR'].mean()
     print(f"  H1: {len(df_h1)}本  ATR avg=${atr_a:.2f}  "
           f"${df_h1['Close'].min():,.0f}〜${df_h1['Close'].max():,.0f}")
-    print(f"  M1: {len(df_m1)}本")
+    print(f"  M5: {len(df_m5)}本  M1: {len(df_m1)}本")
 
     # 3. 買い/売り × 5戦略
     print("\n[3] SL戦略バックテスト（買い/売り × 5戦略）")
@@ -60,7 +68,7 @@ def main(args):
         print(f"\n  ── {lbl} ──")
         for strat in strats:
             res = run_backtest(df_h1, df_m1, strat, sig_p, cfg,
-                               direction=direction)
+                               direction=direction, df_m5=df_m5)
             results[direction].append(res)
             rc = res.get('reason_counts', {})
             print(f"  {res['strategy'][:30]:<30} "
