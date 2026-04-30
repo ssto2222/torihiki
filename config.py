@@ -7,6 +7,7 @@ config.py — 全設定の一元管理
 MT5 = dict(
     symbol    = "XAUUSD",       # GOLD / XAUUSDm など要確認
     h1_bars   = 5000,
+    m5_bars   = 20_000,         # M5 5分足本数（約70日分）
     m1_bars   = 100_000,
     magic     = 20240101,
     deviation = 10,             # 最大スリッページ(pt)

@@ -32,8 +32,9 @@ def connect_mt5(symbol: str) -> bool:
 def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
     try:
         import MetaTrader5 as mt5
-        tf_map = {'M1':mt5.TIMEFRAME_M1,'H1':mt5.TIMEFRAME_H1,
-                  'H4':mt5.TIMEFRAME_H4,'D1':mt5.TIMEFRAME_D1}
+        tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,
+                  'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
+                  'D1':mt5.TIMEFRAME_D1}
         rates = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, bars)
         if rates is None or len(rates) == 0: return None
         df = pd.DataFrame(rates)
@@ -125,6 +126,50 @@ def generate_h1(n: int = 3600, seed: int = 42,
     ret = (prices[-1] / prices[0] - 1) * 100
     print(f"[合成H1] {n}本  ${prices.min():,.0f}〜${prices.max():,.0f}  "
           f"リターン:{ret:+.1f}%  急落:{len(crash_set)}件")
+    return df
+
+
+def generate_m5_from_h1(df_h1: pd.DataFrame, seed: int = 456) -> pd.DataFrame:
+    """
+    H1 → M5 変換（各H1バーを12本のM5バーに分解）
+    M5 RSI フィルタ動作確認・バックテスト用合成データ
+    """
+    rng  = np.random.default_rng(seed)
+    rows = []
+    n_h1 = len(df_h1)
+
+    for i in range(n_h1):
+        row  = df_h1.iloc[i]
+        o, h, l, c = row['Open'], row['High'], row['Low'], row['Close']
+        ts   = df_h1.index[i]
+        span = abs(h - l)
+
+        drift = (c - o) / 12
+        path  = [o]
+        for _ in range(11):
+            step = drift + rng.normal(0, span * 0.10)
+            path.append(path[-1] + step)
+        path = np.array(path)
+        if abs(path[-1] - c) > 1e-6:
+            path = path + (c - path[-1])
+        path = np.clip(path, l, h)
+        path[-1] = c
+
+        for j in range(12):
+            po = path[j]
+            pc = path[j] if j == 11 else path[j+1]
+            nb = abs(rng.normal(0, span * 0.03))
+            rows.append({
+                'time':   ts + pd.Timedelta(minutes=j * 5),
+                'Open':   po,
+                'High':   min(max(po, pc) + nb, h),
+                'Low':    max(min(po, pc) - nb, l),
+                'Close':  pc,
+                'Volume': float(rng.integers(10, 200)),
+            })
+
+    df = pd.DataFrame(rows).set_index('time')
+    print(f"[合成M5] {len(df)}本完了")
     return df
 
 
