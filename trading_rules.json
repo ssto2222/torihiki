@@ -1,0 +1,251 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "generated": "2026-04-30",
+    "data_period": "2020-07 to 2026-04",
+    "total_trades": 12080,
+    "symbols": ["BTCUSD", "XAUUSD"],
+    "description": "Backtest-derived trading filter rules. All thresholds derived from 12,080 real trade records.",
+    "schema_version": "1.0"
+  },
+
+  "global_rules": {
+    "allowed_directions": ["buy"],
+    "forbidden_directions": ["sell"],
+    "direction_note": "Sell total PnL: -$7,871,785. Buy total PnL: +$5,435,025. Sell is structurally losing.",
+    "min_hold_minutes": 15,
+    "min_hold_note": "Trades closed within 15min: WR=30-40%, avg -$3,938. Trades 15-60min: WR=50-60%, avg +$3,062~+$3,458.",
+    "max_consecutive_losses_before_stop": 3,
+    "consecutive_loss_note": "After 1 loss: next WR=13.4%. After 3 losses: WR=11.7%. Stop trading for the day.",
+    "forbidden_simultaneous_same_direction": true,
+    "simultaneous_note": "2 same-direction entries in 15min: avg -$8,175 vs single entry +$1,304.",
+    "cooldown_after_large_loss_minutes": 1440,
+    "large_loss_threshold": -10000
+  },
+
+  "lot_rules": {
+    "max_lot": 1.0,
+    "recommended_lot_range": [0.05, 0.10],
+    "forbidden_lots": [3.0, 5.0],
+    "lot_notes": {
+      "3.0": "WR=26.3%, avg -$86,430, max single loss -$443,815",
+      "5.0": "WR=59.1% but avg -$28,586, max single loss -$1,289,349",
+      "0.05": "WR=70%, avg +$1,622 â best risk-adjusted lot",
+      "1.00": "WR=60%, avg +$723 â acceptable with strict rules"
+    }
+  },
+
+  "sl_tp_rules": {
+    "require_sl": true,
+    "require_tp": true,
+    "sl_note": "62% of trades had no SL. Forced liquidation (SO): 385 trades, -$2,987,284.",
+    "tp_note": "TP set: avg +$6,401. No TP: avg -$1,578. Delta = +$7,979 per trade.",
+    "tp_hit_stats": {
+      "count": 152,
+      "total_profit": 4984539,
+      "avg_profit": 32793,
+      "avg_hold_minutes": 264,
+      "win_rate": 1.0
+    }
+  },
+
+  "session_filter": {
+    "timezone": "UTC",
+    "forbidden_hours_utc": [9, 16, 21],
+    "caution_hours_utc": [0, 7, 12],
+    "preferred_hours_utc": [17, 18, 19, 20, 22, 23],
+    "hour_avg_profit_usd": {
+      "0": -1796, "1": -5990, "2": -132,  "3": 2091,  "4": 1184,  "5": 470,
+      "6": -1919, "7": -5937, "8": -89,   "9": 1395,  "10": -2051,"11": 1154,
+      "12": -5503,"13": -27,  "14": 2318, "15": -1298, "16": 595,  "17": 3956,
+      "18": 3427, "19": 6909, "20": 5310, "21": -12470,"22": 5447, "23": 3124
+    },
+    "jst_offset": 9,
+    "notes": {
+      "UTC21 (JST06)": "Worst hour. WR=30%, avg -$12,470, SL hit rate 34%.",
+      "UTC7  (JST16)": "London open chaos. avg -$5,937.",
+      "UTC19 (JST04)": "Best hour. avg +$6,909."
+    }
+  },
+
+  "dow_filter": {
+    "forbidden_dow": [5],
+    "caution_dow": [3, 4],
+    "preferred_dow": [0, 1, 2, 6],
+    "dow_total_profit_usd": {
+      "0": 6863007,
+      "1": 103146,
+      "2": 1343617,
+      "3": -4161577,
+      "4": -6383569,
+      "5": -3850073,
+      "6": 3648689
+    },
+    "dow_names": ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+  },
+
+  "rsi_h1_zones": {
+    "_note": "RSI(14) on 1H timeframe. Calculated per-symbol from opening prices.",
+    "BTCUSD": {
+      "<20":   {"wr": 0,  "avg_profit": -905,   "buy_wr": null,"sell_wr": 0,   "cnt": 4,    "verdict": "caution",  "tp_effect": null},
+      "20-25": {"wr": 42, "avg_profit": -2771,  "buy_wr": 47,  "sell_wr": 40,  "cnt": 62,   "verdict": "caution",  "tp_effect": null},
+      "25-30": {"wr": 63, "avg_profit": -1403,  "buy_wr": 64,  "sell_wr": 63,  "cnt": 145,  "verdict": "forbidden","tp_effect": null},
+      "30-35": {"wr": 54, "avg_profit": 1775,   "buy_wr": 59,  "sell_wr": 51,  "cnt": 220,  "verdict": "ok",       "tp_effect": 1485},
+      "35-40": {"wr": 50, "avg_profit": 2255,   "buy_wr": 49,  "sell_wr": 51,  "cnt": 373,  "verdict": "ok",       "tp_effect": 20746},
+      "40-45": {"wr": 39, "avg_profit": -2789,  "buy_wr": 41,  "sell_wr": 38,  "cnt": 799,  "verdict": "forbidden","tp_effect": -76836},
+      "45-50": {"wr": 48, "avg_profit": -2941,  "buy_wr": 51,  "sell_wr": 45,  "cnt": 536,  "verdict": "forbidden","tp_effect": -5513},
+      "50-55": {"wr": 53, "avg_profit": -5875,  "buy_wr": 55,  "sell_wr": 48,  "cnt": 820,  "verdict": "forbidden","tp_effect": 1071},
+      "55-60": {"wr": 50, "avg_profit": -1009,  "buy_wr": 58,  "sell_wr": 29,  "cnt": 1037, "verdict": "forbidden","tp_effect": 53977},
+      "60-65": {"wr": 58, "avg_profit": 4261,   "buy_wr": 62,  "sell_wr": 37,  "cnt": 667,  "verdict": "good",     "tp_effect": 50102},
+      "65-70": {"wr": 44, "avg_profit": -3692,  "buy_wr": 47,  "sell_wr": 17,  "cnt": 629,  "verdict": "forbidden","tp_effect": 4635},
+      "70-75": {"wr": 54, "avg_profit": 6015,   "buy_wr": 57,  "sell_wr": 32,  "cnt": 567,  "verdict": "good",     "tp_effect": 82805},
+      "75-80": {"wr": 64, "avg_profit": 515,    "buy_wr": 64,  "sell_wr": 50,  "cnt": 254,  "verdict": "ok",       "tp_effect": 49617},
+      ">80":   {"wr": 80, "avg_profit": 33438,  "buy_wr": 80,  "sell_wr": null,"cnt": 147,  "verdict": "good",     "tp_effect": -1628}
+    },
+    "XAUUSD": {
+      "<20":   {"wr": 54, "avg_profit": -14847, "buy_wr": 50,  "sell_wr": 54,  "cnt": 85,   "verdict": "caution",  "tp_effect": null},
+      "20-25": {"wr": 33, "avg_profit": -15358, "buy_wr": 0,   "sell_wr": 33,  "cnt": 49,   "verdict": "caution",  "tp_effect": 10619},
+      "25-30": {"wr": 48, "avg_profit": -824,   "buy_wr": 44,  "sell_wr": 50,  "cnt": 159,  "verdict": "forbidden","tp_effect": 10619},
+      "30-35": {"wr": 44, "avg_profit": -5056,  "buy_wr": 57,  "sell_wr": 37,  "cnt": 142,  "verdict": "forbidden","tp_effect": 2885},
+      "35-40": {"wr": 53, "avg_profit": 560,    "buy_wr": 38,  "sell_wr": 64,  "cnt": 216,  "verdict": "ok",       "tp_effect": 6577},
+      "40-45": {"wr": 35, "avg_profit": -1649,  "buy_wr": 44,  "sell_wr": 29,  "cnt": 436,  "verdict": "forbidden","tp_effect": 407},
+      "45-50": {"wr": 63, "avg_profit": -5695,  "buy_wr": 58,  "sell_wr": 67,  "cnt": 292,  "verdict": "forbidden","tp_effect": 10531},
+      "50-55": {"wr": 50, "avg_profit": -280,   "buy_wr": 50,  "sell_wr": 50,  "cnt": 580,  "verdict": "forbidden","tp_effect": -2084},
+      "55-60": {"wr": 52, "avg_profit": 260,    "buy_wr": 55,  "sell_wr": 45,  "cnt": 745,  "verdict": "ok",       "tp_effect": 3146},
+      "60-65": {"wr": 59, "avg_profit": 622,    "buy_wr": 65,  "sell_wr": 44,  "cnt": 825,  "verdict": "good",     "tp_effect": 871},
+      "65-70": {"wr": 60, "avg_profit": 784,    "buy_wr": 61,  "sell_wr": 50,  "cnt": 639,  "verdict": "good",     "tp_effect": 1995},
+      "70-75": {"wr": 61, "avg_profit": 1712,   "buy_wr": 65,  "sell_wr": 40,  "cnt": 415,  "verdict": "good",     "tp_effect": 6489},
+      "75-80": {"wr": 67, "avg_profit": 984,    "buy_wr": 66,  "sell_wr": 74,  "cnt": 156,  "verdict": "good",     "tp_effect": 2467},
+      ">80":   {"wr": 40, "avg_profit": -71,    "buy_wr": 47,  "sell_wr": 22,  "cnt": 744,  "verdict": "forbidden","tp_effect": 2011}
+    }
+  },
+
+  "rsi_d1_zones": {
+    "_note": "RSI(14) on D1 timeframe.",
+    "BTCUSD": {
+      "<20":   {"wr": null,"avg_profit": null,  "verdict": "caution"},
+      "20-25": {"wr": 0,   "avg_profit": -2188, "verdict": "forbidden"},
+      "25-30": {"wr": 50,  "avg_profit": -141,  "verdict": "caution"},
+      "30-35": {"wr": 57,  "avg_profit": -2706, "verdict": "forbidden"},
+      "35-40": {"wr": 52,  "avg_profit": -63,   "verdict": "caution"},
+      "40-45": {"wr": 39,  "avg_profit": -715,  "verdict": "forbidden"},
+      "45-50": {"wr": 48,  "avg_profit": 6040,  "verdict": "ok"},
+      "50-55": {"wr": 47,  "avg_profit": 774,   "verdict": "ok"},
+      "55-60": {"wr": 42,  "avg_profit": -850,  "verdict": "forbidden"},
+      "60-65": {"wr": 56,  "avg_profit": -2229, "verdict": "forbidden"},
+      "65-70": {"wr": 56,  "avg_profit": 443,   "verdict": "ok"},
+      "70-75": {"wr": 49,  "avg_profit": 976,   "verdict": "ok"},
+      "75-80": {"wr": 53,  "avg_profit": -1830, "verdict": "forbidden"},
+      ">80":   {"wr": 59,  "avg_profit": 3094,  "verdict": "good"}
+    },
+    "XAUUSD": {
+      "<20":   {"wr": null,"avg_profit": null,   "verdict": "caution"},
+      "20-25": {"wr": null,"avg_profit": null,   "verdict": "caution"},
+      "25-30": {"wr": null,"avg_profit": null,   "verdict": "caution"},
+      "30-35": {"wr": 56,  "avg_profit": 2755,   "verdict": "good"},
+      "35-40": {"wr": 31,  "avg_profit": -12017, "verdict": "forbidden"},
+      "40-45": {"wr": 24,  "avg_profit": -3309,  "verdict": "forbidden"},
+      "45-50": {"wr": 46,  "avg_profit": -1059,  "verdict": "forbidden"},
+      "50-55": {"wr": 54,  "avg_profit": -5709,  "verdict": "forbidden"},
+      "55-60": {"wr": 58,  "avg_profit": -564,   "verdict": "caution"},
+      "60-65": {"wr": 58,  "avg_profit": 587,    "verdict": "good"},
+      "65-70": {"wr": 43,  "avg_profit": -157,   "verdict": "caution"},
+      "70-75": {"wr": 68,  "avg_profit": 875,    "verdict": "good"},
+      "75-80": {"wr": 60,  "avg_profit": 914,    "verdict": "good"},
+      ">80":   {"wr": 38,  "avg_profit": -1,     "verdict": "forbidden"}
+    }
+  },
+
+  "cross_h1_d1": {
+    "_note": "Combined H1ÃD1 RSI filter. Buckets: <40 / 40-50 / 50-60 / 60-70 / >70.",
+    "_verdict_scale": "best > good > ok > caution > forbidden",
+    "BTCUSD": {
+      "<40_x_<40":    {"verdict":"caution",  "avg_profit":-1060,"wr":60},
+      "<40_x_40-50":  {"verdict":"forbidden","avg_profit":-296, "wr":30},
+      "40-50_x_<40":  {"verdict":"good",     "avg_profit":3967, "wr":50},
+      "40-50_x_40-50":{"verdict":"good",     "avg_profit":3591, "wr":50},
+      "40-50_x_50-60":{"verdict":"forbidden","avg_profit":-582, "wr":30},
+      "40-50_x_60-70":{"verdict":"forbidden","avg_profit":-473, "wr":10},
+      "50-60_x_<40":  {"verdict":"ok",       "avg_profit":1553, "wr":50},
+      "50-60_x_40-50":{"verdict":"forbidden","avg_profit":-1692,"wr":40},
+      "50-60_x_50-60":{"verdict":"ok",       "avg_profit":1997, "wr":50},
+      "50-60_x_60-70":{"verdict":"caution",  "avg_profit":-894, "wr":50},
+      "50-60_x_>70":  {"verdict":"forbidden","avg_profit":-9571,"wr":20},
+      "60-70_x_<40":  {"verdict":"ok",       "avg_profit":426,  "wr":50},
+      "60-70_x_40-50":{"verdict":"forbidden","avg_profit":-4846,"wr":50},
+      "60-70_x_50-60":{"verdict":"forbidden","avg_profit":-4515,"wr":60},
+      "60-70_x_60-70":{"verdict":"good",     "avg_profit":1772, "wr":60},
+      "60-70_x_>70":  {"verdict":"caution",  "avg_profit":-647, "wr":50},
+      ">70_x_40-50":  {"verdict":"forbidden","avg_profit":-16286,"wr":60},
+      ">70_x_50-60":  {"verdict":"forbidden","avg_profit":-8664, "wr":50},
+      ">70_x_60-70":  {"verdict":"good",     "avg_profit":6073,  "wr":50},
+      ">70_x_>70":    {"verdict":"best",     "avg_profit":13918, "wr":60}
+    },
+    "XAUUSD": {
+      "<40_x_<40":    {"verdict":"forbidden","avg_profit":-8357,"wr":40},
+      "<40_x_40-50":  {"verdict":"caution",  "avg_profit":-867, "wr":50},
+      "<40_x_50-60":  {"verdict":"forbidden","avg_profit":-2374,"wr":0},
+      "40-50_x_<40":  {"verdict":"caution",  "avg_profit":-339, "wr":50},
+      "40-50_x_40-50":{"verdict":"forbidden","avg_profit":-1556,"wr":40},
+      "40-50_x_50-60":{"verdict":"forbidden","avg_profit":-4262,"wr":20},
+      "40-50_x_60-70":{"verdict":"ok",       "avg_profit":903,  "wr":70},
+      "50-60_x_<40":  {"verdict":"caution",  "avg_profit":-677, "wr":70},
+      "50-60_x_40-50":{"verdict":"forbidden","avg_profit":-9093,"wr":50},
+      "50-60_x_50-60":{"verdict":"caution",  "avg_profit":-162, "wr":60},
+      "50-60_x_60-70":{"verdict":"forbidden","avg_profit":-1786,"wr":50},
+      "50-60_x_>70":  {"verdict":"forbidden","avg_profit":-2097,"wr":40},
+      "60-70_x_<40":  {"verdict":"ok",       "avg_profit":961,  "wr":50},
+      "60-70_x_40-50":{"verdict":"ok",       "avg_profit":136,  "wr":50},
+      "60-70_x_50-60":{"verdict":"ok",       "avg_profit":153,  "wr":50},
+      "60-70_x_60-70":{"verdict":"caution",  "avg_profit":-132, "wr":50},
+      "60-70_x_>70":  {"verdict":"caution",  "avg_profit":-339, "wr":40},
+      ">70_x_40-50":  {"verdict":"ok",       "avg_profit":8544, "wr":50},
+      ">70_x_50-60":  {"verdict":"good",     "avg_profit":1128, "wr":60},
+      ">70_x_60-70":  {"verdict":"good",     "avg_profit":1030, "wr":70},
+      ">70_x_>70":    {"verdict":"ok",       "avg_profit":236,  "wr":50}
+    }
+  },
+
+  "tp_timing": {
+    "_note": "Recommended TP hold time based on median winning trade duration per RSI zone.",
+    "BTCUSD": {
+      "<40":   {"hold_minutes_median": 340, "tp_effect_usd": 1485,  "priority": "low"},
+      "55-60": {"hold_minutes_median": 105, "tp_effect_usd": 53977, "priority": "high"},
+      "60-65": {"hold_minutes_median": 76,  "tp_effect_usd": 50102, "priority": "high"},
+      "70-75": {"hold_minutes_median": 56,  "tp_effect_usd": 82805, "priority": "critical"},
+      "75-80": {"hold_minutes_median": 47,  "tp_effect_usd": 49617, "priority": "high"},
+      ">80":   {"hold_minutes_median": 50,  "tp_effect_usd": -1628, "priority": "none"}
+    },
+    "XAUUSD": {
+      "25-30": {"hold_minutes_median": 17,  "tp_effect_usd": 10619, "priority": "high"},
+      "45-50": {"hold_minutes_median": 51,  "tp_effect_usd": 10531, "priority": "high"},
+      "55-60": {"hold_minutes_median": 74,  "tp_effect_usd": 3146,  "priority": "medium"},
+      "60-65": {"hold_minutes_median": 56,  "tp_effect_usd": 871,   "priority": "medium"},
+      "65-70": {"hold_minutes_median": 76,  "tp_effect_usd": 1995,  "priority": "medium"},
+      "70-75": {"hold_minutes_median": 39,  "tp_effect_usd": 6489,  "priority": "critical"},
+      "75-80": {"hold_minutes_median": 80,  "tp_effect_usd": 2467,  "priority": "medium"}
+    }
+  },
+
+  "scoring_weights": {
+    "_note": "Penalty/bonus weights used by evaluate_signal(). Adjust to tune signal sensitivity.",
+    "h1_zone_forbidden_penalty": 3,
+    "h1_zone_caution_penalty": 1,
+    "d1_zone_forbidden_penalty": 2,
+    "d1_zone_caution_penalty": 1,
+    "cross_best_bonus": 2,
+    "cross_good_bonus": 1,
+    "cross_forbidden_penalty": 2,
+    "cross_caution_penalty": 1,
+    "direction_unfavorable_penalty": 1,
+    "hour_forbidden_penalty": 2,
+    "hour_caution_penalty": 1,
+    "dow_forbidden_penalty": 2,
+    "dow_caution_penalty": 1,
+    "score_base": 30,
+    "score_bonus_per_point": 20,
+    "score_penalty_per_point": 15,
+    "signal_threshold_forbidden": 3,
+    "signal_threshold_caution": 1
+  }
+}
