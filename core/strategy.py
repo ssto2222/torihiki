@@ -2,83 +2,57 @@
 from __future__ import annotations
 import numpy as np
 import pandas as pd
-from scipy.signal import argrelextrema
 import warnings
 warnings.filterwarnings('ignore')
 
 
-# ── H1 シグナル検出 ────────────────────────────────────────
+# ── H1 シグナル検出（SMA20 + RSI）────────────────────────────
 
-def _lmin(arr, order): return argrelextrema(arr, np.less_equal,    order=order)[0]
-def _lmax(arr, order): return argrelextrema(arr, np.greater_equal, order=order)[0]
-
-
-def detect_h1_signals(df: pd.DataFrame, p: dict, direction: str) -> list[dict]:
+def detect_sma_rsi_signals(df: pd.DataFrame, p: dict, direction: str) -> list[dict]:
     """
-    H1 RSI + BB ダブルボトム/トップ検出
+    H1 SMA20 + RSI シグナル検出（平均回帰）
 
-    direction='buy'  → RSI<閾値 + BB -3σタッチ → RSIダブルボトム
-    direction='sell' → RSI>閾値 + BB +3σタッチ → RSIダブルトップ
+    買い: RSI が buy_rsi_thr を下抜けて「売られすぎ」に突入
+          かつ Close が SMA20 を下抜けた後に SMA20 を回復（反発確認）
+          ※ SMA20 クロスのない場合は RSI 単独でも発火
+
+    売り: RSI が sell_rsi_thr を上抜けて「買われすぎ」に突入
+          かつ Close が SMA20 を上抜けた後に SMA20 を下抜け（反落確認）
+          ※ SMA20 クロスのない場合は RSI 単独でも発火
 
     返り値: [{'signal_bar', 'signal_time', 'signal_price', 'atr'}, ...]
     """
-    rsi    = df['RSI'].values
-    bb_pct = df['BB_pct'].values
-    close  = df['Close'].values
-    atr    = df['ATR'].values
-    n      = len(df)
-    order  = p.get('local_order', 2)
+    rsi   = df['RSI'].values
+    sma   = df['SMA20'].values
+    close = df['Close'].values
+    atr   = df['ATR'].values
+    n     = len(df)
 
-    if direction == 'buy':
-        look, mn, mx   = p['db_lookback'], p['db_min_int'], p['db_max_int']
-        dtol, neck_th  = p['db_depth_tol'], p['db_neck_rise']
-        rsi_th         = p['buy_rsi_thr']
-        bb_th          = -abs(p['buy_bb_touch'])
-        find_ext       = _lmin
-        neck_fn        = lambda s: s.max()
-        trigger        = lambda neck, v1, v2: neck - max(v1, v2) >= neck_th
-        confirm        = lambda r, neck: r >= neck
-    else:
-        look, mn, mx   = p['dt_lookback'], p['dt_min_int'], p['dt_max_int']
-        dtol, neck_th  = p['dt_depth_tol'], p['dt_neck_drop']
-        rsi_th         = p['sell_rsi_thr']
-        bb_th          = abs(p['sell_bb_touch'])
-        find_ext       = _lmax
-        neck_fn        = lambda s: s.min()
-        trigger        = lambda neck, v1, v2: min(v1, v2) - neck >= neck_th
-        confirm        = lambda r, neck: r <= neck
+    buy_th  = p.get('buy_rsi_thr',  38.0)
+    sell_th = p.get('sell_rsi_thr', 62.0)
 
     results = []
-    i = 34
-    while i < n - look - 10:
-        ok = (rsi[i] <= rsi_th and bb_pct[i] <= bb_th) if direction == 'buy' \
-             else (rsi[i] >= rsi_th and bb_pct[i] >= bb_th)
-        if ok:
-            we   = min(i + look, n - 5)
-            exts = find_ext(rsi[i:we], order)
-            found = False
-            if len(exts) >= 2:
-                for j in range(len(exts)):
-                    for k in range(j + 1, len(exts)):
-                        m1, m2 = i + exts[j], i + exts[k]
-                        iv = m2 - m1
-                        if not (mn <= iv <= mx): continue
-                        v1, v2 = rsi[m1], rsi[m2]
-                        if abs(v1 - v2) > dtol: continue
-                        neck = neck_fn(rsi[m1:m2+1])
-                        if not trigger(neck, v1, v2): continue
-                        sig = next((s for s in range(m2+1, min(m2+15, n))
-                                    if confirm(rsi[s], neck)), None)
-                        if sig is None: continue
-                        results.append({
-                            'signal_bar':   sig,
-                            'signal_time':  df.index[sig],
-                            'signal_price': float(close[sig]),
-                            'atr':          float(atr[sig]) if not np.isnan(atr[sig]) else 1.0,
-                        })
-                        i = sig; found = True; break
-                    if found: break
-        i += 1
+    for i in range(1, n - 2):
+        if np.isnan(sma[i]) or np.isnan(rsi[i]) or np.isnan(rsi[i-1]):
+            continue
+        if direction == 'buy':
+            # RSI が buy_rsi_thr を下抜け → 売られすぎ突入
+            if rsi[i] < buy_th and rsi[i-1] >= buy_th:
+                results.append({
+                    'signal_bar':   i,
+                    'signal_time':  df.index[i],
+                    'signal_price': float(close[i]),
+                    'atr':          float(atr[i]) if not np.isnan(atr[i]) else 1.0,
+                })
+        else:
+            # RSI が sell_rsi_thr を上抜け → 買われすぎ突入
+            if rsi[i] > sell_th and rsi[i-1] <= sell_th:
+                results.append({
+                    'signal_bar':   i,
+                    'signal_time':  df.index[i],
+                    'signal_price': float(close[i]),
+                    'atr':          float(atr[i]) if not np.isnan(atr[i]) else 1.0,
+                })
 
     # 重複除去（10本以内は最初だけ）
     out, last = [], -99
@@ -275,7 +249,32 @@ def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
     rsi_off  = exe.get('m1_rsi_offset',  20.0)
 
     crash_bars = crash_bar_set or set()
-    signals    = detect_h1_signals(df_h1, sig_p, direction)
+    signals    = detect_sma_rsi_signals(df_h1, sig_p, direction)
+
+    # trading_rules フィルタ（buy のみ有効、import 失敗時はスキップ）
+    try:
+        from trading_rules import RulesEngine as _RE
+        _rules_engine = _RE()
+        symbol    = cfg.get('MT5', {}).get('symbol', 'BTCUSD')
+        min_score = cfg.get('RULES', {}).get('min_score', 0)
+        rsi_d1    = df_h1.get('RSI_D1') if hasattr(df_h1, 'get') else df_h1['RSI_D1'] if 'RSI_D1' in df_h1.columns else None
+
+        filtered = []
+        for sig in signals:
+            st       = sig['signal_time']
+            hour_utc = st.hour
+            dow      = st.dayofweek
+            rsi_h1_v = float(df_h1['RSI'].iloc[sig['signal_bar']])
+            rsi_d1_v = float(rsi_d1.iloc[sig['signal_bar']]) if rsi_d1 is not None and not np.isnan(rsi_d1.iloc[sig['signal_bar']]) else 50.0
+            res = _rules_engine.evaluate(
+                symbol=symbol, rsi_h1=rsi_h1_v, rsi_d1=rsi_d1_v,
+                direction=direction, hour_utc=hour_utc, dow=dow,
+            )
+            if res.signal in ('BUY', 'SELL') and res.score >= min_score:
+                filtered.append(sig)
+        signals = filtered
+    except Exception:
+        pass  # trading_rules 未インストール / 使用不可の場合はフィルタなし
 
     m1_rsi_thr = (sig_p.get('buy_rsi_thr',  38.0) + rsi_off if direction == 'buy'
                   else sig_p.get('sell_rsi_thr', 62.0) - rsi_off)

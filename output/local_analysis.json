@@ -2,196 +2,117 @@
   "source": "合成データ",
   "period": "2022-01-03 14:00:00 〜 2022-05-30 23:00:00",
   "atr_avg": 20.409,
-  "n_crashes": 5,
   "sl_results": [
     {
       "strategy": "A. 固定SL ($15)",
       "color": "#8b949e",
-      "n_trades": 18,
-      "total_pnl": -21374.835642373702,
-      "win_rate": 0.05555555555555555,
-      "profit_factor": 0.19242383137567093,
-      "max_dd": 19874.835642373702,
-      "sharpe": -60.19550325935475,
-      "sl_hit_rate": 0.9444444444444444,
-      "slip_rate": 0.1111111111111111,
+      "n_trades": 12,
+      "total_pnl": 966.3484949620852,
+      "win_rate": 0.3333333333333333,
+      "profit_factor": 1.0400220936056266,
+      "max_dd": 12027.485080367387,
+      "sharpe": 1.3447415545550838,
+      "sl_hit_rate": 0.6666666666666666,
+      "slip_rate": 0.3333333333333333,
       "avg_sl_dist": 15.0,
-      "avg_slip_usd": 0.5377155966633735,
+      "avg_slip_usd": 12.450656651028984,
       "crash_survival": 0.0,
-      "max_consec_loss": 10,
+      "max_consec_loss": 4,
       "reason_counts": {
-        "sl_slip": 2,
-        "sl": 15,
-        "tp": 1
+        "sl_slip": 4,
+        "tp": 4,
+        "sl": 4
       }
     },
     {
       "strategy": "B. ATR×1.5 SL",
       "color": "#58a6ff",
-      "n_trades": 18,
-      "total_pnl": -35414.73251512705,
-      "win_rate": 0.16666666666666666,
-      "profit_factor": 0.2801354927288637,
-      "max_dd": 36390.25413952454,
-      "sharpe": -49.99731911888769,
-      "sl_hit_rate": 0.7222222222222222,
-      "slip_rate": 0.3333333333333333,
-      "avg_sl_dist": 31.726989468014697,
-      "avg_slip_usd": 0.7276515600073026,
+      "n_trades": 11,
+      "total_pnl": -3884.094269826981,
+      "win_rate": 0.36363636363636365,
+      "profit_factor": 0.8660464009348599,
+      "max_dd": 13038.31594665844,
+      "sharpe": -5.39743169604055,
+      "sl_hit_rate": 0.6363636363636364,
+      "slip_rate": 0.2727272727272727,
+      "avg_sl_dist": 35.134810342466196,
+      "avg_slip_usd": 2.970435914325001,
       "crash_survival": 0.0,
-      "max_consec_loss": 10,
+      "max_consec_loss": 3,
       "reason_counts": {
-        "sl_slip": 6,
-        "timeout": 3,
-        "sl": 7,
-        "tp": 2
+        "sl_slip": 3,
+        "tp": 4,
+        "sl": 4
       }
     },
     {
       "strategy": "C. 構造的SL",
       "color": "#e3b341",
-      "n_trades": 17,
-      "total_pnl": -50833.24436324637,
-      "win_rate": 0.11764705882352941,
-      "profit_factor": 0.14143801415421872,
-      "max_dd": 45344.88474808299,
-      "sharpe": -69.6282232606116,
-      "sl_hit_rate": 0.8235294117647058,
-      "slip_rate": 0.35294117647058826,
-      "avg_sl_dist": 39.650166542936674,
-      "avg_slip_usd": 1.3968831022252342,
+      "n_trades": 10,
+      "total_pnl": -6371.568071837692,
+      "win_rate": 0.3,
+      "profit_factor": 0.7547642717129303,
+      "max_dd": 10402.974726037883,
+      "sharpe": -10.073460801242511,
+      "sl_hit_rate": 0.7,
+      "slip_rate": 0.4,
+      "avg_sl_dist": 28.605116360014154,
+      "avg_slip_usd": 3.8835310284009665,
       "crash_survival": 0.0,
-      "max_consec_loss": 9,
+      "max_consec_loss": 4,
       "reason_counts": {
-        "sl_slip": 6,
-        "sl": 8,
-        "timeout": 2,
-        "tp": 1
+        "sl_slip": 4,
+        "tp": 3,
+        "sl": 3
       }
     },
     {
       "strategy": "D. 二段階SL",
       "color": "#3fb950",
-      "n_trades": 18,
-      "total_pnl": -31554.232851430766,
-      "win_rate": 0.05555555555555555,
-      "profit_factor": 0.13897488974376593,
-      "max_dd": 28962.25303075723,
-      "sharpe": -77.77776990306424,
-      "sl_hit_rate": 0.9444444444444444,
-      "slip_rate": 0.16666666666666666,
-      "avg_sl_dist": 21.151326312009775,
-      "avg_slip_usd": 0.5104049531440246,
+      "n_trades": 12,
+      "total_pnl": -3471.130748950689,
+      "win_rate": 0.3333333333333333,
+      "profit_factor": 0.8785589917519724,
+      "max_dd": 12027.485080367387,
+      "sharpe": -4.671144686809479,
+      "sl_hit_rate": 0.6666666666666666,
+      "slip_rate": 0.4166666666666667,
+      "avg_sl_dist": 23.738731688510104,
+      "avg_slip_usd": 7.270050034602434,
       "crash_survival": 0.0,
-      "max_consec_loss": 10,
+      "max_consec_loss": 4,
       "reason_counts": {
-        "sl": 14,
-        "sl_slip": 3,
-        "tp": 1
+        "sl_slip": 5,
+        "tp": 4,
+        "sl": 3
       }
     },
     {
       "strategy": "E. ボラ適応型SL★",
       "color": "#f85149",
-      "n_trades": 18,
-      "total_pnl": -31550.860876199793,
-      "win_rate": 0.16666666666666666,
-      "profit_factor": 0.30401256174068286,
-      "max_dd": 32764.394456855116,
-      "sharpe": -45.87155840585472,
-      "sl_hit_rate": 0.8333333333333334,
-      "slip_rate": 0.3888888888888889,
-      "avg_sl_dist": 31.726989468014697,
-      "avg_slip_usd": 0.8319638049002455,
+      "n_trades": 11,
+      "total_pnl": -3114.0930811788367,
+      "win_rate": 0.36363636363636365,
+      "profit_factor": 0.8896721739840815,
+      "max_dd": 12867.975742138264,
+      "sharpe": -4.367003787609499,
+      "sl_hit_rate": 0.6363636363636364,
+      "slip_rate": 0.36363636363636365,
+      "avg_sl_dist": 35.134810342466196,
+      "avg_slip_usd": 3.1802049133705377,
       "crash_survival": 0.0,
-      "max_consec_loss": 10,
+      "max_consec_loss": 3,
       "reason_counts": {
-        "timeout": 1,
-        "sl_slip": 7,
-        "sl": 8,
-        "tp": 2
+        "sl_slip": 4,
+        "tp": 4,
+        "sl": 3
       }
     }
   ],
-  "recommended_sl": {
-    "strategy": "E. ボラ適応型SL",
-    "rules": {
-      "ATR_ratio<0.8": "×1.0",
-      "ATR_ratio 0.8〜1.5": "×1.5",
-      "ATR_ratio 1.5〜2.5": "×2.5",
-      "ATR_ratio>2.5": "×4.0 (急落)"
-    },
+  "sl_config": {
+    "sl_multi": 1.5,
+    "tp_atr_multi": 3.0,
     "rsi_exit_thr": 75,
     "trail_multi": 1.5
-  },
-  "optimization": {
-    "buy": {
-      "params": {
-        "rsi_thr": 38,
-        "bb_touch": 0.85,
-        "lookback": 20,
-        "depth_tol": 4.0,
-        "neck_th": 1.5,
-        "touch_m": 0.1,
-        "rsi_offset": 25.0,
-        "rsi_exit": 70.0,
-        "trail_m": 1.5
-      },
-      "metrics": {
-        "strategy": "E. ボラ適応型SL★",
-        "color": "#f85149",
-        "n_trades": 13,
-        "total_pnl": -35685.36655517619,
-        "win_rate": 0.07692307692307693,
-        "profit_factor": 0.07652667096718496,
-        "max_dd": 33395.65458889651,
-        "sharpe": -116.09858036903631,
-        "sl_hit_rate": 1.0,
-        "slip_rate": 0.5384615384615384,
-        "avg_sl_dist": 31.062083809504358,
-        "avg_slip_usd": 2.5764534069448577,
-        "crash_survival": 0.0,
-        "max_consec_loss": 12,
-        "reason_counts": {
-          "sl_slip": 7,
-          "sl": 6
-        }
-      }
-    },
-    "sell": {
-      "params": {
-        "rsi_thr": 42,
-        "bb_touch": 0.85,
-        "lookback": 35,
-        "depth_tol": 4.0,
-        "neck_th": 2.0,
-        "touch_m": 0.2,
-        "rsi_offset": 15.0,
-        "rsi_exit": 75.0,
-        "trail_m": 2.0
-      },
-      "metrics": {
-        "strategy": "E. ボラ適応型SL★",
-        "color": "#f85149",
-        "n_trades": 18,
-        "total_pnl": 30723.364321013694,
-        "win_rate": 0.5,
-        "profit_factor": 2.1228154532497396,
-        "max_dd": 6282.486029260166,
-        "sharpe": 26.78231049463424,
-        "sl_hit_rate": 0.5,
-        "slip_rate": 0.16666666666666666,
-        "avg_sl_dist": 32.446949193329246,
-        "avg_slip_usd": 0.5888553333127093,
-        "crash_survival": 0.0,
-        "max_consec_loss": 2,
-        "reason_counts": {
-          "sl_slip": 3,
-          "sl": 6,
-          "tp": 8,
-          "timeout": 1
-        }
-      }
-    }
   }
 }

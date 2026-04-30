@@ -17,13 +17,13 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import load_data
-from core.indicators import add_h1_indicators, add_m1_indicators, detect_crash_events
-from core.strategy   import (detect_h1_signals, get_all_strategies,
-                              run_backtest, VolAdaptiveSL)
+from core.indicators import add_h1_indicators, add_m1_indicators, add_d1_rsi_to_h1
+from core.strategy   import (detect_sma_rsi_signals, get_all_strategies,
+                              run_backtest, AtrSL)
 from core.plot       import plot_crash_analysis, plot_sl_comparison
 
 CFG = {k: getattr(C, k) for k in
-       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','CRASH','OPTIMIZE','LOCAL','PLOT','BRIDGE']}
+       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','OPTIMIZE','LOCAL','PLOT','BRIDGE']}
 
 
 # ── グリッド最適化 ─────────────────────────────────────────
@@ -42,15 +42,11 @@ def optimize(df_h1, df_m1, direction, n_samples=None):
     ns  = n_samples or CFG['OPTIMIZE']['n_samples']
 
     grid = dict(
-        rsi_thr    = [35, 38, 40, 42],
-        bb_touch   = [0.75, 0.80, 0.85],
-        lookback   = [20, 25, 35],
-        depth_tol  = [4.0, 5.0, 7.0],
-        neck_th    = [1.5, 2.0, 3.0],
-        touch_m    = [0.10, 0.20, 0.40],
-        rsi_offset = [15.0, 20.0, 25.0],
-        rsi_exit   = [70.0, 73.0, 75.0, 78.0],
+        rsi_thr    = [30, 33, 35, 38, 40, 42, 45],
+        sl_multi   = [1.0, 1.5, 2.0, 2.5],
+        rsi_exit   = [65.0, 70.0, 75.0, 78.0, 80.0],
         trail_m    = [1.0, 1.5, 2.0, 2.5],
+        rsi_offset = [10.0, 15.0, 20.0, 25.0],
     )
     keys = list(grid.keys())
     vals = list(grid.values())
@@ -62,25 +58,19 @@ def optimize(df_h1, df_m1, direction, n_samples=None):
         raw = dict(zip(keys, [rng.choice(v) for v in vals]))
 
         if direction == 'buy':
-            sig_p = dict(buy_rsi_thr=raw['rsi_thr'], buy_bb_touch=raw['bb_touch'],
-                         db_lookback=raw['lookback'], db_min_int=2, db_max_int=16,
-                         db_depth_tol=raw['depth_tol'], db_neck_rise=raw['neck_th'],
-                         local_order=2)
+            sig_p = dict(buy_rsi_thr=raw['rsi_thr'], sell_rsi_thr=62.0)
         else:
-            sig_p = dict(sell_rsi_thr=raw['rsi_thr'], sell_bb_touch=raw['bb_touch'],
-                         dt_lookback=raw['lookback'], dt_min_int=2, dt_max_int=16,
-                         dt_depth_tol=raw['depth_tol'], dt_neck_drop=raw['neck_th'],
-                         local_order=2)
+            sig_p = dict(buy_rsi_thr=38.0, sell_rsi_thr=raw['rsi_thr'])
 
         cfg_t = {**CFG,
                  'EXECUTION': {**CFG['EXECUTION'],
-                               'touch_margin': raw['touch_m'],
                                'm1_rsi_offset': raw['rsi_offset']},
                  'SL':        {**CFG['SL'],
-                               'rsi_exit_thr': raw['rsi_exit'],
-                               'trail_multi':  raw['trail_m']}}
+                               'sl_multi':      raw['sl_multi'],
+                               'rsi_exit_thr':  raw['rsi_exit'],
+                               'trail_multi':   raw['trail_m']}}
 
-        strat = VolAdaptiveSL(cfg=cfg_t)
+        strat = AtrSL(multi=raw['sl_multi'])
         res   = run_backtest(df_h1, df_m1, strat, sig_p, cfg_t, direction)
         sc    = _score(res, CFG['OPTIMIZE']['min_trades'])
         cnt  += 1
@@ -115,25 +105,21 @@ def main(args):
     # 2. 指標
     print("\n[2] 指標計算")
     df_h1 = add_h1_indicators(df_h1_raw, CFG)
+    df_h1 = add_d1_rsi_to_h1(df_h1, CFG)      # D1 RSI を H1 に付加（ルールフィルタ用）
     df_m1 = add_m1_indicators(df_m1_raw, CFG)
     atr_a = df_h1['ATR'].mean()
     print(f"  H1: {len(df_h1)}本  ATR avg=${atr_a:.2f}  "
           f"${df_h1['Close'].min():,.0f}〜${df_h1['Close'].max():,.0f}")
     print(f"  M1: {len(df_m1)}本")
 
-    # 3. 急落検出
-    print("\n[3] 急落イベント検出")
-    df_crashes = detect_crash_events(df_h1, df_m1, CFG)
-    crash_set  = set(df_crashes['bar'].tolist()) if not df_crashes.empty else set()
-
-    # 4. SL戦略バックテスト比較
-    print("\n[4] SL戦略バックテスト（5戦略比較）")
+    # 3. SL戦略バックテスト比較
+    print("\n[3] SL戦略バックテスト（買い・5戦略比較）")
     sig_p   = CFG['SIGNAL']
     strats  = get_all_strategies(CFG)
     results = []
     for strat in strats:
         res = run_backtest(df_h1, df_m1, strat, sig_p, CFG,
-                           direction='buy', crash_bar_set=crash_set)
+                           direction='buy')
         results.append(res)
         rc = res.get('reason_counts', {})
         print(f"\n  {res['strategy']}")
@@ -147,30 +133,28 @@ def main(args):
               f"最大連続損失={res['max_consec_loss']}回")
         print(f"    exit: {rc}  SL距離avg=${res['avg_sl_dist']:.1f}")
 
-    # 5. 最適化（オプション）
+    # 4. 最適化（オプション）
     opt_results = {}
     if args.optimize:
-        print(f"\n[5] パラメータ最適化（{CFG['OPTIMIZE']['n_samples']}サンプル）")
+        print(f"\n[4] パラメータ最適化（{CFG['OPTIMIZE']['n_samples']}サンプル）")
         for d in ['buy', 'sell']:
             lbl = '買い' if d == 'buy' else '売り'
             print(f"\n  [{lbl}]")
             t1 = time.time()
             opt_results[d] = optimize(df_h1, df_m1, d)
             print(f"  完了 {time.time()-t1:.1f}秒")
-            p = opt_results[d]['params'] or {}
             r = opt_results[d]['result'] or {}
             if r:
                 print(f"  → pnl={r.get('total_pnl',0):+.1f}pips  "
                       f"wr={r.get('win_rate',0)*100:.0f}%  PF={r.get('profit_factor',0):.2f}")
     else:
-        print("\n[5] 最適化スキップ（--optimize で実行）")
+        print("\n[4] 最適化スキップ（--optimize で実行）")
 
-    # 6. グラフ
-    print("\n[6] グラフ出力")
-    plot_crash_analysis(df_h1, df_crashes, CFG, out)
-    plot_sl_comparison(results, df_h1, df_crashes, CFG, out)
+    # 5. グラフ
+    print("\n[5] グラフ出力")
+    plot_sl_comparison(results, df_h1, None, CFG, out)
 
-    # 7. JSON
+    # 6. JSON
     def san(v):
         if isinstance(v, (np.integer,)):  return int(v)
         if isinstance(v, (np.floating,)): return float(v)
@@ -180,20 +164,14 @@ def main(args):
         'source':   '合成データ',
         'period':   f"{df_h1.index[0]} 〜 {df_h1.index[-1]}",
         'atr_avg':  round(float(atr_a), 3),
-        'n_crashes': len(df_crashes),
         'sl_results': [
             {k: san(v) for k, v in r.items()
              if k not in ('trades','equity','pnls')}
             for r in results
         ],
-        'recommended_sl': {
-            'strategy': 'E. ボラ適応型SL',
-            'rules': {
-                'ATR_ratio<0.8':    f"×{CFG['SL']['sl_multi_low']}",
-                'ATR_ratio 0.8〜1.5': f"×{CFG['SL']['sl_multi_normal']}",
-                'ATR_ratio 1.5〜2.5': f"×{CFG['SL']['sl_multi_medium']}",
-                'ATR_ratio>2.5':    f"×{CFG['SL']['sl_multi_high']} (急落)",
-            },
+        'sl_config': {
+            'sl_multi':      CFG['SL']['sl_multi'],
+            'tp_atr_multi':  CFG['SL']['tp_atr_multi'],
             'rsi_exit_thr':  CFG['SL']['rsi_exit_thr'],
             'trail_multi':   CFG['SL']['trail_multi'],
         },
@@ -216,8 +194,7 @@ def main(args):
     print(f"\n{'='*60}")
     print(f"  完了  ({time.time()-t0:.1f}秒)")
     print(f"  出力先: {out}/")
-    print(f"    sl_crash_analysis.png  急落イベント分析")
-    print(f"    sl_comparison.png      SL戦略比較")
+    print(f"    sl_comparison.png    SL戦略比較")
     print(f"    local_analysis.json    数値結果")
     print(f"{'='*60}")
 

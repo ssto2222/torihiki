@@ -1,4 +1,4 @@
-"""core/indicators.py — テクニカル指標・急落検出"""
+"""core/indicators.py — テクニカル指標"""
 from __future__ import annotations
 import numpy as np
 import pandas as pd
@@ -47,6 +47,7 @@ def add_h1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     df['BB_mid']   = bb_ma
     df['BB_pct']   = (df['Close'] - bb_ma) / (df['BB_upper'] - bb_ma).replace(0, np.nan)
 
+    df['SMA20']      = df['Close'].rolling(20).mean()
     df['EMA21']      = df['Close'].ewm(span=ef, adjust=False).mean()
     df['EMA50']      = df['Close'].ewm(span=es, adjust=False).mean()
     df['Swing_Low']  = df['Low'].rolling(sw).min()
@@ -65,74 +66,26 @@ def add_m1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return df.dropna()
 
 
-def detect_crash_events(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
-                         cfg: dict) -> pd.DataFrame:
+def add_d1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """D1 データに RSI を付加して返す（MT5 D1取得データ用）"""
+    ind = cfg.get('INDICATOR', {})
+    df  = df.copy()
+    df['RSI'] = calc_rsi(df['Close'], ind.get('rsi_period', 14))
+    return df.dropna()
+
+
+def add_d1_rsi_to_h1(df_h1: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
-    H1足から急落イベントを自動検出
-
-    検出条件（いずれかを満たすバー）:
-      a) 1本下落幅 > ATR × crash_atr_multi
-      b) オープンギャップダウン > crash_gap_usd
-      c) ATR_ratio > vol_spike
+    H1 DataFrame を D1 にリサンプルして RSI を計算し、
+    RSI_D1 カラムとして H1 に forward-fill でマージして返す。
+    バックテスト・ローカル分析で D1 RSI を使う際に呼ぶ。
     """
-    cr       = cfg.get('CRASH', {})
-    atr_thr  = cr.get('atr_multi', 2.5)
-    gap_thr  = cr.get('gap_usd',   8.0)
-    spk_thr  = cr.get('vol_spike', 2.0)
+    ind = cfg.get('INDICATOR', {})
+    rp  = ind.get('rsi_period', 14)
+    d1_close = df_h1['Close'].resample('1D').last().dropna()
+    d1_rsi   = calc_rsi(d1_close, rp)
+    df_h1    = df_h1.copy()
+    df_h1['RSI_D1'] = d1_rsi.reindex(df_h1.index, method='ffill')
+    return df_h1
 
-    records = []
-    for i in range(1, len(df_h1)):
-        row   = df_h1.iloc[i]
-        prev  = df_h1.iloc[i - 1]
-        atr_v = float(row['ATR']) if not np.isnan(row['ATR']) else 1.0
-        ratio = float(row.get('ATR_ratio', np.nan))
-        if np.isnan(ratio): ratio = 1.0
 
-        drop = float(prev['Close'] - row['Close'])   # 正=下落
-        gap  = float(prev['Close'] - row['Open'])    # 正=ギャップダウン
-
-        cond_drop  = drop > 0 and drop > atr_v * atr_thr
-        cond_gap   = gap  > gap_thr
-        cond_spike = ratio > spk_thr
-        if not (cond_drop or cond_gap or cond_spike):
-            continue
-
-        n = len(df_h1)
-        records.append({
-            'bar':         i,
-            'time':        df_h1.index[i],
-            'close':       float(row['Close']),
-            'drop_usd':    max(drop, 0.0),
-            'gap_usd':     max(gap,  0.0),
-            'atr':         atr_v,
-            'atr_ratio':   ratio,
-            'drop_atr':    max(drop, 0.0) / atr_v,
-            'cause':       'drop' if cond_drop else ('gap' if cond_gap else 'spike'),
-            'recovery_3h':  (df_h1['Close'].iloc[min(i+3,  n-1)] / row['Close'] - 1) * 100,
-            'recovery_6h':  (df_h1['Close'].iloc[min(i+6,  n-1)] / row['Close'] - 1) * 100,
-            'recovery_12h': (df_h1['Close'].iloc[min(i+12, n-1)] / row['Close'] - 1) * 100,
-        })
-
-    df_c = pd.DataFrame(records) if records else pd.DataFrame()
-
-    # M1 ギャップ統計
-    m1_gap   = (df_m1['Open'] - df_m1['Close'].shift()).dropna()
-    neg_gaps = m1_gap[m1_gap < -gap_thr / 2]
-
-    print(f"[急落検出] H1ベース: {len(df_c)}件", end='')
-    if not df_c.empty:
-        causes = df_c['cause'].value_counts().to_dict()
-        print(f"  {causes}")
-        print(f"  下落幅: avg=${df_c.drop_usd.mean():.2f}  max=${df_c.drop_usd.max():.2f}"
-              f"  ATR比max={df_c.drop_atr.max():.2f}")
-        r6 = df_c['recovery_6h']
-        print(f"  6H後回復: avg={r6.mean():+.2f}%  "
-              f"反発={(r6>0).sum()}/{len(r6)}件")
-    else:
-        print()
-
-    print(f"[M1ギャップ] 下方>{gap_thr/2:.1f}USD: {len(neg_gaps)}件  "
-          f"avg=${neg_gaps.mean():.2f}  worst=${neg_gaps.min():.2f}"
-          if len(neg_gaps) > 0 else "[M1ギャップ] 下方ギャップなし")
-
-    return df_c

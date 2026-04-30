@@ -25,57 +25,36 @@ INDICATOR = dict(
     atr_ma_bars  = 50,          # ATR_ratio の分母期間
 )
 
-# ── H1 シグナル検出 ────────────────────────────────────────
-# 最適化結果（local_analysis.py --optimize より）
+# ── H1 シグナル検出（SMA20 + RSI）────────────────────────────
 SIGNAL = dict(
-    # 買い：ダブルボトム
-    buy_rsi_thr   = 38.0,
-    buy_bb_touch  = 0.85,       # 最適値（0.80→0.85）
-    db_lookback   = 20,          # 最適値（25→20）
-    db_min_int    = 2,
-    db_max_int    = 16,
-    db_depth_tol  = 4.0,         # 最適値（5.0→4.0）
-    db_neck_rise  = 1.5,         # 最適値（2.0→1.5）
-    local_order   = 2,
-    # 売り：ダブルトップ（勝率50%・PF2.12 を達成した最優秀パラメータ）
-    sell_rsi_thr  = 42.0,        # 最適値（62.0→42.0）
-    sell_bb_touch = 0.85,        # 最適値（0.80→0.85）
-    dt_lookback   = 35,          # 最適値（25→35）
-    dt_min_int    = 2,
-    dt_max_int    = 16,
-    dt_depth_tol  = 4.0,         # 最適値（5.0→4.0）
-    dt_neck_drop  = 2.0,
+    buy_rsi_thr  = 38.0,   # RSI がこの値を下抜け かつ Close > SMA20 → 買い
+    sell_rsi_thr = 62.0,   # RSI がこの値を上抜け かつ Close < SMA20 → 売り
 )
 
 # ── M1 執行 ────────────────────────────────────────────────
-# 最適値（売り方向の最適化より）
 EXECUTION = dict(
     touch_margin    = 0.20,
-    m1_rsi_offset   = 15.0,     # 最適値（20.0→15.0）
+    m1_rsi_offset   = 20.0,
     signal_valid_m1 = 240,      # シグナルON有効期限（M1本数）
 )
 
 # ── SL & イグジット ────────────────────────────────────────
 SL = dict(
-    spread_usd      = 0.30,
-    hold_max_h1     = 48,
-    tp_atr_multi    = 3.0,      # 保険TP = ATR × N
-    rsi_exit_thr    = 75,       # RSI≥75 でトレーリング起動（最適値）
-    trail_multi     = 2.0,      # 最適値（1.5→2.0）
-    # ボラ適応型SL 倍率
-    sl_multi_low    = 1.0,      # ATR_ratio < 0.8
-    sl_multi_normal = 1.5,      # 0.8 〜 1.5
-    sl_multi_medium = 2.5,      # 1.5 〜 2.5
-    sl_multi_high   = 4.0,      # > 2.5（急落）
-    atr_ratio_medium = 1.5,
-    atr_ratio_high   = 2.5,
+    spread_usd   = 0.30,
+    sl_multi     = 1.5,         # SL = Entry ± ATR × sl_multi
+    tp_atr_multi = 3.0,         # TP  = Entry ± ATR × tp_atr_multi
+    hold_max_h1  = 48,
+    rsi_exit_thr = 75,          # RSI≥75 でトレーリング起動
+    trail_multi  = 1.5,         # トレーリング幅 = ATR × trail_multi
 )
 
-# ── 急落検出 ──────────────────────────────────────────────
-CRASH = dict(
-    atr_multi = 2.5,            # 1本下落 > ATR×N → 急落
-    gap_usd   = 8.0,            # Open-Close ギャップ > N USD
-    vol_spike = 2.0,            # ATR_ratio > N
+# ── トレードルール（trading_rules.json から導出）────────────────
+RULES = dict(
+    min_score                = 30,    # RulesEngine スコア閾値（以下はエントリースキップ）
+    max_consecutive_losses   = 3,     # 連続損失この回数でその日の取引停止
+    cooldown_large_loss_min  = 1440,  # 大損失後のクールダウン（分）= 翌日まで
+    large_loss_threshold_usd = -10000,
+    min_hold_minutes         = 15,
 )
 
 # ── 最適化 ────────────────────────────────────────────────
@@ -88,7 +67,6 @@ OPTIMIZE = dict(
 # ── ローカル合成データ ─────────────────────────────────────
 LOCAL = dict(
     h1_bars_synth = 3600,
-    crash_rate    = 0.008,      # 急落発生率（低めに設定）
     output_dir    = "./output",
 )
 
@@ -97,7 +75,7 @@ BRIDGE = dict(
     signal_file = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json",
     status_file ="C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
     poll_sec    = 5,
-    lot_size    = 0.01,         # 1回の取引ロット数（--lot で上書き可）
+    lot_size    = 0.05,         # 1回の取引ロット数（推奨: 0.05〜0.10）（--lot で上書き可）
 )
 
 # ── 可視化 ────────────────────────────────────────────────

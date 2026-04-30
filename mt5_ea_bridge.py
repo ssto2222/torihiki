@@ -7,11 +7,19 @@ MT5 EA が OnTimer() で読み込み、注文を執行する
 実行:
     python mt5_ea_bridge.py           # ポーリングループ（Ctrl+C で終了）
     python mt5_ea_bridge.py --once    # 1回だけ計算して終了（動作確認用）
-    python mt5_ea_bridge.py --symbol GOLD --output ./out
+    python mt5_ea_bridge.py --symbol BTCUSD --lot 0.05
 
 通信プロトコル:
     Python → MT5 EA : output/signal.json   （毎ポーリング更新）
     MT5 EA → Python : output/ea_state.json （EA が書き込む状態）
+
+ルール適用（trading_rules.json）:
+    - 買いのみ（売りは構造的損失）
+    - 禁止時間帯（UTC 9/16/21）はスキップ
+    - 金曜日はスキップ
+    - H1/D1 RSI ゾーン + クロスフィルターで品質スコア算出
+    - スコア < min_score のシグナルはスキップ
+    - EA 連続損失 >= 3 回でその日停止
 """
 import sys, json, time, argparse
 from pathlib import Path
@@ -21,112 +29,118 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import connect_mt5, fetch_ohlcv
-from core.indicators import add_h1_indicators, add_m1_indicators
-from core.strategy   import detect_h1_signals, VolAdaptiveSL
+from core.indicators import add_h1_indicators, add_d1_indicators
 
 CFG = {k: getattr(C, k) for k in
-       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','CRASH','LOCAL','PLOT','BRIDGE']}
+       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT','BRIDGE']}
+
+# ── RulesEngine ロード（なければフィルタなし）────────────────
+try:
+    from trading_rules import RulesEngine
+    _engine = RulesEngine()
+    print("[ルール] trading_rules.json 読み込み完了")
+except Exception as _e:
+    _engine = None
+    print(f"[ルール] trading_rules 読み込み失敗: {_e} → フィルタなし")
 
 
 # ── リアルタイム指標・シグナル計算 ────────────────────────────
 
 def compute_signal(symbol: str, cfg: dict) -> dict | None:
     """
-    最新 H1 + M1 から現在の売買シグナルと SL 水準を計算
+    H1 RSI + D1 RSI で現在の売買シグナルと SL 水準を計算して返す。
+    RulesEngine でフィルタリング済み（スコア < min_score は action='none'）。
 
-    戻り値フォーマット（signal.json と同一）:
-    {
-      "timestamp":      "2024-01-15T03:00:00+00:00",
-      "symbol":         "XAUUSD",
-      "close":          1950.20,
-      "atr":            12.34,
-      "atr_ratio":      1.05,
-      "rsi":            42.1,
-      "sl_multi":       1.5,          // ボラ適応型で決定したATR倍率
-      "action":         "buy",        // "buy" / "sell" / "none"
-      "sl_price":       1931.70,      // 推奨SL価格
-      "tp_price":       1987.22,      // 保険TP価格
-      "rsi_exit_thr":   75.0,
-      "trail_multi":    1.5,
-      "max_slip_pt":    617,          // MT5 deviation パラメータ相当
-      "signal_active":  true,
-      "n_signals_buy":  1,
-      "n_signals_sell": 0
-    }
+    signal.json フォーマット:
+      action          : "buy" / "none"
+      sl_price        : Entry - ATR × sl_multi
+      tp_price        : Entry + ATR × tp_atr_multi
+      score           : RulesEngine スコア (0〜100)
+      strength        : "strong" / "normal" / "weak" / "none"
+      tp_hold_minutes : TP目安保有時間（分）
+      lot_size        : 発注ロット数
+      timestamp       : "YYYY.MM.DD HH:MM:SS"（MQL5 StringToTime 互換）
     """
     try:
         import MetaTrader5 as mt5
 
         df_h1_raw = fetch_ohlcv(symbol, 'H1', 200)
-        df_m1_raw = fetch_ohlcv(symbol, 'M1', 500)
-        if df_h1_raw is None or df_m1_raw is None:
+        df_d1_raw = fetch_ohlcv(symbol, 'D1', 50)
+        if df_h1_raw is None or df_d1_raw is None:
             return None
 
         df_h1 = add_h1_indicators(df_h1_raw, cfg)
-        df_m1 = add_m1_indicators(df_m1_raw, cfg)
-        if df_h1.empty: return None
+        df_d1 = add_d1_indicators(df_d1_raw, cfg)
+        if df_h1.empty or df_d1.empty or 'SMA20' not in df_h1.columns:
+            return None
 
-        last    = df_h1.iloc[-1]
-        atr_v   = float(last['ATR'])
-        ratio   = float(last['ATR_ratio']) if not np.isnan(last['ATR_ratio']) else 1.0
-        rsi_v   = float(last['RSI'])
-        bb_pct  = float(last['BB_pct'])
-        close_v = float(last['Close'])
+        last     = df_h1.iloc[-1]
+        close_v  = float(last['Close'])
+        atr_v    = float(last['ATR'])
+        rsi_h1_v = float(last['RSI'])
+        sma20    = float(last['SMA20'])
+        rsi_d1_v = float(df_d1['RSI'].iloc[-1])
 
-        # ボラ適応型 SL でマルチプライヤーを決定
-        strat    = VolAdaptiveSL(cfg=cfg)
-        sl_multi = strat._m(ratio)
+        sl_multi = cfg['SL']['sl_multi']
+        now      = datetime.now(timezone.utc)
+        hour_utc = now.hour
+        dow      = now.weekday()   # 0=Mon, 6=Sun
 
-        # シグナル検出（直近200本）
-        sigs_buy  = detect_h1_signals(df_h1, cfg['SIGNAL'], 'buy')
-        sigs_sell = detect_h1_signals(df_h1, cfg['SIGNAL'], 'sell')
+        # RSI 閾値ベースの生シグナル（買いのみ、売り禁止）
+        active_buy = rsi_h1_v < cfg['SIGNAL']['buy_rsi_thr']
 
-        # 直近 signal_valid_m1 本（M1）以内のシグナルを有効とみなす
-        valid_sec   = cfg['EXECUTION']['signal_valid_m1'] * 60
-        now         = df_h1.index[-1]
-        active_buy  = any((now - s['signal_time']).total_seconds() <= valid_sec
-                          for s in sigs_buy)
-        active_sell = any((now - s['signal_time']).total_seconds() <= valid_sec
-                          for s in sigs_sell)
+        # RulesEngine でフィルタリング
+        score           = 0
+        strength        = 'none'
+        tp_hold_minutes = 0
+        skip_reason     = ''
 
-        # アクション決定（買いと売りが同時発光なら none）
-        if active_buy and not active_sell:
-            action   = 'buy'
-            sl_price = close_v - atr_v * sl_multi
-            tp_price = close_v + atr_v * cfg['SL']['tp_atr_multi']
-        elif active_sell and not active_buy:
-            action   = 'sell'
-            sl_price = close_v + atr_v * sl_multi
-            tp_price = close_v - atr_v * cfg['SL']['tp_atr_multi']
-        else:
-            action   = 'none'
-            sl_price = close_v - atr_v * sl_multi   # 参考値
-            tp_price = close_v + atr_v * cfg['SL']['tp_atr_multi']
+        if _engine is not None:
+            result = _engine.evaluate(
+                symbol    = symbol,
+                rsi_h1    = rsi_h1_v,
+                rsi_d1    = rsi_d1_v,
+                direction = 'buy',
+                hour_utc  = hour_utc,
+                dow       = dow,
+            )
+            score           = result.score
+            strength        = result.strength or 'none'
+            tp_hold_minutes = result.tp_hold_minutes or 0
 
-        # MT5 deviation ポイント換算
-        tick   = mt5.symbol_info(symbol)
-        point  = tick.point if tick else 0.01
+            if result.signal != 'BUY':
+                active_buy  = False
+                skip_reason = ' | '.join(result.reasons[:2])
+
+        action = 'buy' if active_buy else 'none'
+
+        sl_price = close_v - atr_v * sl_multi
+        tp_price = close_v + atr_v * cfg['SL']['tp_atr_multi']
+
+        tick  = mt5.symbol_info(symbol)
+        point = tick.point if tick else 0.01
         max_pt = max(1, int(atr_v * 0.5 / point))
 
         return {
-            'timestamp':      datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
-            'symbol':         symbol,
-            'close':          round(close_v, 2),
-            'atr':            round(atr_v,   2),
-            'atr_ratio':      round(ratio,   3),
-            'rsi':            round(rsi_v,   1),
-            'bb_pct':         round(bb_pct,  3),
-            'sl_multi':       round(sl_multi, 2),
-            'action':         action,
-            'sl_price':       round(sl_price, 2),
-            'tp_price':       round(tp_price, 2),
-            'rsi_exit_thr':   cfg['SL']['rsi_exit_thr'],
-            'trail_multi':    cfg['SL']['trail_multi'],
-            'max_slip_pt':    max_pt,
-            'lot_size':       cfg['BRIDGE']['lot_size'],
-            'signal_active':  active_buy or active_sell,
-            'n_signals_buy':  len(sigs_buy),
-            'n_signals_sell': len(sigs_sell),
+            'timestamp':       datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
+            'symbol':          symbol,
+            'close':           round(close_v, 2),
+            'atr':             round(atr_v,    2),
+            'rsi_h1':          round(rsi_h1_v, 1),
+            'rsi_d1':          round(rsi_d1_v, 1),
+            'sma20':           round(sma20,    2),
+            'sl_multi':        round(sl_multi,  2),
+            'action':          action,
+            'sl_price':        round(sl_price,  2),
+            'tp_price':        round(tp_price,  2),
+            'score':           score,
+            'strength':        strength,
+            'tp_hold_minutes': tp_hold_minutes,
+            'skip_reason':     skip_reason,
+            'rsi_exit_thr':    cfg['SL']['rsi_exit_thr'],
+            'trail_multi':     cfg['SL']['trail_multi'],
+            'max_slip_pt':     max_pt,
+            'lot_size':        cfg['BRIDGE']['lot_size'],
         }
     except Exception as e:
         print(f"[ブリッジ] 計算エラー: {e}")
@@ -172,46 +186,56 @@ def run_bridge(cfg: dict, once: bool = False):
     sig_path   = cfg['BRIDGE']['signal_file']
     state_path = cfg['BRIDGE']['status_file']
     poll_sec   = cfg['BRIDGE']['poll_sec']
+    lot_size   = cfg['BRIDGE']['lot_size']
+    max_consec = cfg.get('RULES', {}).get('max_consecutive_losses', 3)
+    min_score  = cfg.get('RULES', {}).get('min_score', 30)
 
     Path(sig_path).parent.mkdir(parents=True, exist_ok=True)
 
-    lot_size   = cfg['BRIDGE']['lot_size']
-
-    print("=" * 58)
+    print("=" * 60)
     print(f"  MT5 EA ブリッジ  [{symbol}]")
     print(f"  signal.json  → {sig_path}")
     print(f"  ea_state.json← {state_path}")
     print(f"  ポーリング   : {poll_sec}秒  （Ctrl+C で終了）")
-    print(f"  ロット数     : {lot_size}")
-    print("=" * 58)
+    print(f"  ロット数     : {lot_size}  最小スコア: {min_score}")
+    print(f"  連続損失上限 : {max_consec}回")
+    print("=" * 60)
 
     if not connect_mt5(symbol):
         print("\n[エラー] MT5 接続失敗。ターミナルを起動して再実行してください。")
         return
 
     try:
-        import MetaTrader5 as mt5
         itr = 0
         while True:
             itr += 1
-            t_s = time.time()
+            t_s  = time.time()
             data = compute_signal(symbol, cfg)
 
             if data:
+                # 連続損失チェック（EA state から読む）
+                ea            = read_ea_state(state_path)
+                consec_losses = ea.get('consecutive_losses', 0)
+                pos           = ea.get('positions', 0)
+                bal           = ea.get('balance', 'N/A')
+
+                if consec_losses >= max_consec and data['action'] == 'buy':
+                    data['action']      = 'none'
+                    data['skip_reason'] = f'consecutive_losses={consec_losses}>={max_consec}'
+
                 write_signal(data, sig_path)
-                ea  = read_ea_state(state_path)
-                pos = ea.get('positions', 0)
-                bal = ea.get('balance',   'N/A')
-                ts  = datetime.now().strftime('%H:%M:%S')
-                print(f"\n[{ts}] #{itr}  close=${data['close']:,.2f}  "
-                      f"ATR=${data['atr']:.2f}  ratio={data['atr_ratio']:.2f}  "
-                      f"RSI={data['rsi']:.1f}")
-                print(f"  SL=ATR×{data['sl_multi']}  "
-                      f"action={data['action'].upper():4s}  "
+                ts = datetime.now().strftime('%H:%M:%S')
+                print(f"\n[{ts}] #{itr}  "
+                      f"close=${data['close']:,.2f}  "
+                      f"RSI_H1={data['rsi_h1']:.1f}  RSI_D1={data['rsi_d1']:.1f}  "
+                      f"ATR=${data['atr']:.2f}")
+                print(f"  action={data['action'].upper():4s}  "
                       f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
-                      f"lot={data['lot_size']}  max_slip={data['max_slip_pt']}pt")
-                print(f"  signal={data['n_signals_buy']}買/{data['n_signals_sell']}売  "
-                      f"残高={bal}  ポジション={pos}件")
+                      f"score={data['score']}({data['strength']})  "
+                      f"lot={data['lot_size']}")
+                if data['skip_reason']:
+                    print(f"  skip: {data['skip_reason']}")
+                print(f"  残高={bal}  ポジション={pos}件  連続損失={consec_losses}回")
             else:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}  データ取得失敗")
 
