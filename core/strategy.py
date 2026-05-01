@@ -109,6 +109,30 @@ def check_m5_entry_filter(rsi_m5: float, rsi_m5_prev: float,
         return (50 <= rsi_m5 <= 70) and rsi_m5 < 80
 
 
+def check_m5_surge(df_m5: pd.DataFrame,
+                   lookback: int = 5,
+                   threshold: float = 20.0) -> str:
+    """
+    M5 RSI の急変（急騰・急落）を検出する。
+
+    lookback 本前の RSI と現在の RSI の差が threshold 以上なら急変と判定。
+    デフォルト: 5本（25分）で 20 ポイント超の変化。
+
+    Returns: 'rapid_rise' / 'rapid_fall' / 'none'
+    """
+    if df_m5 is None or 'RSI' not in df_m5.columns:
+        return 'none'
+    rsi = df_m5['RSI'].dropna()
+    if len(rsi) < lookback + 1:
+        return 'none'
+    delta = float(rsi.iloc[-1]) - float(rsi.iloc[-1 - lookback])
+    if delta >= threshold:
+        return 'rapid_rise'
+    if delta <= -threshold:
+        return 'rapid_fall'
+    return 'none'
+
+
 def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
                   direction: str, cfg: dict,
                   rsi_d1: float = 50.0,
