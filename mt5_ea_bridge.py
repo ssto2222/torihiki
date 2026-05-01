@@ -437,6 +437,22 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                 return normal_data
             # 通常モード計算失敗時はスキャルプ継続（フォールスルー）
 
+        # ── クールダウン中は通常モードに切換え ──────────────────
+        in_cooldown = (
+            _scalp_last_at is not None and
+            now < _scalp_last_at + timedelta(minutes=cooldown)
+        )
+        if in_cooldown:
+            normal_data = compute_signal(symbol, cfg)
+            if normal_data is not None:
+                rem = int((_scalp_last_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
+                normal_data['signal_type'] = (
+                    f"{normal_data.get('signal_type','none')}[cooldown残{rem}分]"
+                )
+                normal_data['scalp_mode']  = False
+                return normal_data
+            # compute_signal 失敗時はスキャルプのまま継続
+
         # TP/SL 価格幅を逆算
         #   profit(JPY) = lot × contract_size × price_move × jpy_rate
         #   price_move  = target_jpy / (lot × contract_size × jpy_rate)
