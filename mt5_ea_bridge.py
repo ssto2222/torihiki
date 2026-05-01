@@ -112,12 +112,13 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
 
         if _engine is not None:
             result = _engine.evaluate(
-                symbol    = symbol,
-                rsi_h1    = rsi_h1_v,
-                rsi_d1    = rsi_d1_v,
-                direction = 'buy',
-                hour_utc  = hour_utc,
-                dow       = dow,
+                symbol     = symbol,
+                rsi_h1     = rsi_h1_v,
+                rsi_d1     = rsi_d1_v,
+                direction  = 'buy',
+                hour_utc   = hour_utc,
+                dow        = dow,
+                minute_utc = now.minute,
             )
             score           = result.score
             strength        = result.strength or 'none'

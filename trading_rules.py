@@ -204,22 +204,24 @@ class RulesEngine:
 
     def evaluate(
         self,
-        symbol:    str,
-        rsi_h1:    float,
-        rsi_d1:    float,
-        direction: str,
-        hour_utc:  int,
-        dow:       int,
+        symbol:     str,
+        rsi_h1:     float,
+        rsi_d1:     float,
+        direction:  str,
+        hour_utc:   int,
+        dow:        int,
+        minute_utc: int = 0,
     ) -> SignalResult:
         """
         Parameters
         ----------
-        symbol    : "BTCUSD" or "XAUUSD"
-        rsi_h1    : RSI(14) value on 1H chart
-        rsi_d1    : RSI(14) value on D1 chart
-        direction : "buy" or "sell"
-        hour_utc  : current hour in UTC (0-23)
-        dow       : day of week  0=Mon, 6=Sun
+        symbol     : "BTCUSD" or "XAUUSD"
+        rsi_h1     : RSI(14) value on 1H chart
+        rsi_d1     : RSI(14) value on D1 chart
+        direction  : "buy" or "sell"
+        hour_utc   : current hour in UTC (0-23)
+        dow        : day of week  0=Mon, 6=Sun
+        minute_utc : current minute (0-59); 危険時間の15分前からブロック開始
         """
         w = self._w
         h1z   = self._get_h1_zone(symbol, rsi_h1)
@@ -290,14 +292,17 @@ class RulesEngine:
             penalties += w["h1_zone_forbidden_penalty"]
             blocked["dir"] = True
 
-        # ── 時間帯 ──
-        jst = (hour_utc + 9) % 24
-        if hour_utc in self._session["forbidden_hours_utc"]:
-            reasons.append(f"[HOUR BLOCKED] UTC{hour_utc} (JST{jst}) worst session")
+        # ── 時間帯（15分前シフト）──
+        # minute_utc >= 45 の場合、次の時間帯として扱う（例: 8:45 → UTC9 扱い）
+        eff_hour = (hour_utc + 1) % 24 if minute_utc >= 45 else hour_utc
+        jst = (eff_hour + 9) % 24
+        if eff_hour in self._session["forbidden_hours_utc"]:
+            reasons.append(f"[HOUR BLOCKED] UTC{eff_hour} (JST{jst}) worst session"
+                           + (f" [early -{60 - minute_utc}min]" if minute_utc >= 45 else ""))
             penalties += w["hour_forbidden_penalty"]
             blocked["hour"] = True
-        elif hour_utc in self._session["caution_hours_utc"]:
-            reasons.append(f"[HOUR CAUTION] UTC{hour_utc} (JST{jst}) caution session")
+        elif eff_hour in self._session["caution_hours_utc"]:
+            reasons.append(f"[HOUR CAUTION] UTC{eff_hour} (JST{jst}) caution session")
             penalties += w["hour_caution_penalty"]
 
         # ── 曜日 ──
