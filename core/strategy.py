@@ -133,6 +133,39 @@ def check_m5_surge(df_m5: pd.DataFrame,
     return 'none'
 
 
+def detect_big_move(df_m5: pd.DataFrame,
+                    lookback: int = 12,
+                    atr_multi: float = 2.0) -> str:
+    """
+    大変動検知: スキャルプ→通常モード自動切換えのトリガー。
+
+    2つの条件どちらかで判定:
+      1. 60分（M5×12本）の価格変動が ATR×atr_multi を超える（方向性大変動）
+      2. 直近 ATR が 20 本移動平均の 1.8 倍超（ボラスパイク）
+
+    Returns: 'up' / 'down' / 'none'
+    """
+    if df_m5 is None or 'ATR' not in df_m5.columns or len(df_m5) < lookback + 1:
+        return 'none'
+    atr = float(df_m5['ATR'].iloc[-1])
+    if atr <= 0:
+        return 'none'
+    close_now  = float(df_m5['Close'].iloc[-1])
+    close_prev = float(df_m5['Close'].iloc[-1 - lookback])
+    change     = close_now - close_prev
+
+    # 条件①: 方向性変動 > ATR × atr_multi
+    if abs(change) > atr * atr_multi:
+        return 'up' if change > 0 else 'down'
+
+    # 条件②: ATR スパイク (現在 ATR / 20 本 MA > 1.8)
+    atr_ma = df_m5['ATR'].rolling(20, min_periods=10).mean().iloc[-1]
+    if not np.isnan(atr_ma) and atr_ma > 0 and atr / atr_ma > 1.8:
+        return 'up' if change > 0 else 'down'
+
+    return 'none'
+
+
 def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
                   direction: str, cfg: dict,
                   rsi_d1: float = 50.0,
