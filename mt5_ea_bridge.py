@@ -398,20 +398,18 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             _scalp_count = 0
             _scalp_date  = today
 
-        # データ取得
-        df_raw    = fetch_ohlcv(symbol, sig_tf, 30)
-        df_h1_raw = fetch_ohlcv(symbol, 'H1', 50)
-        if df_raw is None or df_h1_raw is None:
+        # データ取得（スキャルプは M5 のみ。H1 は ATR_MA rolling(50) の都合で空になるため不使用）
+        df_raw = fetch_ohlcv(symbol, sig_tf, 50)   # RSI(14)+ATR(14) に余裕を持たせ 50 本
+        if df_raw is None:
             return None
 
-        df    = add_m5_indicators(df_raw, cfg)
-        df_h1 = add_h1_indicators(df_h1_raw, cfg)
-        if df.empty or df_h1.empty:
+        df = add_m5_indicators(df_raw, cfg)
+        if df.empty:
             return None
 
         rsi_cur = float(df['RSI'].iloc[-1])
         close_v = float(df['Close'].iloc[-1])
-        atr_v   = float(df_h1['ATR'].iloc[-1])   # H1 ATR を基準値として使用
+        atr_v   = float(df['ATR'].iloc[-1])         # M5 ATR（スキャルプに適切な短期ボラ）
 
         # TP/SL 価格幅を逆算
         #   profit(JPY) = lot × contract_size × price_move × jpy_rate
