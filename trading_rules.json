@@ -51,7 +51,7 @@
 
   "session_filter": {
     "timezone": "UTC",
-    "forbidden_hours_utc": [9, 16, 21],
+    "forbidden_hours_utc": [16],
     "caution_hours_utc": [0, 7, 12],
     "preferred_hours_utc": [17, 18, 19, 20, 22, 23],
     "hour_avg_profit_usd": {
