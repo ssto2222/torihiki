@@ -85,7 +85,7 @@ BRIDGE = dict(
     signal_file = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json",
     status_file ="C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
     poll_sec    = 5,
-    lot_size    = 0.03,         # 1回の取引ロット数（推奨: 0.05〜0.10）（--lot で上書き可）
+    lot_size    = 0.05,         # 1回の取引ロット数（推奨: 0.05〜0.10）（--lot で上書き可）
 )
 
 # ── スキャルプモード（--mode scalp で有効）────────────────────
