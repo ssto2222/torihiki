@@ -4,7 +4,6 @@ import warnings
 import numpy as np
 import pandas as pd
 warnings.filterwarnings('ignore')
-from secret import MT5_LOGIN_INFO
 
 
 # ── MT5 ───────────────────────────────────────────────────
