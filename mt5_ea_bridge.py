@@ -23,7 +23,7 @@ MT5 EA が OnTimer() で読み込み、注文を執行する
 """
 import sys, json, time, argparse
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import numpy as np
 
 
@@ -45,30 +45,43 @@ except Exception as _e:
     _engine = None
     print(f"[ルール] trading_rules 読み込み失敗: {_e} → フィルタなし")
 
+# ── シグナル状態（クロス検出用）─────────────────────────────
+_prev_rsi_h1: float | None = None          # 前回ポーリング時の H1 RSI
+_signal_active: dict       = {             # 現在有効なシグナルウィンドウ
+    'type':  None,                         # 'dip' / 'momentum_55' / ...
+    'until': None,                         # 有効期限 (datetime UTC)
+}
+
 
 # ── リアルタイム指標・シグナル計算 ────────────────────────────
 
 def compute_signal(symbol: str, cfg: dict) -> dict | None:
     """
-    H1 RSI + D1 RSI で現在の売買シグナルと SL 水準を計算して返す。
-    RulesEngine でフィルタリング済み（スコア < min_score は action='none'）。
+    バックテストと同じシグナルロジック（クロス検出）でリアルタイムシグナルを生成。
+
+    DIP:      H1 RSI が buy_rsi_thr (40) を下抜けた瞬間
+    MOMENTUM: H1 RSI が momentum_thrs (55/60/65/70/75) を上抜けた瞬間
+    いずれも signal_valid_m1 分間（デフォルト 240 分）シグナルウィンドウが開く。
+    ウィンドウ内かつ RulesEngine=BUY のポーリング時に action='buy' を出力。
 
     signal.json フォーマット:
       action          : "buy" / "none"
-      sl_price        : Entry - ATR × sl_multi
-      tp_price        : Entry + ATR × tp_atr_multi
+      signal_type     : "dip" / "momentum_55" / ... / "none"
+      signal_valid_until: シグナルウィンドウ終了時刻
       score           : RulesEngine スコア (0〜100)
       strength        : "strong" / "normal" / "weak" / "none"
       tp_hold_minutes : TP目安保有時間（分）
       lot_size        : 発注ロット数
       timestamp       : "YYYY.MM.DD HH:MM:SS"（MQL5 StringToTime 互換）
     """
+    global _prev_rsi_h1, _signal_active
+
     try:
         import MetaTrader5 as mt5
 
         df_h1_raw = fetch_ohlcv(symbol, 'H1', 200)
         df_d1_raw = fetch_ohlcv(symbol, 'D1', 50)
-        df_m5_raw = fetch_ohlcv(symbol, 'M5', 60)   # RSI(14) + 余裕分
+        df_m5_raw = fetch_ohlcv(symbol, 'M5', 60)
         if df_h1_raw is None or df_d1_raw is None:
             return None
 
@@ -95,16 +108,42 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 rsi_m5_prev = float(df_m5['RSI'].iloc[-2])
                 m5_ok = check_m5_entry_filter(rsi_m5_cur, rsi_m5_prev, rsi_d1_v, symbol)
 
-        sl_multi = cfg['SL']['sl_multi']
+        sl_multi    = cfg['SL']['sl_multi']
+        sig_p       = cfg['SIGNAL']
+        buy_thr     = sig_p.get('buy_rsi_thr',  40.0)
+        mom_thrs    = sorted(sig_p.get('momentum_thrs', [55.0, 60.0, 65.0, 70.0, 75.0]))
+        valid_min   = cfg['EXECUTION'].get('signal_valid_m1', 240)  # M1本数 = 分数
+
         now      = datetime.now(timezone.utc)
         hour_utc = now.hour
-        dow      = now.weekday()   # 0=Mon, 6=Sun
+        dow      = now.weekday()
 
-        # RSI 閾値ベースの生シグナル（買いのみ、売り禁止）
-        # M5 フィルタはゲートではなくボーナス加点のみ
-        active_buy = rsi_h1_v < cfg['SIGNAL']['buy_rsi_thr']
+        # ── クロス検出（バックテストと同ロジック）──────────────
+        new_type = None
+        if _prev_rsi_h1 is not None:
+            if rsi_h1_v < buy_thr and _prev_rsi_h1 >= buy_thr:
+                new_type = 'dip'
+            else:
+                for thr in mom_thrs:
+                    if rsi_h1_v > thr and _prev_rsi_h1 <= thr:
+                        new_type = f'momentum_{int(thr)}'
+                        break
+        _prev_rsi_h1 = rsi_h1_v
 
-        # RulesEngine でフィルタリング
+        # 新クロス検出 → シグナルウィンドウを開く（上書き）
+        if new_type:
+            _signal_active['type']  = new_type
+            _signal_active['until'] = now + timedelta(minutes=valid_min)
+
+        # ウィンドウ内かどうか
+        in_window = (
+            _signal_active['until'] is not None and
+            now <= _signal_active['until']
+        )
+        sig_type = _signal_active['type'] if in_window else 'none'
+
+        # ── RulesEngine フィルタ ────────────────────────────
+        active_buy      = in_window
         score           = 0
         strength        = 'none'
         tp_hold_minutes = 0
@@ -124,7 +163,6 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             strength        = result.strength or 'none'
             tp_hold_minutes = result.tp_hold_minutes or 0
 
-            # M5 ゾーン条件が揃っている場合はボーナス +10
             if m5_ok:
                 score = min(100, score + 10)
 
@@ -133,6 +171,8 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 skip_reason = ' | '.join(result.reasons[:2])
 
         action = 'buy' if active_buy else 'none'
+        valid_until_str = (_signal_active['until'].strftime('%Y.%m.%d %H:%M:%S')
+                           if _signal_active['until'] else '')
 
         sl_price = close_v - atr_v * sl_multi
         tp_price = close_v + atr_v * cfg['SL']['tp_atr_multi']
@@ -142,26 +182,28 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         max_pt = max(1, int(atr_v * 0.5 / point))
 
         return {
-            'timestamp':       datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
-            'symbol':          symbol,
-            'close':           round(close_v, 2),
-            'atr':             round(atr_v,    2),
-            'rsi_h1':          round(rsi_h1_v, 1),
-            'rsi_d1':          round(rsi_d1_v, 1),
-            'rsi_m5':          round(rsi_m5_cur, 1) if not np.isnan(rsi_m5_cur) else 0.0,
-            'rsi_m5_prev':     round(rsi_m5_prev, 1) if not np.isnan(rsi_m5_prev) else 0.0,
-            'm5_filter_ok':    m5_ok,
-            'sma20':           round(sma20,    2),
-            'sl_multi':        round(sl_multi,  2),
-            'action':          action,
-            'sl_price':        round(sl_price,  2),
-            'tp_price':        round(tp_price,  2),
-            'score':           score,
-            'strength':        strength,
-            'tp_hold_minutes': tp_hold_minutes,
-            'skip_reason':     skip_reason,
-            'rsi_exit_thr':    cfg['SL']['rsi_exit_thr'],
-            'trail_multi':     cfg['SL']['trail_multi'],
+            'timestamp':          datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
+            'symbol':             symbol,
+            'close':              round(close_v, 2),
+            'atr':                round(atr_v,    2),
+            'rsi_h1':             round(rsi_h1_v, 1),
+            'rsi_d1':             round(rsi_d1_v, 1),
+            'rsi_m5':             round(rsi_m5_cur, 1) if not np.isnan(rsi_m5_cur) else 0.0,
+            'rsi_m5_prev':        round(rsi_m5_prev, 1) if not np.isnan(rsi_m5_prev) else 0.0,
+            'm5_filter_ok':       m5_ok,
+            'sma20':              round(sma20,    2),
+            'sl_multi':           round(sl_multi,  2),
+            'action':             action,
+            'signal_type':        sig_type,
+            'signal_valid_until': valid_until_str,
+            'sl_price':           round(sl_price,  2),
+            'tp_price':           round(tp_price,  2),
+            'score':              score,
+            'strength':           strength,
+            'tp_hold_minutes':    tp_hold_minutes,
+            'skip_reason':        skip_reason,
+            'rsi_exit_thr':       cfg['SL']['rsi_exit_thr'],
+            'trail_multi':        cfg['SL']['trail_multi'],
             'max_slip_pt':     max_pt,
             'lot_size':        cfg['BRIDGE']['lot_size'],
         }
@@ -254,9 +296,12 @@ def run_bridge(cfg: dict, once: bool = False):
                       f"RSI_M5={data['rsi_m5']:.1f}({'↑' if data['m5_filter_ok'] else '↓/NG'})  "
                       f"ATR=${data['atr']:.2f}")
                 print(f"  action={data['action'].upper():4s}  "
+                      f"signal={data['signal_type']}  "
                       f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
                       f"score={data['score']}({data['strength']})  "
                       f"lot={data['lot_size']}")
+                if data['signal_valid_until']:
+                    print(f"  window_until={data['signal_valid_until']}")
                 if data['skip_reason']:
                     print(f"  skip: {data['skip_reason']}")
                 print(f"  残高={bal}  ポジション={pos}件  連続損失={consec_losses}回")
