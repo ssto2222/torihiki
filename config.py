@@ -82,10 +82,13 @@ LOCAL = dict(
 
 # ── MT5 EA ブリッジ ────────────────────────────────────────
 BRIDGE = dict(
-    signal_file = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json",
-    status_file ="C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
-    poll_sec    = 5,
-    lot_size    = 0.05,         # 1回の取引ロット数（推奨: 0.05〜0.10）（--lot で上書き可）
+    signal_file      = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json",
+    status_file      = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
+    poll_sec         = 5,
+    lot_size         = 0.05,         # フォールバックロット（残高取得失敗時）
+    risk_pct         = 0.01,         # 1トレードあたりリスク = 残高 × 1%
+    fallback_balance = 10000.0,      # MT5残高取得失敗時のデフォルト残高（$）
+    scalp_lot_multi  = 2.0,          # スキャルプモードのロット倍率
 )
 
 # ── スキャルプモード（--mode scalp で有効）────────────────────

@@ -66,6 +66,25 @@ _signal_sell_active: dict          = {        # 下落トレンドフォロー S
 }
 
 
+# ── ロットサイズ計算ユーティリティ ──────────────────────────────
+
+def _calc_lot(balance: float, risk_pct: float, sl_dist: float,
+              contract_size: float,
+              lot_min: float, lot_max: float, lot_step: float,
+              fallback: float) -> float:
+    """
+    残高ベースのロットサイズ計算。
+    risk_usd = balance × risk_pct をリスク許容額とし、
+    SL距離（価格）× コントラクトサイズ で割ってロットを求める。
+    """
+    if sl_dist <= 0 or contract_size <= 0:
+        return fallback
+    risk_usd = balance * risk_pct
+    lot = risk_usd / (sl_dist * contract_size)
+    lot = round(lot / lot_step) * lot_step
+    return max(lot_min, min(lot_max, lot))
+
+
 # ── リアルタイム指標・シグナル計算 ────────────────────────────
 
 def compute_signal(symbol: str, cfg: dict) -> dict | None:
@@ -325,6 +344,19 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         point = tick.point if tick else 0.01
         max_pt = max(1, int(atr_v * 0.5 / point))
 
+        # 残高ベースのロットサイズ計算
+        c_sz     = float(tick.trade_contract_size) if tick else 100.0
+        l_min    = float(tick.volume_min)          if tick else 0.01
+        l_max    = float(tick.volume_max)          if tick else 100.0
+        l_step   = float(tick.volume_step)         if tick else 0.01
+        account  = mt5.account_info()
+        balance  = (float(account.balance) if account
+                    else cfg['BRIDGE'].get('fallback_balance', 10000.0))
+        risk_pct = cfg['BRIDGE'].get('risk_pct', 0.01)
+        lot_size = _calc_lot(balance, risk_pct, atr_v * sl_multi,
+                             c_sz, l_min, l_max, l_step,
+                             cfg['BRIDGE']['lot_size'])
+
         return {
             'timestamp':          datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
             'symbol':             symbol,
@@ -382,7 +414,6 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         import MetaTrader5 as mt5
 
         scalp      = cfg.get('SCALP', {})
-        lot        = cfg['BRIDGE']['lot_size']
         jpy_rate   = scalp.get('jpy_per_usd',       150.0)
         target     = scalp.get('target_profit_jpy',  300)
         sl_ratio   = scalp.get('sl_ratio',           1.5)
@@ -412,6 +443,25 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         rsi_cur = float(df['RSI'].iloc[-1])
         close_v = float(df['Close'].iloc[-1])
         atr_v   = float(df['ATR'].iloc[-1])         # M5 ATR（スキャルプに適切な短期ボラ）
+
+        # シンボル情報・残高取得（ロット計算に必要なため早期に取得）
+        info          = mt5.symbol_info(symbol)
+        contract_size = float(info.trade_contract_size) if info else 1.0
+        l_min         = float(info.volume_min)          if info else 0.01
+        l_max         = float(info.volume_max)          if info else 100.0
+        l_step        = float(info.volume_step)         if info else 0.01
+        account       = mt5.account_info()
+        balance       = (float(account.balance) if account
+                         else cfg['BRIDGE'].get('fallback_balance', 10000.0))
+        risk_pct      = cfg['BRIDGE'].get('risk_pct',        0.01)
+        scalp_multi   = cfg['BRIDGE'].get('scalp_lot_multi', 2.0)
+
+        # 残高ベースのロット計算（スキャルプは scalp_lot_multi 倍）
+        sl_dist_est = atr_v * scalp.get('sl_ratio', 1.5)
+        lot_base    = _calc_lot(balance, risk_pct, sl_dist_est, contract_size,
+                                l_min, l_max, l_step, cfg['BRIDGE']['lot_size'])
+        lot         = max(l_min, min(l_max,
+                          round(lot_base * scalp_multi / l_step) * l_step))
 
         # ── 大変動検知: スキャルプ→通常モード自動切換え ──────────
         bm_lookback   = scalp.get('big_move_lookback',  12)
@@ -456,8 +506,6 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         # TP/SL 価格幅を逆算
         #   profit(JPY) = lot × contract_size × price_move × jpy_rate
         #   price_move  = target_jpy / (lot × contract_size × jpy_rate)
-        info          = mt5.symbol_info(symbol)
-        contract_size = float(info.trade_contract_size) if info else 1.0
         target_usd    = target / jpy_rate
         tp_move       = target_usd / (lot * contract_size)
         sl_move       = tp_move * sl_ratio
@@ -509,7 +557,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             sl_price = close_v + sl_move
             tp_price = close_v - tp_move
 
-        point  = info.point if info else 0.01
+        point  = float(info.point) if info else 0.01
         max_pt = max(1, int(tp_move * 0.5 / point))
 
         return {
@@ -653,6 +701,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"close=${data['close']:,.2f}  "
                           f"RSI_M5={data['rsi_m5']:.1f}  "
                           f"ATR=${data['atr']:.2f}  "
+                          f"残高=${bal}  "
+                          f"lot={data['lot_size']}({scalp_cfg.get('scalp_lot_multi',2.0)}x)  "
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}  "
