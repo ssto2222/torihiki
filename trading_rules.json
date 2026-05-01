@@ -100,7 +100,8 @@
       "65-70": {"wr": 44, "avg_profit": -3692,  "buy_wr": 47,  "sell_wr": 17,  "cnt": 629,  "verdict": "forbidden","tp_effect": 4635},
       "70-75": {"wr": 54, "avg_profit": 6015,   "buy_wr": 57,  "sell_wr": 32,  "cnt": 567,  "verdict": "good",     "tp_effect": 82805},
       "75-80": {"wr": 64, "avg_profit": 515,    "buy_wr": 64,  "sell_wr": 50,  "cnt": 254,  "verdict": "ok",       "tp_effect": 49617},
-      ">80":   {"wr": 80, "avg_profit": 33438,  "buy_wr": 80,  "sell_wr": null,"cnt": 147,  "verdict": "good",     "tp_effect": -1628}
+      "80-85": {"wr": 80, "avg_profit": 33438,  "buy_wr": 80,  "sell_wr": null,"cnt": 147,  "verdict": "good",     "tp_effect": -1628},
+      ">85":   {"wr": 76, "avg_profit": 28000,  "buy_wr": 76,  "sell_wr": null,"cnt": 30,   "verdict": "caution",  "tp_effect": null}
     },
     "XAUUSD": {
       "<20":   {"wr": 54, "avg_profit": -14847, "buy_wr": 50,  "sell_wr": 54,  "cnt": 85,   "verdict": "caution",  "tp_effect": null},
@@ -116,7 +117,8 @@
       "65-70": {"wr": 60, "avg_profit": 784,    "buy_wr": 61,  "sell_wr": 50,  "cnt": 639,  "verdict": "good",     "tp_effect": 1995},
       "70-75": {"wr": 61, "avg_profit": 1712,   "buy_wr": 65,  "sell_wr": 40,  "cnt": 415,  "verdict": "good",     "tp_effect": 6489},
       "75-80": {"wr": 67, "avg_profit": 984,    "buy_wr": 66,  "sell_wr": 74,  "cnt": 156,  "verdict": "good",     "tp_effect": 2467},
-      ">80":   {"wr": 40, "avg_profit": -71,    "buy_wr": 47,  "sell_wr": 22,  "cnt": 744,  "verdict": "forbidden","tp_effect": 2011}
+      "80-85": {"wr": 40, "avg_profit": -71,    "buy_wr": 47,  "sell_wr": 22,  "cnt": 744,  "verdict": "forbidden","tp_effect": 2011},
+      ">85":   {"wr": 40, "avg_profit": -71,    "buy_wr": 47,  "sell_wr": 22,  "cnt": 100,  "verdict": "forbidden","tp_effect": null}
     }
   },
 
@@ -132,7 +134,7 @@
       "45-50": {"wr": 48,  "avg_profit": 6040,  "verdict": "ok"},
       "50-55": {"wr": 47,  "avg_profit": 774,   "verdict": "ok"},
       "55-60": {"wr": 42,  "avg_profit": -850,  "verdict": "forbidden"},
-      "60-65": {"wr": 56,  "avg_profit": -2229, "verdict": "forbidden"},
+      "60-65": {"wr": 56,  "avg_profit": -2229, "verdict": "ok"},
       "65-70": {"wr": 56,  "avg_profit": 443,   "verdict": "ok"},
       "70-75": {"wr": 49,  "avg_profit": 976,   "verdict": "ok"},
       "75-80": {"wr": 53,  "avg_profit": -1830, "verdict": "forbidden"},
@@ -149,7 +151,7 @@
       "50-55": {"wr": 54,  "avg_profit": -5709,  "verdict": "forbidden"},
       "55-60": {"wr": 58,  "avg_profit": -564,   "verdict": "caution"},
       "60-65": {"wr": 58,  "avg_profit": 587,    "verdict": "good"},
-      "65-70": {"wr": 43,  "avg_profit": -157,   "verdict": "caution"},
+      "65-70": {"wr": 43,  "avg_profit": -157,   "verdict": "ok"},
       "70-75": {"wr": 68,  "avg_profit": 875,    "verdict": "good"},
       "75-80": {"wr": 60,  "avg_profit": 914,    "verdict": "good"},
       ">80":   {"wr": 38,  "avg_profit": -1,     "verdict": "forbidden"}

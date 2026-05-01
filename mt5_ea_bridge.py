@@ -100,8 +100,9 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         hour_utc = now.hour
         dow      = now.weekday()   # 0=Mon, 6=Sun
 
-        # RSI 閾値ベースの生シグナル（買いのみ、売り禁止）+ M5 タイミング確認
-        active_buy = rsi_h1_v < cfg['SIGNAL']['buy_rsi_thr'] and m5_ok
+        # RSI 閾値ベースの生シグナル（買いのみ、売り禁止）
+        # M5 フィルタはゲートではなくボーナス加点のみ
+        active_buy = rsi_h1_v < cfg['SIGNAL']['buy_rsi_thr']
 
         # RulesEngine でフィルタリング
         score           = 0
@@ -121,6 +122,10 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             score           = result.score
             strength        = result.strength or 'none'
             tp_hold_minutes = result.tp_hold_minutes or 0
+
+            # M5 ゾーン条件が揃っている場合はボーナス +10
+            if m5_ok:
+                score = min(100, score + 10)
 
             if result.signal != 'BUY':
                 active_buy  = False
@@ -218,7 +223,7 @@ def run_bridge(cfg: dict, once: bool = False):
     print(f"  連続損失上限 : {max_consec}回")
     print("=" * 60)
 
-    if not connect_mt5(symbol):
+    if not connect_mt5(symbol, cfg['MT5']):
         print("\n[エラー] MT5 接続失敗。ターミナルを起動して再実行してください。")
         return
 

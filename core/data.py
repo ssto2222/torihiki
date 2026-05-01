@@ -9,16 +9,24 @@ from secret import MT5_LOGIN_INFO
 
 # ── MT5 ───────────────────────────────────────────────────
 
-def connect_mt5(symbol: str) -> bool:
+def connect_mt5(symbol: str, mt5_cfg: dict | None = None) -> bool:
     try:
         import MetaTrader5 as mt5
-        if not mt5.initialize(
-            path=MT5_LOGIN_INFO["path"],
-            login=MT5_LOGIN_INFO["login"],
-            password=MT5_LOGIN_INFO["password"],
-            server=MT5_LOGIN_INFO["server"]
-        ):
-            print(f"[MT5] 初期化失敗: {mt5.last_error()}")
+        init_kwargs: dict = {}
+        if mt5_cfg:
+            login = mt5_cfg.get('login', 0)
+            pw    = mt5_cfg.get('password', '')
+            srv   = mt5_cfg.get('server', '')
+            if login:    init_kwargs['login']    = int(login)
+            if pw:       init_kwargs['password'] = str(pw)
+            if srv:      init_kwargs['server']   = str(srv)
+
+        if not mt5.initialize(**init_kwargs):
+            err = mt5.last_error()
+            print(f"[MT5] 初期化失敗: {err}")
+            if err[0] == -6:
+                print("  → MT5 ターミナルを起動してアカウントにログインするか")
+                print("  → config.py の MT5['login'] / MT5['password'] / MT5['server'] を設定してください")
             return False
         info = mt5.symbol_info(symbol)
         if info is None:
@@ -58,7 +66,7 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
 
 def load_mt5(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame] | tuple[None, None]:
     sym = cfg['MT5']['symbol']
-    if not connect_mt5(sym): return None, None
+    if not connect_mt5(sym, cfg['MT5']): return None, None
     try:
         import MetaTrader5 as mt5
         h1 = fetch_ohlcv(sym, 'H1', cfg['MT5']['h1_bars'])
