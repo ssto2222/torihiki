@@ -345,14 +345,16 @@ def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
 
         filtered = []
         for sig in signals:
-            st       = sig['signal_time']
-            hour_utc = st.hour
-            dow      = st.dayofweek
+            st         = sig['signal_time']
+            hour_utc   = st.hour
+            minute_utc = st.minute
+            dow        = st.dayofweek
             rsi_h1_v = float(df_h1['RSI'].iloc[sig['signal_bar']])
             rsi_d1_v = float(rsi_d1.iloc[sig['signal_bar']]) if rsi_d1 is not None and not np.isnan(rsi_d1.iloc[sig['signal_bar']]) else 50.0
             res = _rules_engine.evaluate(
                 symbol=symbol, rsi_h1=rsi_h1_v, rsi_d1=rsi_d1_v,
                 direction=direction, hour_utc=hour_utc, dow=dow,
+                minute_utc=minute_utc,
             )
             if res.signal in ('BUY', 'SELL') and res.score >= min_score:
                 filtered.append(sig)
