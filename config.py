@@ -97,7 +97,9 @@ SCALP = dict(
     rsi_buy_thrs      = [50.0, 55.0, 60.0],   # RSI 上抜け → BUY
     rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
     max_trades_day    = 20,      # 1日の最大エントリー回数
-    cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
+    cooldown_min      = 30,      # 前回エントリーからのクールダウン（分）
+    big_move_lookback = 12,      # 大変動判定: 過去 N 本（12本=60分）
+    big_move_atr_multi= 2.0,     # 大変動判定: 価格変動 > ATR × N で切換え
 )
 
 # ── 可視化 ────────────────────────────────────────────────

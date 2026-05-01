@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import connect_mt5, fetch_ohlcv
 from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicators
-from core.strategy   import check_m5_entry_filter, check_m5_surge
+from core.strategy   import check_m5_entry_filter, check_m5_surge, detect_big_move
 
 CFG = {k: getattr(C, k) for k in
        ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT','BRIDGE','SCALP']}
@@ -57,8 +57,9 @@ _rapid_fall_at:     datetime | None = None    # 直近 rapid_fall 発生時刻
 # ── スキャルプモード状態 ─────────────────────────────────────
 _scalp_prev_rsi: float | None    = None   # 前回足 RSI（クロス検出）
 _scalp_last_at:  datetime | None = None   # 直近エントリーシグナル時刻
-_scalp_count:    int              = 0      # 当日シグナル発火回数
-_scalp_date:     object           = None   # 日付リセット管理
+_scalp_count:       int              = 0      # 当日シグナル発火回数
+_scalp_date:        object           = None   # 日付リセット管理
+_scalp_last_action: str              = 'none' # 直近スキャルプエントリー方向（大変動継続判定用）
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -375,7 +376,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
       - 前回エントリーから cooldown_min 分以内はスキップ
       - 禁止時間帯（UTC 9/16/21h）はスキップ
     """
-    global _scalp_prev_rsi, _scalp_last_at, _scalp_count, _scalp_date
+    global _scalp_prev_rsi, _scalp_last_at, _scalp_count, _scalp_date, _scalp_last_action
 
     try:
         import MetaTrader5 as mt5
@@ -411,6 +412,30 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         rsi_cur = float(df['RSI'].iloc[-1])
         close_v = float(df['Close'].iloc[-1])
         atr_v   = float(df['ATR'].iloc[-1])         # M5 ATR（スキャルプに適切な短期ボラ）
+
+        # ── 大変動検知: スキャルプ→通常モード自動切換え ──────────
+        bm_lookback   = scalp.get('big_move_lookback',  12)
+        bm_atr_multi  = scalp.get('big_move_atr_multi', 2.0)
+        big_move      = detect_big_move(df, bm_lookback, bm_atr_multi)
+
+        if big_move != 'none':
+            # 通常モードのロジックで再計算
+            normal_data = compute_signal(symbol, cfg)
+            if normal_data is not None:
+                # ポジション方向と大変動方向が一致するならトレーリングを有効化
+                position_aligns = (
+                    (big_move == 'up'   and _scalp_last_action == 'buy') or
+                    (big_move == 'down' and _scalp_last_action == 'sell')
+                )
+                if position_aligns:
+                    normal_data['trail_multi'] = cfg['SL']['trail_multi']
+                normal_data['signal_type'] = f'big_move_{big_move}(was_scalp)'
+                normal_data['scalp_mode']  = False
+                print(f"[スキャルプ→通常] 大変動={big_move}  "
+                      f"last_pos={_scalp_last_action}  "
+                      f"trail={'ON' if position_aligns else 'scalp_trail=0'}")
+                return normal_data
+            # 通常モード計算失敗時はスキャルプ継続（フォールスルー）
 
         # TP/SL 価格幅を逆算
         #   profit(JPY) = lot × contract_size × price_move × jpy_rate
@@ -456,9 +481,10 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                 rem  = int((_scalp_last_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
                 skip = f'cooldown残{rem}分'
             else:
-                action         = new_cross
-                _scalp_count  += 1
-                _scalp_last_at = now
+                action              = new_cross
+                _scalp_last_action  = new_cross
+                _scalp_count       += 1
+                _scalp_last_at      = now
 
         if action == 'buy':
             sl_price = close_v - sl_move
@@ -605,7 +631,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                 write_signal(data, sig_path)
                 ts = datetime.now().strftime('%H:%M:%S')
 
-                if mode == 'scalp':
+                if mode == 'scalp' and data.get('scalp_mode', True):
                     # スキャルプ専用ログ
                     print(f"\n[{ts}] #{itr} [SCALP]  "
                           f"close=${data['close']:,.2f}  "
