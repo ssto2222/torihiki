@@ -78,8 +78,8 @@ def _calc_lot(balance: float, risk_pct: float, sl_dist: float,
     SL距離（価格）× コントラクトサイズ で割ってロットを求める。
     """
     if sl_dist <= 0 or contract_size <= 0:
-        return fallback
-    risk_usd = balance * risk_pct
+        return fallback/150
+    risk_usd = balance/150 * risk_pct
     lot = risk_usd / (sl_dist * contract_size)
     lot = round(lot / lot_step) * lot_step
     return max(lot_min, min(lot_max, lot))
@@ -701,7 +701,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"close=${data['close']:,.2f}  "
                           f"RSI_M5={data['rsi_m5']:.1f}  "
                           f"ATR=${data['atr']:.2f}  "
-                          f"残高=${bal}  "
+                          f"残高={bal}円  "
                           f"lot={data['lot_size']}({scalp_cfg.get('scalp_lot_multi',2.0)}x)  "
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
                     print(f"  action={data['action'].upper():4s}  "
