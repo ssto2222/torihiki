@@ -272,15 +272,16 @@ class RulesEngine:
             penalties += w["cross_caution_penalty"]
 
         # ── 方向フィルター ──
+        dir_min_wr = w.get("direction_filter_min_buy_wr", 30)
         if direction == "buy":
             bwr = h1z.buy_wr
-            if bwr is not None and bwr < 45:
+            if bwr is not None and bwr < dir_min_wr:
                 reasons.append(f"[DIR CAUTION] Buy WR {bwr}% in H1 {h1z.zone}")
                 penalties += w["direction_unfavorable_penalty"]
                 blocked["dir"] = True
         else:
             swr = h1z.sell_wr
-            if swr is not None and swr < 45:
+            if swr is not None and swr < dir_min_wr:
                 reasons.append(f"[DIR CAUTION] Sell WR {swr}% in H1 {h1z.zone}")
                 penalties += w["direction_unfavorable_penalty"]
                 blocked["dir"] = True

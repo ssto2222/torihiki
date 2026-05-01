@@ -10,17 +10,16 @@ warnings.filterwarnings('ignore')
 
 def detect_sma_rsi_signals(df: pd.DataFrame, p: dict, direction: str) -> list[dict]:
     """
-    H1 SMA20 + RSI シグナル検出（平均回帰）
+    H1 RSI シグナル検出
 
-    買い: RSI が buy_rsi_thr を下抜けて「売られすぎ」に突入
-          かつ Close が SMA20 を下抜けた後に SMA20 を回復（反発確認）
-          ※ SMA20 クロスのない場合は RSI 単独でも発火
+    買い（2種類）:
+      DIP:      RSI が buy_rsi_thr を下抜け（売られすぎ）
+      MOMENTUM: RSI が momentum_thrs の各値を上抜け（モメンタム）
+                XAU好適ゾーン 55-80・BTC好適ゾーン 60-85 へのエントリー
 
-    売り: RSI が sell_rsi_thr を上抜けて「買われすぎ」に突入
-          かつ Close が SMA20 を上抜けた後に SMA20 を下抜け（反落確認）
-          ※ SMA20 クロスのない場合は RSI 単独でも発火
+    売り: RSI が sell_rsi_thr を上抜け（禁止）
 
-    返り値: [{'signal_bar', 'signal_time', 'signal_price', 'atr'}, ...]
+    返り値: [{'signal_bar', 'signal_time', 'signal_price', 'atr', 'signal_type'}, ...]
     """
     rsi   = df['RSI'].values
     sma   = df['SMA20'].values
@@ -28,36 +27,48 @@ def detect_sma_rsi_signals(df: pd.DataFrame, p: dict, direction: str) -> list[di
     atr   = df['ATR'].values
     n     = len(df)
 
-    buy_th  = p.get('buy_rsi_thr',  38.0)
-    sell_th = p.get('sell_rsi_thr', 62.0)
+    buy_th       = p.get('buy_rsi_thr',   45.0)
+    sell_th      = p.get('sell_rsi_thr',  62.0)
+    mom_thrs     = sorted(p.get('momentum_thrs', [55.0, 60.0, 65.0, 70.0, 75.0]))
 
     results = []
     for i in range(1, n - 2):
         if np.isnan(sma[i]) or np.isnan(rsi[i]) or np.isnan(rsi[i-1]):
             continue
         if direction == 'buy':
-            # RSI が buy_rsi_thr を下抜け → 売られすぎ突入
             if rsi[i] < buy_th and rsi[i-1] >= buy_th:
                 results.append({
                     'signal_bar':   i,
                     'signal_time':  df.index[i],
                     'signal_price': float(close[i]),
                     'atr':          float(atr[i]) if not np.isnan(atr[i]) else 1.0,
+                    'signal_type':  'dip',
                 })
+            else:
+                for m_thr in mom_thrs:
+                    if rsi[i] > m_thr and rsi[i-1] <= m_thr:
+                        results.append({
+                            'signal_bar':   i,
+                            'signal_time':  df.index[i],
+                            'signal_price': float(close[i]),
+                            'atr':          float(atr[i]) if not np.isnan(atr[i]) else 1.0,
+                            'signal_type':  f'momentum_{int(m_thr)}',
+                        })
+                        break  # 1バーで複数閾値を同時超えしない
         else:
-            # RSI が sell_rsi_thr を上抜け → 買われすぎ突入
             if rsi[i] > sell_th and rsi[i-1] <= sell_th:
                 results.append({
                     'signal_bar':   i,
                     'signal_time':  df.index[i],
                     'signal_price': float(close[i]),
                     'atr':          float(atr[i]) if not np.isnan(atr[i]) else 1.0,
+                    'signal_type':  'sell',
                 })
 
-    # 重複除去（10本以内は最初だけ）
+    # 重複除去（5本以内は最初だけ）
     out, last = [], -99
     for r in sorted(results, key=lambda x: x['signal_bar']):
-        if r['signal_bar'] - last > 10:
+        if r['signal_bar'] - last > 5:
             out.append(r); last = r['signal_bar']
     return out
 
@@ -404,7 +415,7 @@ def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
         except Exception:
             continue
 
-        xp, xt, reason = None, None, 'timeout'
+        xp, xt, reason, slip_usd = None, None, 'timeout', 0.0
 
         for b in range(epos + 1, min(epos + hold_max, n_h1)):
             h_b  = high_h1[b]
