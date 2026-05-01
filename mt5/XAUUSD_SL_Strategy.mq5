@@ -160,6 +160,7 @@ void OpenSell(double sl, double tp)
 //+------------------------------------------------------------------+
 void UpdateTrailing(double atr, double trail_multi)
 {
+   if(trail_multi <= 0.0) return;   // スキャルプモード時はトレーリング無効
    double trail = atr * trail_multi;
 
    for(int i = PositionsTotal()-1; i >= 0; i--)

@@ -34,7 +34,7 @@ from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicat
 from core.strategy   import check_m5_entry_filter, check_m5_surge
 
 CFG = {k: getattr(C, k) for k in
-       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT','BRIDGE']}
+       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT','BRIDGE','SCALP']}
 
 # ── RulesEngine ロード（なければフィルタなし）────────────────
 try:
@@ -53,6 +53,12 @@ _signal_active: dict       = {             # 現在有効なシグナルウィ�
 }
 _prev_rsi_m1:       float | None    = None    # 前回ポーリング時の M1 RSI（反発クロス検出用）
 _rapid_fall_at:     datetime | None = None    # 直近 rapid_fall 発生時刻
+
+# ── スキャルプモード状態 ─────────────────────────────────────
+_scalp_prev_rsi: float | None    = None   # 前回足 RSI（クロス検出）
+_scalp_last_at:  datetime | None = None   # 直近エントリーシグナル時刻
+_scalp_count:    int              = 0      # 当日シグナル発火回数
+_scalp_date:     object           = None   # 日付リセット管理
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -356,6 +362,150 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         return None
 
 
+# ── スキャルプモード シグナル計算 ────────────────────────────
+
+def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
+    """
+    スキャルプモード: M5 RSI が rsi_cross_thr を上/下抜けたらエントリー。
+    TP/SL は円建て目標利益から価格幅を逆算。
+    トレーリング・TP延長は無効（trail_multi=0）。
+
+    制御:
+      - 日次 max_trades_day 回を超えたらスキップ
+      - 前回エントリーから cooldown_min 分以内はスキップ
+      - 禁止時間帯（UTC 9/16/21h）はスキップ
+    """
+    global _scalp_prev_rsi, _scalp_last_at, _scalp_count, _scalp_date
+
+    try:
+        import MetaTrader5 as mt5
+
+        scalp     = cfg.get('SCALP', {})
+        lot       = cfg['BRIDGE']['lot_size']
+        jpy_rate  = scalp.get('jpy_per_usd',       150.0)
+        target    = scalp.get('target_profit_jpy',  300)
+        sl_ratio  = scalp.get('sl_ratio',           1.5)
+        sig_tf    = scalp.get('signal_tf',          'M5')
+        cross_thr = scalp.get('rsi_cross_thr',      50.0)
+        max_day   = scalp.get('max_trades_day',     20)
+        cooldown  = scalp.get('cooldown_min',       30)
+
+        now   = datetime.now(timezone.utc)
+        today = now.date()
+
+        # 日付をまたいだらカウントリセット
+        if _scalp_date != today:
+            _scalp_count = 0
+            _scalp_date  = today
+
+        # データ取得
+        df_raw    = fetch_ohlcv(symbol, sig_tf, 30)
+        df_h1_raw = fetch_ohlcv(symbol, 'H1', 50)
+        if df_raw is None or df_h1_raw is None:
+            return None
+
+        df    = add_m5_indicators(df_raw, cfg)
+        df_h1 = add_h1_indicators(df_h1_raw, cfg)
+        if df.empty or df_h1.empty:
+            return None
+
+        rsi_cur = float(df['RSI'].iloc[-1])
+        close_v = float(df['Close'].iloc[-1])
+        atr_v   = float(df_h1['ATR'].iloc[-1])   # H1 ATR を基準値として使用
+
+        # TP/SL 価格幅を逆算
+        #   profit(JPY) = lot × contract_size × price_move × jpy_rate
+        #   price_move  = target_jpy / (lot × contract_size × jpy_rate)
+        info          = mt5.symbol_info(symbol)
+        contract_size = float(info.trade_contract_size) if info else 1.0
+        target_usd    = target / jpy_rate
+        tp_move       = target_usd / (lot * contract_size)
+        sl_move       = tp_move * sl_ratio
+
+        # M5 RSI クロス検出（中立線 cross_thr の上/下抜け）
+        new_cross = None
+        if _scalp_prev_rsi is not None:
+            if rsi_cur > cross_thr and _scalp_prev_rsi <= cross_thr:
+                new_cross = 'buy'
+            elif rsi_cur < cross_thr and _scalp_prev_rsi >= cross_thr:
+                new_cross = 'sell'
+        _scalp_prev_rsi = rsi_cur
+
+        action = 'none'
+        skip   = ''
+
+        if new_cross:
+            hour_utc = now.hour
+            eff_hour = (hour_utc + 1) % 24 if now.minute >= 45 else hour_utc
+
+            if eff_hour in {9, 16, 21}:
+                skip = f'forbidden_hour={eff_hour}'
+            elif _scalp_count >= max_day:
+                skip = f'daily_limit={_scalp_count}/{max_day}'
+            elif (_scalp_last_at is not None and
+                  now < _scalp_last_at + timedelta(minutes=cooldown)):
+                rem  = int((_scalp_last_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
+                skip = f'cooldown残{rem}分'
+            else:
+                action         = new_cross
+                _scalp_count  += 1
+                _scalp_last_at = now
+
+        if action == 'buy':
+            sl_price = close_v - sl_move
+            tp_price = close_v + tp_move
+        else:
+            sl_price = close_v + sl_move
+            tp_price = close_v - tp_move
+
+        point  = info.point if info else 0.01
+        max_pt = max(1, int(tp_move * 0.5 / point))
+
+        return {
+            'timestamp':          now.strftime('%Y.%m.%d %H:%M:%S'),
+            'symbol':             symbol,
+            'close':              round(close_v, 2),
+            'atr':                round(atr_v,   2),
+            'rsi_h1':             0.0,
+            'rsi_d1':             0.0,
+            'rsi_m5':             round(rsi_cur, 1),
+            'rsi_m5_prev':        0.0,
+            'm5_filter_ok':       False,
+            'm5_surge':           'none',
+            'rsi_m1':             0.0,
+            'scalp_type':         'none',
+            'sma20':              0.0,
+            'sl_multi':           round(sl_ratio, 2),
+            'action':             action,
+            'signal_type':        f'scalp_{action}' if action != 'none' else 'none',
+            'signal_valid_until': '',
+            'downtrend_ok':       False,
+            'sell_signal_type':   'none',
+            'sell_valid_until':   '',
+            'sell_skip_reason':   '',
+            'sl_price':           round(sl_price, 2),
+            'tp_price':           round(tp_price, 2),
+            'score':              100,        # スキャルプはスコアチェック不要
+            'strength':           'scalp',
+            'tp_hold_minutes':    5,
+            'skip_reason':        skip,
+            'rsi_exit_thr':       cfg['SL']['rsi_exit_thr'],
+            'trail_multi':        0.0,        # スキャルプはトレーリングなし
+            'max_slip_pt':        max_pt,
+            'lot_size':           lot,
+            # スキャルプ専用フィールド（EA は参照しないが記録用）
+            'scalp_mode':         True,
+            'target_profit_jpy':  target,
+            'tp_move_usd':        round(target_usd, 4),
+            'trades_today':       _scalp_count,
+            'cooldown_min':       cooldown,
+        }
+
+    except Exception as e:
+        print(f"[スキャルプ] 計算エラー: {e}")
+        return None
+
+
 # ── ファイル I/O ───────────────────────────────────────────
 
 def write_signal(data: dict, path: str):
@@ -390,7 +540,7 @@ def read_ea_state(path: str) -> dict:
 
 # ── ポーリングループ ─────────────────────────────────────────
 
-def run_bridge(cfg: dict, once: bool = False):
+def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
     symbol     = cfg['MT5']['symbol']
     sig_path   = cfg['BRIDGE']['signal_file']
     state_path = cfg['BRIDGE']['status_file']
@@ -398,16 +548,22 @@ def run_bridge(cfg: dict, once: bool = False):
     lot_size   = cfg['BRIDGE']['lot_size']
     max_consec = cfg.get('RULES', {}).get('max_consecutive_losses', 3)
     min_score  = cfg.get('RULES', {}).get('min_score', 30)
+    scalp_cfg  = cfg.get('SCALP', {})
 
     Path(sig_path).parent.mkdir(parents=True, exist_ok=True)
 
     print("=" * 60)
-    print(f"  MT5 EA ブリッジ  [{symbol}]")
+    print(f"  MT5 EA ブリッジ  [{symbol}]  モード: {mode.upper()}")
     print(f"  signal.json  → {sig_path}")
     print(f"  ea_state.json← {state_path}")
     print(f"  ポーリング   : {poll_sec}秒  （Ctrl+C で終了）")
-    print(f"  ロット数     : {lot_size}  最小スコア: {min_score}")
-    print(f"  連続損失上限 : {max_consec}回")
+    if mode == 'scalp':
+        print(f"  目標利益     : {scalp_cfg.get('target_profit_jpy', 300)}円"
+              f"  クールダウン : {scalp_cfg.get('cooldown_min', 30)}分"
+              f"  日次上限     : {scalp_cfg.get('max_trades_day', 20)}回")
+    else:
+        print(f"  ロット数     : {lot_size}  最小スコア: {min_score}")
+        print(f"  連続損失上限 : {max_consec}回")
     print("=" * 60)
 
     if not connect_mt5(symbol, cfg['MT5']):
@@ -419,7 +575,11 @@ def run_bridge(cfg: dict, once: bool = False):
         while True:
             itr += 1
             t_s  = time.time()
-            data = compute_signal(symbol, cfg)
+
+            if mode == 'scalp':
+                data = compute_scalp_signal(symbol, cfg)
+            else:
+                data = compute_signal(symbol, cfg)
 
             if data:
                 # 連続損失チェック（EA state から読む）
@@ -433,29 +593,45 @@ def run_bridge(cfg: dict, once: bool = False):
                     data['skip_reason'] = f'consecutive_losses={consec_losses}>={max_consec}'
 
                 write_signal(data, sig_path)
-                ts         = datetime.now().strftime('%H:%M:%S')
-                surge_tag  = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
-                scalp_tag  = f"[SCALP:{data['scalp_type']}]" if data['scalp_type'] != 'none' else ''
-                trend_tag  = '[SELL↓]' if data['downtrend_ok'] else ''
-                print(f"\n[{ts}] #{itr}  "
-                      f"close=${data['close']:,.2f}  "
-                      f"RSI_H1={data['rsi_h1']:.1f}  RSI_D1={data['rsi_d1']:.1f}{trend_tag}  "
-                      f"RSI_M5={data['rsi_m5']:.1f}({'↑' if data['m5_filter_ok'] else '↓/NG'})  "
-                      f"RSI_M1={data['rsi_m1']:.1f}{surge_tag}  "
-                      f"ATR=${data['atr']:.2f}")
-                print(f"  action={data['action'].upper():4s}  "
-                      f"signal={data['signal_type']}{scalp_tag}  "
-                      f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
-                      f"score={data['score']}({data['strength']})  "
-                      f"lot={data['lot_size']}")
-                if data['signal_valid_until']:
-                    print(f"  buy_window_until={data['signal_valid_until']}")
-                if data['sell_signal_type'] != 'none':
-                    print(f"  sell_signal={data['sell_signal_type']}  "
-                          f"sell_window_until={data['sell_valid_until']}")
+                ts = datetime.now().strftime('%H:%M:%S')
+
+                if mode == 'scalp':
+                    # スキャルプ専用ログ
+                    print(f"\n[{ts}] #{itr} [SCALP]  "
+                          f"close=${data['close']:,.2f}  "
+                          f"RSI_M5={data['rsi_m5']:.1f}  "
+                          f"ATR=${data['atr']:.2f}  "
+                          f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
+                    print(f"  action={data['action'].upper():4s}  "
+                          f"signal={data['signal_type']}  "
+                          f"TP=+${data.get('tp_move_usd',0):.2f}"
+                          f"(¥{scalp_cfg.get('target_profit_jpy',300)})  "
+                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}")
+                else:
+                    # 通常モードログ
+                    surge_tag = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
+                    scalp_tag = f"[SCALP:{data['scalp_type']}]" if data['scalp_type'] != 'none' else ''
+                    trend_tag = '[SELL↓]' if data['downtrend_ok'] else ''
+                    print(f"\n[{ts}] #{itr}  "
+                          f"close=${data['close']:,.2f}  "
+                          f"RSI_H1={data['rsi_h1']:.1f}  RSI_D1={data['rsi_d1']:.1f}{trend_tag}  "
+                          f"RSI_M5={data['rsi_m5']:.1f}({'↑' if data['m5_filter_ok'] else '↓/NG'})  "
+                          f"RSI_M1={data['rsi_m1']:.1f}{surge_tag}  "
+                          f"ATR=${data['atr']:.2f}")
+                    print(f"  action={data['action'].upper():4s}  "
+                          f"signal={data['signal_type']}{scalp_tag}  "
+                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
+                          f"score={data['score']}({data['strength']})  "
+                          f"lot={data['lot_size']}")
+                    if data['signal_valid_until']:
+                        print(f"  buy_window_until={data['signal_valid_until']}")
+                    if data['sell_signal_type'] != 'none':
+                        print(f"  sell_signal={data['sell_signal_type']}  "
+                              f"sell_window_until={data['sell_valid_until']}")
+
                 if data['skip_reason']:
                     print(f"  skip: {data['skip_reason']}")
-                if data['sell_skip_reason']:
+                if data.get('sell_skip_reason'):
                     print(f"  sell_skip: {data['sell_skip_reason']}")
                 print(f"  残高={bal}  ポジション={pos}件  連続損失={consec_losses}回")
             else:
@@ -480,12 +656,22 @@ if __name__ == '__main__':
     ap.add_argument('--output', default='./output')
     ap.add_argument('--lot',    type=float, default=None,
                     help=f'1回の取引ロット数（省略時: {C.BRIDGE["lot_size"]}）')
+    ap.add_argument('--mode',   choices=['normal', 'scalp'], default='normal',
+                    help='normal: H1クロス戦略（デフォルト）/ scalp: M5 RSI50クロス, 円建てTP')
+    ap.add_argument('--target', type=int, default=None,
+                    help='スキャルプモード目標利益（円）（省略時: config.py の値）')
+    ap.add_argument('--jpy',    type=float, default=None,
+                    help='スキャルプモード JPY/USD レート（省略時: config.py の値）')
     args = ap.parse_args()
 
     CFG['MT5']['symbol']          = args.symbol
     CFG['BRIDGE']['signal_file']  = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json"
     CFG['BRIDGE']['status_file']  = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json"
-    if args.lot is not None:
-        CFG['BRIDGE']['lot_size'] = args.lot
+    if args.lot    is not None:
+        CFG['BRIDGE']['lot_size']          = args.lot
+    if args.target is not None:
+        CFG['SCALP']['target_profit_jpy']  = args.target
+    if args.jpy    is not None:
+        CFG['SCALP']['jpy_per_usd']        = args.jpy
 
-    run_bridge(CFG, once=args.once)
+    run_bridge(CFG, once=args.once, mode=args.mode)

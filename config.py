@@ -88,6 +88,17 @@ BRIDGE = dict(
     lot_size    = 0.03,         # 1回の取引ロット数（推奨: 0.05〜0.10）（--lot で上書き可）
 )
 
+# ── スキャルプモード（--mode scalp で有効）────────────────────
+SCALP = dict(
+    jpy_per_usd       = 150.0,   # JPY/USD レート（定期的に手動更新）
+    target_profit_jpy = 300,     # 1トレードあたり目標利益（円）
+    sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio
+    signal_tf         = 'M5',    # シグナル生成足（'M5' 推奨）
+    rsi_cross_thr     = 50.0,    # RSI クロス閾値（上抜け=BUY, 下抜け=SELL）
+    max_trades_day    = 20,      # 1日の最大エントリー回数
+    cooldown_min      = 30,      # 前回エントリーからのクールダウン（分）
+)
+
 # ── 可視化 ────────────────────────────────────────────────
 PLOT = dict(
     font_family = ['MS Gothic', 'Noto Sans JP', 'DejaVu Sans'],
