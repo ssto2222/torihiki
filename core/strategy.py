@@ -103,13 +103,12 @@ def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
                   rsi_d1: float = 50.0,
                   symbol: str = 'BTCUSD') -> dict | None:
     """
-    H1 シグナル発火後、M5 RSI フィルタを最初に通過したバーをエントリーに使う。
-    方向は 'buy' のみ（sell は rules で禁止）。
+    H1 シグナル発火後、最初に RSI が上昇している M5 バーをエントリーに使う。
+    M5 RSI ゾーン条件は m5_bonus フラグとして記録（ゲートではなくボーナス）。
     """
     exe    = cfg.get('EXECUTION', {})
     sl_cfg = cfg.get('SL', {})
-    # signal_valid_m1 は M1 本数基準 → M5 換算（÷5）
-    valid  = max(cfg.get('EXECUTION', {}).get('signal_valid_m1', 240) // 5, 12)
+    valid  = max(exe.get('signal_valid_m1', 240) // 5, 12)
     spread = sl_cfg.get('spread_usd', 0.30)
 
     slc = df_m5[df_m5.index >= signal_time].head(valid)
@@ -123,13 +122,14 @@ def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
     for i in range(1, len(close)):
         if np.isnan(rsi[i]) or np.isnan(rsi[i - 1]):
             continue
-        if direction == 'buy' and check_m5_entry_filter(rsi[i], rsi[i - 1], rsi_d1, symbol):
+        if direction == 'buy' and rsi[i] > rsi[i - 1]:  # rising のみ（ゾーン制限なし）
             ep = float(close[i]) + spread
             return {
                 'entry_time':      idx[i],
                 'entry_price':     ep,
                 'sma_at_entry':    float(close[i]),
                 'rsi_at_entry':    float(rsi[i]),
+                'm5_bonus':        check_m5_entry_filter(rsi[i], rsi[i-1], rsi_d1, symbol),
             }
     return None
 
