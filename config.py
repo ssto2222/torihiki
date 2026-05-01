@@ -5,7 +5,7 @@ config.py — 全設定の一元管理
 
 # ── MT5 接続 ──────────────────────────────────────────────
 MT5 = dict(
-    symbol    = "XAUUSD",       # GOLD / XAUUSDm など要確認
+    symbol    = "BTCUSD",       # GOLD / XAUUSDm など要確認
     h1_bars   = 5000,
     m5_bars   = 20_000,         # M5 5分足本数（約70日分）
     m1_bars   = 100_000,
@@ -76,7 +76,7 @@ BRIDGE = dict(
     signal_file = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json",
     status_file ="C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
     poll_sec    = 5,
-    lot_size    = 0.05,         # 1回の取引ロット数（推奨: 0.05〜0.10）（--lot で上書き可）
+    lot_size    = 0.03,         # 1回の取引ロット数（推奨: 0.05〜0.10）（--lot で上書き可）
 )
 
 # ── 可視化 ────────────────────────────────────────────────

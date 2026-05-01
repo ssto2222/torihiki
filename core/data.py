@@ -4,6 +4,7 @@ import warnings
 import numpy as np
 import pandas as pd
 warnings.filterwarnings('ignore')
+from secret import MT5_LOGIN_INFO
 
 
 # ── MT5 ───────────────────────────────────────────────────
@@ -11,7 +12,12 @@ warnings.filterwarnings('ignore')
 def connect_mt5(symbol: str) -> bool:
     try:
         import MetaTrader5 as mt5
-        if not mt5.initialize():
+        if not mt5.initialize(
+            path=MT5_LOGIN_INFO["path"],
+            login=MT5_LOGIN_INFO["login"],
+            password=MT5_LOGIN_INFO["password"],
+            server=MT5_LOGIN_INFO["server"]
+        ):
             print(f"[MT5] 初期化失敗: {mt5.last_error()}")
             return False
         info = mt5.symbol_info(symbol)

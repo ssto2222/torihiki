@@ -26,6 +26,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 import numpy as np
 
+
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import connect_mt5, fetch_ohlcv
