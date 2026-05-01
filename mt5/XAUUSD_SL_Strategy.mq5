@@ -131,8 +131,10 @@ void OpenBuy(double sl, double tp)
       Print("[EA] Buy スキップ: SL(", sl, ") >= Ask(", ask, ")");
       return;
    }
-   if(!g_trade.Buy(g_lot_size, _Symbol, ask, sl, tp, "SL_BUY"))
-      Print("[EA] Buy 失敗: ", g_trade.ResultRetcode());
+   // price=0: 市場価格で即時執行（REQUOTE 回避）
+   if(!g_trade.Buy(g_lot_size, _Symbol, 0, sl, tp, "SL_BUY"))
+      Print("[EA] Buy 失敗: code=", g_trade.ResultRetcode(),
+            " msg=", g_trade.ResultComment());
    else
       Print("[EA] Buy 執行  lot=", g_lot_size,
             " ask=", ask, " SL=", sl, " TP=", tp);
@@ -140,14 +142,19 @@ void OpenBuy(double sl, double tp)
 
 void OpenSell(double sl, double tp)
 {
+   // SELL の SL バリデーション: SL は Ask より上である必要がある
+   // （SELL はBID約定だが、SL は Ask で判定されるため）
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   if(sl <= bid)
+   if(sl <= ask)
    {
-      Print("[EA] Sell スキップ: SL(", sl, ") <= Bid(", bid, ")");
+      Print("[EA] Sell スキップ: SL(", sl, ") <= Ask(", ask, ")");
       return;
    }
-   if(!g_trade.Sell(g_lot_size, _Symbol, bid, sl, tp, "SL_SELL"))
-      Print("[EA] Sell 失敗: ", g_trade.ResultRetcode());
+   // price=0: 市場価格で即時執行（REQUOTE 回避）
+   if(!g_trade.Sell(g_lot_size, _Symbol, 0, sl, tp, "SL_SELL"))
+      Print("[EA] Sell 失敗: code=", g_trade.ResultRetcode(),
+            " msg=", g_trade.ResultComment());
    else
       Print("[EA] Sell 執行  lot=", g_lot_size,
             " bid=", bid, " SL=", sl, " TP=", tp);
