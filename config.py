@@ -94,7 +94,8 @@ SCALP = dict(
     target_profit_jpy = 300,     # 1トレードあたり目標利益（円）
     sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio
     signal_tf         = 'M5',    # シグナル生成足（'M5' 推奨）
-    rsi_cross_thr     = 50.0,    # RSI クロス閾値（上抜け=BUY, 下抜け=SELL）
+    rsi_buy_thrs      = [50.0, 55.0, 60.0],   # RSI 上抜け → BUY
+    rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
     max_trades_day    = 20,      # 1日の最大エントリー回数
     cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
 )

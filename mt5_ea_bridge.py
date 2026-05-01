@@ -380,15 +380,16 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
     try:
         import MetaTrader5 as mt5
 
-        scalp     = cfg.get('SCALP', {})
-        lot       = cfg['BRIDGE']['lot_size']
-        jpy_rate  = scalp.get('jpy_per_usd',       150.0)
-        target    = scalp.get('target_profit_jpy',  300)
-        sl_ratio  = scalp.get('sl_ratio',           1.5)
-        sig_tf    = scalp.get('signal_tf',          'M5')
-        cross_thr = scalp.get('rsi_cross_thr',      50.0)
-        max_day   = scalp.get('max_trades_day',     20)
-        cooldown  = scalp.get('cooldown_min',       30)
+        scalp      = cfg.get('SCALP', {})
+        lot        = cfg['BRIDGE']['lot_size']
+        jpy_rate   = scalp.get('jpy_per_usd',       150.0)
+        target     = scalp.get('target_profit_jpy',  300)
+        sl_ratio   = scalp.get('sl_ratio',           1.5)
+        sig_tf     = scalp.get('signal_tf',          'M5')
+        buy_thrs   = sorted(scalp.get('rsi_buy_thrs',  [50.0, 55.0, 60.0]))         # 小→大
+        sell_thrs  = sorted(scalp.get('rsi_sell_thrs', [45.0, 40.0, 35.0]), reverse=True)  # 大→小
+        max_day    = scalp.get('max_trades_day',     20)
+        cooldown   = scalp.get('cooldown_min',       30)
 
         now   = datetime.now(timezone.utc)
         today = now.date()
@@ -420,13 +421,23 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         tp_move       = target_usd / (lot * contract_size)
         sl_move       = tp_move * sl_ratio
 
-        # M5 RSI クロス検出（中立線 cross_thr の上/下抜け）
-        new_cross = None
+        # M5 RSI クロス検出（複数閾値）
+        # BUY : 50 / 55 / 60 のいずれかを上抜け
+        # SELL: 45 / 40 / 35 のいずれかを下抜け
+        new_cross     = None
+        crossed_level = 0.0
         if _scalp_prev_rsi is not None:
-            if rsi_cur > cross_thr and _scalp_prev_rsi <= cross_thr:
-                new_cross = 'buy'
-            elif rsi_cur < cross_thr and _scalp_prev_rsi >= cross_thr:
-                new_cross = 'sell'
+            for thr in buy_thrs:
+                if rsi_cur > thr and _scalp_prev_rsi <= thr:
+                    new_cross     = 'buy'
+                    crossed_level = thr
+                    break
+            if new_cross is None:
+                for thr in sell_thrs:
+                    if rsi_cur < thr and _scalp_prev_rsi >= thr:
+                        new_cross     = 'sell'
+                        crossed_level = thr
+                        break
         _scalp_prev_rsi = rsi_cur
 
         action = 'none'
@@ -475,7 +486,8 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'sma20':              0.0,
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
-            'signal_type':        f'scalp_{action}' if action != 'none' else 'none',
+            'signal_type':        (f'scalp_{action}_{int(crossed_level)}'
+                                   if action != 'none' else 'none'),
             'signal_valid_until': '',
             'downtrend_ok':       False,
             'sell_signal_type':   'none',
