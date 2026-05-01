@@ -1,5 +1,6 @@
-__pycache__/
+./__pycache__/
 *.pyc
 *.pyo
 *.pyd
+config.cpython-314.pyc
 secret.py
