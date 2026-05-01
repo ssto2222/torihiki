@@ -34,7 +34,7 @@ INDICATOR = dict(
 
 # ── H1 シグナル検出（SMA20 + RSI）────────────────────────────
 SIGNAL = dict(
-    buy_rsi_thr        = 40.0,    # RSI がこの値を下抜け → ディップ買い
+    buy_rsi_thr        = 30.0,    # RSI がこの値を下抜け → ディップ買い  ★最適化済み(旧40)
     sell_rsi_thr       = 62.0,    # (旧: 上抜け売り禁止) 現在未使用
     momentum_thrs      = [55.0, 60.0, 65.0, 70.0, 75.0],  # RSI 上抜け → モメンタム買い
     momentum_sell_thrs = [55.0, 50.0, 45.0, 40.0, 35.0],  # RSI 下抜け → 下落トレンド売り
@@ -51,11 +51,11 @@ EXECUTION = dict(
 # ── SL & イグジット ────────────────────────────────────────
 SL = dict(
     spread_usd   = 0.30,
-    sl_multi     = 1.5,         # SL = Entry ± ATR × sl_multi
+    sl_multi     = 1.0,         # SL = Entry ± ATR × sl_multi        ★最適化済み(旧1.5)
     tp_atr_multi = 3.0,         # TP  = Entry ± ATR × tp_atr_multi
     hold_max_h1  = 48,
-    rsi_exit_thr = 75,          # RSI≥75 でトレーリング起動
-    trail_multi  = 1.5,         # トレーリング幅 = ATR × trail_multi
+    rsi_exit_thr = 65,          # RSI≥65 でトレーリング起動           ★最適化済み(旧75)
+    trail_multi  = 2.5,         # トレーリング幅 = ATR × trail_multi  ★最適化済み(旧1.5)
 )
 
 # ── トレードルール（trading_rules.json から導出）────────────────
