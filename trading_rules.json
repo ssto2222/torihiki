@@ -242,7 +242,7 @@
     "direction_unfavorable_penalty": 1,
     "hour_forbidden_penalty": 2,
     "hour_caution_penalty": 0,
-    "dow_forbidden_penalty": 2,
+    "dow_forbidden_penalty": 0,
     "dow_caution_penalty": 0,
     "score_base": 30,
     "score_bonus_per_point": 20,
