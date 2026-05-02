@@ -90,7 +90,7 @@ BRIDGE = dict(
     lot_size         = 0.05,         # フォールバックロット（残高取得失敗時）
     risk_pct         = 0.03,         # 1トレードあたりリスク = 残高 × 3%  ★Quarter-Kelly(7.1%)の保守側上限
     fallback_balance = 15_000,    # MT5残高取得失敗時のデフォルト残高（円）
-    scalp_lot_multi  = 2.0,          # スキャルプモードのロット倍率
+    scalp_lot_multi  = 1.0,          # スキャルプモードのロット倍率
 )
 
 # ── スキャルプモード（--mode scalp で有効）────────────────────
