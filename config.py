@@ -105,7 +105,7 @@ SCALP = dict(
     max_trades_day    = 20,      # 1日の最大エントリー回数
     cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
     big_move_lookback = 12,      # 大変動判定: 過去 N 本（12本=60分）
-    big_move_atr_multi= 2.0,     # 大変動判定: 価格変動 > ATR × N で切換え
+    big_move_atr_multi= 5.0,     # 大変動判定: 価格変動 > ATR × N で切換え
 )
 
 # ── レジーム判定・分散エントリー ──────────────────────────────────
@@ -131,7 +131,7 @@ TIME_BIAS = dict(
     danger_avg_pnl       = 0.0,     # avg_pnl がこの値以下 → 危険（OR条件）
     min_trades_per_hour  = 5,       # サンプル不足の時間帯は判定スキップ
     skip_before_min      = 30,      # 危険時間帯の N 分前からスキップ開始
-    skip_after_min       = 15,      # 危険時間帯終了後 N 分までスキップ継続
+    skip_after_min       = 0,      # 危険時間帯終了後 N 分までスキップ継続
     rebias_interval_hours = 24,     # この間隔（時間）で自動再分析。0 = 起動時1回のみ
     bias_file             = "./output/time_bias.json",
 )
