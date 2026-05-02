@@ -105,7 +105,7 @@ SCALP = dict(
     max_trades_day    = 20,      # 1日の最大エントリー回数
     cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
     big_move_lookback = 12,      # 大変動判定: 過去 N 本（12本=60分）
-    big_move_atr_multi= 2.0,     # 大変動判定: 価格変動 > ATR × N で切換え
+    big_move_atr_multi= 5.0,     # 大変動判定: 価格変動 > ATR × N で切換え
 )
 
 # ── レジーム判定・分散エントリー ──────────────────────────────────
