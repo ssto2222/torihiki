@@ -730,7 +730,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"RSI_M5={data['rsi_m5']:.1f}  "
                           f"ATR=${data['atr']:.2f}  "
                           f"残高=¥{bal}  "
-                          f"lot={data['lot_size']}({scalp_cfg.get('scalp_lot_multi',2.0)}x)  "
+                          f"lot={data['lot_size']}({scalp_cfg.get('scalp_lot_multi',5.0)}x)  "
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}  "
