@@ -111,6 +111,25 @@ def _calc_lot(balance: float, risk_pct: float, sl_dist: float,
     return max(lot_min, min(lot_max, lot))
 
 
+def _position_status(risk_pct: float, total_risk_pct: float) -> dict:
+    """
+    全ポジション（手動エントリー含む）をカウントし、最大許容数と空きスロット数を返す。
+    max_positions = floor(total_risk_pct / risk_pct)  例: 0.20/0.01 = 20
+    """
+    max_positions = max(1, int(total_risk_pct / risk_pct))
+    try:
+        import MetaTrader5 as mt5
+        positions = mt5.positions_get()
+        total = len(positions) if positions is not None else 0
+    except Exception:
+        total = 0
+    return {
+        'max_positions':   max_positions,
+        'total_positions': total,
+        'available_slots': max(0, max_positions - total),
+    }
+
+
 # ── リアルタイム指標・シグナル計算 ────────────────────────────
 
 def compute_signal(symbol: str, cfg: dict) -> dict | None:
@@ -385,6 +404,14 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                              c_sz, l_min, l_max, l_step,
                              cfg['BRIDGE']['lot_size'])
 
+        # ── ポジション数チェック（手動エントリー含む全ポジション）──
+        total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
+        pos_st = _position_status(risk_pct, total_risk_pct)
+        if pos_st['available_slots'] <= 0 and action in ('buy', 'sell'):
+            action      = 'none'
+            skip_reason = (f"max_positions={pos_st['max_positions']}に到達"
+                           f"（全{pos_st['total_positions']}本）")
+
         return {
             'timestamp':          datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
             'symbol':             symbol,
@@ -415,8 +442,11 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             'skip_reason':           skip_reason,
             'rsi_exit_thr':       cfg['SL']['rsi_exit_thr'],
             'trail_multi':        cfg['SL']['trail_multi'],
-            'max_slip_pt':     max_pt,
-            'lot_size':        cfg['BRIDGE']['lot_size'],
+            'max_slip_pt':        max_pt,
+            'lot_size':           lot_size,
+            'max_positions':      pos_st['max_positions'],
+            'total_positions':    pos_st['total_positions'],
+            'available_slots':    pos_st['available_slots'],
         }
     except Exception as e:
         print(f"[ブリッジ] 計算エラー: {e}")
@@ -559,6 +589,11 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         action = 'none'
         skip   = ''
 
+        # ── ポジション数チェック（手動エントリー含む全ポジション）──
+        risk_pct       = cfg['BRIDGE'].get('risk_pct', 0.01)
+        total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
+        pos_st         = _position_status(risk_pct, total_risk_pct)
+
         if new_cross:
             hour_utc = now.hour
             eff_hour = (hour_utc + 1) % 24 if now.minute >= 45 else hour_utc
@@ -571,6 +606,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                   now < _scalp_last_at + timedelta(minutes=cooldown)):
                 rem  = int((_scalp_last_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
                 skip = f'cooldown残{rem}分'
+            elif pos_st['available_slots'] <= 0:
+                skip = (f"max_positions={pos_st['max_positions']}に到達"
+                        f"（全{pos_st['total_positions']}本）")
             else:
                 action              = new_cross
                 _scalp_last_action  = new_cross
@@ -624,9 +662,12 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'scalp_mode':         True,
             'target_profit_jpy':  target,
             'tp_move_usd':        round(target_usd, 4),
-            'trades_today':          _scalp_count,
-            'cooldown_min':          cooldown,
-            'scalp_cooldown_rem':    0,
+            'trades_today':       _scalp_count,
+            'cooldown_min':       cooldown,
+            'scalp_cooldown_rem': 0,
+            'max_positions':      pos_st['max_positions'],
+            'total_positions':    pos_st['total_positions'],
+            'available_slots':    pos_st['available_slots'],
         }
 
     except Exception as e:
@@ -765,7 +806,10 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                     print(f"  skip: {data['skip_reason']}")
                 if data.get('sell_skip_reason'):
                     print(f"  sell_skip: {data['sell_skip_reason']}")
-                print(f"  残高=¥{bal}  ポジション={pos}件  連続損失={consec_losses}回")
+                max_p  = data.get('max_positions',   20)
+                total_p = data.get('total_positions', pos)
+                avail  = data.get('available_slots',  max_p - pos)
+                print(f"  残高=¥{bal}  ポジション={total_p}/{max_p}件(空き{avail})  連続損失={consec_losses}回")
             else:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}  データ取得失敗")
 

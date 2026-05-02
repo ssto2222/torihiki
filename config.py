@@ -65,6 +65,7 @@ RULES = dict(
     cooldown_large_loss_min  = 1440,  # 大損失後のクールダウン（分）= 翌日まで
     large_loss_threshold_usd = -10000,
     min_hold_minutes         = 15,
+    total_risk_pct           = 0.20,  # 全体許容損失（残高比）; max_positions = total/risk_pct = 20
 )
 
 # ── 最適化 ────────────────────────────────────────────────

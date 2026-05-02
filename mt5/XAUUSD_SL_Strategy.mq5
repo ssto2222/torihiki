@@ -63,11 +63,11 @@ void OnTimer()
 {
    string action, sig_ts, strength;
    double sl_price, tp_price, atr_v, sl_multi, rsi_exit, trail_m, lot_sig;
-   int    max_slip, score, tp_hold_min;
+   int    max_slip, score, tp_hold_min, max_pos;
 
    if(!ReadSignal(action, sl_price, tp_price, atr_v, sl_multi,
                   max_slip, rsi_exit, trail_m, lot_sig, score, strength,
-                  tp_hold_min, sig_ts))
+                  tp_hold_min, sig_ts, max_pos))
    {
       if(InpDebugLog) Print("[EA] signal.json 読み込み失敗");
       return;
@@ -110,12 +110,14 @@ void OnTimer()
       return;
    }
 
-   // 新規エントリー（ポジションなし時のみ）
-   if(CountPos() == 0)
+   // 新規エントリー（全ポジション数が max_positions 未満の時のみ）
+   if(CountAllPos() < max_pos)
    {
       if(action == "buy")  OpenBuy(sl_price,  tp_price);
       if(action == "sell") OpenSell(sl_price, tp_price);
    }
+   else if(InpDebugLog && (action == "buy" || action == "sell"))
+      Print("[EA] エントリースキップ: 全ポジション=", CountAllPos(), " >= max_positions=", max_pos);
 
    WriteState(consec);
 }
@@ -267,6 +269,12 @@ int CountPos()
    return cnt;
 }
 
+// 手動エントリー含む全ポジション数（max_positions チェック用）
+int CountAllPos()
+{
+   return PositionsTotal();
+}
+
 // 直近クローズ済みトレードから連続損失回数を取得
 int GetConsecLosses()
 {
@@ -295,7 +303,7 @@ bool ReadSignal(string &action, double &sl, double &tp,
                 double &atr, double &sl_multi,
                 int &max_slip, double &rsi_exit, double &trail_m,
                 double &lot_size, int &score, string &strength,
-                int &tp_hold_min, string &ts)
+                int &tp_hold_min, string &ts, int &max_pos)
 {
    int fh = FileOpen(InpSignalFile, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(fh == INVALID_HANDLE) return false;
@@ -317,6 +325,8 @@ bool ReadSignal(string &action, double &sl, double &tp,
    strength    = JStr(raw, "strength");
    tp_hold_min = (int)JDbl(raw, "tp_hold_minutes");
    ts          = JStr(raw, "timestamp");
+   max_pos     = (int)JDbl(raw, "max_positions");
+   if(max_pos <= 0) max_pos = 1;   // フォールバック: 旧フォーマット互換
    return StringLen(action) > 0;
 }
 
