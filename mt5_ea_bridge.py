@@ -34,7 +34,7 @@ from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicat
 from core.strategy   import check_m5_entry_filter, check_m5_surge, detect_big_move
 
 CFG = {k: getattr(C, k) for k in
-       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT','BRIDGE','SCALP']}
+       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT','BRIDGE','SCALP','REGIME']}
 
 # ── RulesEngine ロード（なければフィルタなし）────────────────
 try:
@@ -53,6 +53,15 @@ _signal_active: dict       = {             # 現在有効なシグナルウィ�
 }
 _prev_rsi_m1:       float | None    = None    # 前回ポーリング時の M1 RSI（反発クロス検出用）
 _rapid_fall_at:     datetime | None = None    # 直近 rapid_fall 発生時刻
+
+# ── レジーム・分散エントリー状態 ─────────────────────────────────
+_entry_in_window:      int   = 0      # 現シグナルウィンドウ内の BUY エントリー回数
+_last_entry_price:     float = 0.0   # 直近 BUY エントリー価格
+_signal_window_key:    tuple = (None, None)  # ウィンドウリセット検出用
+
+_sell_entry_in_window: int   = 0
+_sell_last_entry_price:float = 0.0
+_sell_window_key:      tuple = (None, None)
 
 # ── スキャルプモード状態 ─────────────────────────────────────
 _scalp_prev_rsi: float | None    = None   # 前回足 RSI（クロス検出）
@@ -130,6 +139,39 @@ def _position_status(risk_pct: float, total_risk_pct: float) -> dict:
     }
 
 
+def _detect_regime(adx: float, di_plus: float, di_minus: float,
+                   regime_cfg: dict) -> str:
+    """
+    ADX に基づくレジーム判定。
+    returns: 'trend_up' | 'trend_down' | 'weak_trend' | 'range'
+    """
+    if np.isnan(adx):
+        return 'range'
+    trend_thr = regime_cfg.get('trend_thr', 25.0)
+    range_thr = regime_cfg.get('range_thr', 20.0)
+    if adx >= trend_thr:
+        return 'trend_up' if di_plus > di_minus else 'trend_down'
+    if adx >= range_thr:
+        return 'weak_trend'
+    return 'range'
+
+
+def _regime_lot_multi(regime_h1: str, regime_m5: str, regime_cfg: dict) -> float:
+    """
+    H1 / M5 のレジームからロット倍率を返す。
+    両方トレンド → lot_multi_trend (1.5×)
+    片方トレンド → lot_multi_weak  (1.0×)
+    両方レンジ   → lot_multi_range (0.6×)
+    """
+    t_h1 = regime_h1.startswith('trend')
+    t_m5 = regime_m5.startswith('trend')
+    if t_h1 and t_m5:
+        return float(regime_cfg.get('lot_multi_trend', 1.5))
+    if t_h1 or t_m5:
+        return float(regime_cfg.get('lot_multi_weak',  1.0))
+    return float(regime_cfg.get('lot_multi_range', 0.6))
+
+
 # ── リアルタイム指標・シグナル計算 ────────────────────────────
 
 def compute_signal(symbol: str, cfg: dict) -> dict | None:
@@ -152,6 +194,8 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
       timestamp       : "YYYY.MM.DD HH:MM:SS"（MQL5 StringToTime 互換）
     """
     global _prev_rsi_h1, _signal_active, _signal_sell_active, _prev_rsi_m1, _rapid_fall_at
+    global _entry_in_window, _last_entry_price, _signal_window_key
+    global _sell_entry_in_window, _sell_last_entry_price, _sell_window_key
 
     try:
         import MetaTrader5 as mt5
@@ -175,11 +219,19 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         sma20    = float(last['SMA20'])
         rsi_d1_v = float(df_d1['RSI'].iloc[-1])
 
+        # H1 ADX（レジーム判定用）
+        adx_h1_v  = float(last['ADX'])    if 'ADX'      in df_h1.columns else float('nan')
+        dip_h1    = float(last['DI_plus']) if 'DI_plus'  in df_h1.columns else float('nan')
+        dim_h1    = float(last['DI_minus'])if 'DI_minus' in df_h1.columns else float('nan')
+
         # M5 RSI（直近2本で rising 判定 + 急騰急落検出）
         rsi_m5_cur  = float('nan')
         rsi_m5_prev = float('nan')
         m5_ok       = False
         surge       = 'none'
+        adx_m5_v    = float('nan')
+        dip_m5      = float('nan')
+        dim_m5      = float('nan')
         if df_m5_raw is not None and len(df_m5_raw) >= 3:
             df_m5 = add_m5_indicators(df_m5_raw, cfg)
             if not df_m5.empty and len(df_m5) >= 2:
@@ -187,6 +239,10 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 rsi_m5_prev = float(df_m5['RSI'].iloc[-2])
                 m5_ok = check_m5_entry_filter(rsi_m5_cur, rsi_m5_prev, rsi_d1_v, symbol)
                 surge = check_m5_surge(df_m5)
+                if 'ADX' in df_m5.columns:
+                    adx_m5_v = float(df_m5['ADX'].iloc[-1])
+                    dip_m5   = float(df_m5['DI_plus'].iloc[-1])
+                    dim_m5   = float(df_m5['DI_minus'].iloc[-1])
 
         # M1 RSI（スキャルプ判定用: RSI(14) を M1 足で計算）
         rsi_m1_cur      = float('nan')
@@ -400,9 +456,17 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         jpy_per_usd = _get_jpy_per_usd(cfg['SCALP'].get('jpy_per_usd', 150.0))
         balance_usd = balance_jpy / jpy_per_usd
         risk_pct    = cfg['BRIDGE'].get('risk_pct', 0.01)
-        lot_size    = _calc_lot(balance_usd, risk_pct, atr_v * sl_multi,
+
+        # ── レジーム判定（H1 + M5 ADX）──────────────────────────
+        regime_cfg = cfg.get('REGIME', {})
+        regime_h1  = _detect_regime(adx_h1_v, dip_h1, dim_h1, regime_cfg)
+        regime_m5  = _detect_regime(adx_m5_v, dip_m5, dim_m5, regime_cfg)
+        r_multi    = _regime_lot_multi(regime_h1, regime_m5, regime_cfg)
+
+        lot_base = _calc_lot(balance_usd, risk_pct, atr_v * sl_multi,
                              c_sz, l_min, l_max, l_step,
                              cfg['BRIDGE']['lot_size'])
+        lot_size = max(l_min, min(l_max, round(lot_base * r_multi / l_step) * l_step))
 
         # ── ポジション数チェック（手動エントリー含む全ポジション）──
         total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
@@ -411,6 +475,47 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             action      = 'none'
             skip_reason = (f"max_positions={pos_st['max_positions']}に到達"
                            f"（全{pos_st['total_positions']}本）")
+
+        # ── 分散エントリーゲート ─────────────────────────────────
+        # シグナルウィンドウが変わったらエントリーカウントをリセット
+        max_ep   = regime_cfg.get('max_entry_per_signal', 3)
+        spacing  = regime_cfg.get('entry_spacing_atr',    0.5)
+
+        if action == 'buy':
+            cur_key = (_signal_active['type'], _signal_active['until'])
+            if cur_key != _signal_window_key:
+                _signal_window_key = cur_key
+                _entry_in_window   = 0
+                _last_entry_price  = 0.0
+            if _entry_in_window >= max_ep:
+                action      = 'none'
+                skip_reason = f'entry上限{max_ep}回到達'
+            elif (_last_entry_price > 0 and
+                  close_v > _last_entry_price - spacing * atr_v):
+                action      = 'none'
+                skip_reason = (f'押し目待ち(現{close_v:.0f}'
+                               f'<必要{_last_entry_price - spacing*atr_v:.0f})')
+            else:
+                _entry_in_window  += 1
+                _last_entry_price  = close_v
+
+        elif action == 'sell':
+            cur_key = (_signal_sell_active['type'], _signal_sell_active['until'])
+            if cur_key != _sell_window_key:
+                _sell_window_key        = cur_key
+                _sell_entry_in_window   = 0
+                _sell_last_entry_price  = 0.0
+            if _sell_entry_in_window >= max_ep:
+                action      = 'none'
+                skip_reason = f'entry上限{max_ep}回到達'
+            elif (_sell_last_entry_price > 0 and
+                  close_v < _sell_last_entry_price + spacing * atr_v):
+                action      = 'none'
+                need_v = _sell_last_entry_price + spacing * atr_v
+                skip_reason = f'戻り待ち(現{close_v:.0f}需>{need_v:.0f})'
+            else:
+                _sell_entry_in_window  += 1
+                _sell_last_entry_price  = close_v
 
         return {
             'timestamp':          datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
@@ -447,6 +552,12 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
+            'adx_h1':             round(adx_h1_v, 1) if not np.isnan(adx_h1_v) else 0.0,
+            'adx_m5':             round(adx_m5_v, 1) if not np.isnan(adx_m5_v) else 0.0,
+            'regime_h1':          regime_h1,
+            'regime_m5':          regime_m5,
+            'regime_lot_multi':   round(r_multi, 2),
+            'entry_in_window':    _entry_in_window,
         }
     except Exception as e:
         print(f"[ブリッジ] 計算エラー: {e}")
@@ -509,16 +620,26 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         l_max         = float(info.volume_max)          if info else 100.0
         l_step        = float(info.volume_step)         if info else 0.01
 
-        # ── スキャルプロット計算（目標利益から逆算）──────────────────
+        # ── レジーム判定（M5 ADX）→ TP距離・ロット計算 ──────────
+        regime_cfg = cfg.get('REGIME', {})
+        adx_m5_sv  = float(df['ADX'].iloc[-1])    if 'ADX'      in df.columns else float('nan')
+        dip_m5_sv  = float(df['DI_plus'].iloc[-1]) if 'DI_plus'  in df.columns else float('nan')
+        dim_m5_sv  = float(df['DI_minus'].iloc[-1])if 'DI_minus' in df.columns else float('nan')
+        regime_m5s = _detect_regime(adx_m5_sv, dip_m5_sv, dim_m5_sv, regime_cfg)
+        # スキャルプはH1不使用のためM5のみで判定（H1は 'weak_trend' 相当として扱う）
+        r_multi_s  = _regime_lot_multi('weak_trend', regime_m5s, regime_cfg)
+
         # TP幅 = M5 ATR × tp_atr_fraction（先に価格距離を決める）
-        # lot  = target_usd / (tp_move × contract_size)
-        # SL損失 ≈ target_usd × sl_ratio（残高に依存しない固定リスク）
+        # lot  = target_usd / (tp_move × contract_size) × regime_multi
+        # SL損失 ≈ target_usd × sl_ratio × regime_multi（レジームで調整）
         target_usd    = target / jpy_rate
         tp_atr_frac   = scalp.get('tp_atr_fraction', 0.5)
         tp_move       = atr_v * tp_atr_frac
         sl_move       = tp_move * sl_ratio
         lot_raw       = target_usd / (tp_move * contract_size) if tp_move > 0 else 0
-        lot           = max(l_min, min(l_max, round(lot_raw / l_step) * l_step))
+        lot_base_s    = max(l_min, min(l_max, round(lot_raw / l_step) * l_step))
+        lot           = max(l_min, min(l_max,
+                            round(lot_base_s * r_multi_s / l_step) * l_step))
 
         # ── 大変動検知: スキャルプ→通常モード自動切換え ──────────
         bm_lookback   = scalp.get('big_move_lookback',  12)
@@ -660,6 +781,12 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
+            'adx_h1':             0.0,
+            'adx_m5':             round(adx_m5_sv, 1) if not np.isnan(adx_m5_sv) else 0.0,
+            'regime_h1':          'n/a',
+            'regime_m5':          regime_m5s,
+            'regime_lot_multi':   round(r_multi_s, 2),
+            'entry_in_window':    0,
         }
 
     except Exception as e:
@@ -781,11 +908,17 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"RSI_M5={data['rsi_m5']:.1f}({'↑' if data['m5_filter_ok'] else '↓/NG'})  "
                           f"RSI_M1={data['rsi_m1']:.1f}{surge_tag}  "
                           f"ATR=${data['atr']:.2f}")
+                    rg_tag = (f"[ADX_H1={data.get('adx_h1',0):.0f}/{data.get('regime_h1','?')}"
+                              f" M5={data.get('adx_m5',0):.0f}/{data.get('regime_m5','?')}"
+                              f" ×{data.get('regime_lot_multi',1.0)}]")
+                    ep_tag = (f" entry#{data.get('entry_in_window',0)}/{cfg.get('REGIME',{}).get('max_entry_per_signal',3)}"
+                              if data.get('entry_in_window', 0) > 0 else '')
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}{scalp_tag}  "
                           f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
                           f"score={data['score']}({data['strength']})  "
-                          f"lot={data['lot_size']}")
+                          f"lot={data['lot_size']}{ep_tag}")
+                    print(f"  {rg_tag}")
                     if data['signal_valid_until']:
                         print(f"  buy_window_until={data['signal_valid_until']}")
                     if data['sell_signal_type'] != 'none':

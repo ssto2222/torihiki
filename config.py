@@ -23,6 +23,7 @@ MT5 = dict(
 INDICATOR = dict(
     rsi_period   = 14,
     atr_period   = 14,
+    adx_period   = 14,          # ADX / +DI / -DI 期間
     bb_period    = 20,
     bb_sigma     = 3.0,
     sma_m1       = 20,
@@ -105,6 +106,20 @@ SCALP = dict(
     cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
     big_move_lookback = 12,      # 大変動判定: 過去 N 本（12本=60分）
     big_move_atr_multi= 2.0,     # 大変動判定: 価格変動 > ATR × N で切換え
+)
+
+# ── レジーム判定・分散エントリー ──────────────────────────────────
+REGIME = dict(
+    # ADX によるトレンド/レンジ判定（H1・M5 それぞれ独立評価）
+    trend_thr            = 25.0,   # ADX ≥ この値 → トレンド
+    range_thr            = 20.0,   # ADX < この値 → レンジ
+    # レジーム別ロット倍率（_calc_lot の結果に乗算）
+    lot_multi_trend      = 1.5,    # H1・M5 両方トレンド時
+    lot_multi_weak       = 1.0,    # 片方のみトレンド時
+    lot_multi_range      = 0.6,    # 両方レンジ時
+    # 分散エントリー
+    max_entry_per_signal = 3,      # 1シグナルウィンドウ内の最大エントリー回数
+    entry_spacing_atr    = 0.5,    # 追加エントリーの最小間隔（ATR × この値 の押し目/戻り）
 )
 
 # ── 可視化 ────────────────────────────────────────────────
