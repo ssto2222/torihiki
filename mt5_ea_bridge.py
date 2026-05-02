@@ -525,10 +525,8 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             normal_data = compute_signal(symbol, cfg)
             if normal_data is not None:
                 rem = int((_scalp_last_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
-                normal_data['signal_type'] = (
-                    f"{normal_data.get('signal_type','none')}[cooldown残{rem}分]"
-                )
-                normal_data['scalp_mode']  = False
+                normal_data['scalp_cooldown_rem'] = rem
+                normal_data['scalp_mode']         = False
                 return normal_data
             # compute_signal 失敗時はスキャルプのまま継続
 
@@ -626,8 +624,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'scalp_mode':         True,
             'target_profit_jpy':  target,
             'tp_move_usd':        round(target_usd, 4),
-            'trades_today':       _scalp_count,
-            'cooldown_min':       cooldown,
+            'trades_today':          _scalp_count,
+            'cooldown_min':          cooldown,
+            'scalp_cooldown_rem':    0,
         }
 
     except Exception as e:
@@ -759,6 +758,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                     if data['sell_signal_type'] != 'none':
                         print(f"  sell_signal={data['sell_signal_type']}  "
                               f"sell_window_until={data['sell_valid_until']}")
+                    if data.get('scalp_cooldown_rem', 0) > 0:
+                        print(f"  [SCALP cooldown残{data['scalp_cooldown_rem']}分 → 通常モード中]")
 
                 if data['skip_reason']:
                     print(f"  skip: {data['skip_reason']}")
