@@ -1,130 +1,182 @@
-# XAUUSD 自動売買システム
+# torihiki 自動売買システム
+
+## 概要
+
+このリポジトリは、MT5 と Python を組み合わせた自動売買システムです。
+H1/M5 の RSI・ATR・ADX を使ったシグナル生成、MT5 EA との連携、時間帯バイアス回避、スキャルプモードなどを備えています。
 
 ## ディレクトリ構成
 
 ```
-xauusd_system/
-├── config.py              ★ 全設定の一元管理
-├── local_analysis.py      ローカル分析（MT5不要）
-├── mt5_backtest.py        MT5実データ バックテスト
-├── mt5_ea_bridge.py       MT5 EA リアルタイム連携
-├── core/
-│   ├── data.py            データ取得（MT5 / 合成）
-│   ├── indicators.py      テクニカル指標・急落検出
-│   ├── strategy.py        シグナル検出・SL戦略・バックテスト
-│   └── plot.py            可視化
-├── mt5/
-│   └── XAUUSD_SL_Strategy.mq5   MT5 EA（MQL5）
-└── output/                出力先
-    ├── signal.json         Python→EA シグナル
-    ├── ea_state.json       EA→Python 状態
-    ├── sl_crash_analysis.png
-    ├── sl_comparison.png
-    └── *.json
+ torihiki/
+ ├── analyze_risk.py      リスク分析・評価
+ ├── analyze_time_bias.py 時間帯バイアス分析
+ ├── config.py            全設定の一元管理
+ ├── examples.py          実行例・テスト用コード
+ ├── local_analysis.py    ローカル分析（MT5不要）
+ ├── mt5_backtest.py      MT5 実データ バックテスト
+ ├── mt5_ea_bridge.py     MT5 EA リアルタイム連携ブリッジ
+ ├── secret.py            機密情報・認証用（未管理推奨）
+ ├── trading_rules.json   ルールエンジン用フィルタ
+ ├── output/              分析・バックテスト出力
+ ├── core/
+ │   ├── data.py          データ取得・合成データ生成
+ │   ├── indicators.py    テクニカル指標・急落検出
+ │   ├── plot.py          可視化
+ │   └── strategy.py      シグナル検出・SL戦略・バックテスト
+ └── mt5/
+     └── XAUUSD_SL_Strategy.mq5  MT5 EA（MQL5）
+```
+
+## 必要なパッケージ
+
+```bash
+pip install pandas numpy matplotlib scipy
+pip install MetaTrader5
 ```
 
 ## 実行方法
 
-### A. ローカル分析（MT5 不要）
+### 1. ローカル分析（MT5不要）
 
 ```bash
-pip install pandas numpy matplotlib scipy
-cd xauusd_system
-
-python local_analysis.py                    # 分析のみ
-python local_analysis.py --optimize         # 分析 + グリッド最適化
-python local_analysis.py --output ./result  # 出力先変更
+python local_analysis.py
+python local_analysis.py --optimize
+python local_analysis.py --output ./result
 ```
 
-### B. MT5 実データ バックテスト
+### 2. 時間帯バイアス分析
 
 ```bash
-pip install MetaTrader5 pandas numpy matplotlib scipy
+python analyze_time_bias.py
+```
 
-# MT5 ターミナルを起動した状態で実行
+### 3. リスク分析
+
+```bash
+python analyze_risk.py
+```
+
+### 4. MT5 実データ バックテスト
+
+```bash
 python mt5_backtest.py
-python mt5_backtest.py --symbol XAUUSD --h1 3000 --m1 50000
-python mt5_backtest.py --symbol GOLD   --output ./gold_result
+python mt5_backtest.py --symbol BTCUSD --h1 3000 --m1 50000
 ```
 
-### C. MT5 EA リアルタイム連携
+### 5. MT5 EA リアルタイム連携
+
+1. `config.py` の `MT5['symbol']` を使用するシンボルに合わせる
+2. MT5 EA の `InpSignalFile` を `signal.json` の書き込み先と一致させる
+3. Python ブリッジを起動
 
 ```bash
-# 1. Python ブリッジを起動（MT5ターミナル起動状態で）
 python mt5_ea_bridge.py
-python mt5_ea_bridge.py --once    # 1回だけ確認
-
-# 2. MT5 に EA を設置
-#    mt5/XAUUSD_SL_Strategy.mq5 → MQL5/Experts/ にコピー
-#    MT5 でコンパイル（F7）
-#    チャートにアタッチ
-#    InpSignalFile にフルパスを設定（例: C:\xauusd_system\output\signal.json）
+python mt5_ea_bridge.py --once
+python mt5_ea_bridge.py --mode scalp --symbol BTCUSD --lot 0.05 --target 1000 --jpy 150
 ```
+
+`--mode` の選択:
+- `normal`: H1/M5 クロス戦略
+- `scalp` : M5 RSI 閾値クロス / 円建て TP でエントリー
+
+`--target` はスキャルプモードの目標利益（円）、`--jpy` は JPY/USD レートです。
 
 ## config.py の主要設定
 
+### MT5
+
 ```python
 MT5 = dict(
-    symbol = "XAUUSD",   # ← ブローカーにより GOLD / XAUUSDm 等に変更
-)
-
-SL = dict(
-    rsi_exit_thr    = 75.0,   # RSI≥75 でトレーリングSL起動（買い）
-    trail_multi     = 1.5,    # トレーリング幅 = ATR × 1.5
-    sl_multi_low    = 1.0,    # ATR_ratio < 0.8（低ボラ）
-    sl_multi_normal = 1.5,    # ATR_ratio 0.8〜1.5（通常）
-    sl_multi_medium = 2.5,    # ATR_ratio 1.5〜2.5（高ボラ）
-    sl_multi_high   = 4.0,    # ATR_ratio > 2.5（急落）
-)
-
-CRASH = dict(
-    atr_multi = 2.5,   # 1本下落幅 > ATR×2.5 → 急落検出
-    gap_usd   = 8.0,   # ギャップダウン > $8 → 急落検出
-    vol_spike = 2.0,   # ATR_ratio > 2.0 → ボラスパイク
+    symbol = "BTCUSD",
+    h1_bars = 5000,
+    m5_bars = 20000,
+    m1_bars = 100000,
+    magic = 20240101,
+    deviation = 10,
 )
 ```
 
-## SL 戦略一覧
+### BRIDGE
 
-| 戦略 | 説明 |
-|---|---|
-| A. 固定SL | USD絶対値（ベースライン） |
-| B. ATR×1.5 SL | ATR倍率（ボラ追従） |
-| C. 構造的SL | スイング安値/高値ベース |
-| D. 二段階SL | 急落時 ATR×2.5 に自動拡大 |
-| **E. ボラ適応型SL** ★推奨 | ATR_ratio で動的調整 |
-
-## 通信プロトコル
-
-```
-[Python ブリッジ]          [MT5 EA]
-      │                       │
-      │ signal.json を書き込む │
-      │ ──────────────────→  │ OnTimer() で読み込み
-      │                       │ エントリー / SL更新
-      │ ea_state.json を読む  │
-      │ ←──────────────────  │ 残高・ポジション数
+```python
+BRIDGE = dict(
+    signal_file      = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/signal.json",
+    status_file      = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
+    poll_sec         = 5,
+    lot_size         = 0.05,
+    risk_pct         = 0.03,
+    fallback_balance = 15_000,
+    scalp_lot_multi  = 2.0,
+)
 ```
 
-### signal.json フォーマット
+### SCALP
 
-```json
-{
-  "timestamp":      "2024-01-15T03:00:00+00:00",
-  "symbol":         "XAUUSD",
-  "close":          1950.20,
-  "atr":            12.34,
-  "atr_ratio":      1.05,
-  "rsi":            42.1,
-  "sl_multi":       1.5,
-  "action":         "buy",
-  "sl_price":       1931.70,
-  "tp_price":       1987.22,
-  "rsi_exit_thr":   75.0,
-  "trail_multi":    1.5,
-  "max_slip_pt":    617,
-  "signal_active":  true,
-  "n_signals_buy":  1,
-  "n_signals_sell": 0
-}
+```python
+SCALP = dict(
+    jpy_per_usd       = 150.0,
+    target_profit_jpy = 1000,
+    sl_ratio          = 1.5,
+    tp_atr_fraction   = 0.5,
+    signal_tf         = 'M5',
+    rsi_buy_thrs      = [55.0, 60.0, 65.0],
+    rsi_sell_thrs     = [45.0, 40.0, 35.0],
+    max_trades_day    = 20,
+    cooldown_min      = 15,
+    big_move_lookback = 12,
+    big_move_atr_multi= 2.0,
+)
 ```
+
+### REGIME
+
+```python
+REGIME = dict(
+    trend_thr            = 25.0,
+    range_thr            = 20.0,
+    lot_multi_trend      = 1.5,
+    lot_multi_weak       = 1.0,
+    lot_multi_range      = 0.6,
+    max_entry_per_signal = 3,
+    entry_spacing_atr    = 0.5,
+    scalp_reserve_slots  = 1,
+)
+```
+
+### TIME_BIAS
+
+```python
+TIME_BIAS = dict(
+    enabled              = True,
+    danger_win_rate_thr  = 0.40,
+    danger_avg_pnl       = 0.0,
+    min_trades_per_hour  = 5,
+    close_before_min     = 15,
+    reentry_delay_min    = 15,
+    rebias_interval_hours= 24,
+    bias_file            = "./output/time_bias.json",
+)
+```
+
+## 主要機能
+
+- H1/M5 の RSI・ATR・ADX を使ったシグナル生成
+- `trading_rules.json` によるルールエンジンフィルタ
+- MT5 EA との `signal.json` / `ea_state.json` 双方向連携
+- スキャルプモード: M5 RSI 閾値クロス + 1本待機ロジック
+- 時間帯バイアス回避: 危険時間帯で新規エントリー停止 / 事前決済
+- レジーム判定による分散エントリー・スキャルプ枠確保
+
+## MT5 EA 側設定
+
+- EA を `MQL5/Experts/` に配置しコンパイル
+- チャートにアタッチ
+- `InpSignalFile` を `config.py` の `BRIDGE['signal_file']` に合わせる
+- EA は `signal.json` を読み込み、新規エントリー・SL/TP を更新します
+
+## 注意
+
+- 現在 `signal.json` の出力先は `config.py` の `BRIDGE['signal_file']` で指定されています。
+- `output/` フォルダは主に分析出力用で、MT5 EA ブリッジのワークディレクトリとは別です。
+- `trading_rules.json` がある場合、`RulesEngine` を読み込んでフィルタを適用します。
