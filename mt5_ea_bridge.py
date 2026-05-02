@@ -502,25 +502,23 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         close_v = float(df['Close'].iloc[-1])
         atr_v   = float(df['ATR'].iloc[-1])         # M5 ATR（スキャルプに適切な短期ボラ）
 
-        # シンボル情報・残高取得（ロット計算に必要なため早期に取得）
+        # シンボル情報取得
         info          = mt5.symbol_info(symbol)
         contract_size = float(info.trade_contract_size) if info else 1.0
         l_min         = float(info.volume_min)          if info else 0.01
         l_max         = float(info.volume_max)          if info else 100.0
         l_step        = float(info.volume_step)         if info else 0.01
-        account       = mt5.account_info()
-        balance_jpy   = (float(account.balance) if account
-                         else cfg['BRIDGE'].get('fallback_balance', 1_500_000))
-        balance_usd   = balance_jpy / jpy_rate          # jpy_rate は上で取得済み
-        risk_pct      = cfg['BRIDGE'].get('risk_pct',        0.01)
-        scalp_multi   = cfg['BRIDGE'].get('scalp_lot_multi', 2.0)
 
-        # 残高ベースのロット計算（スキャルプは scalp_lot_multi 倍）
-        sl_dist_est = atr_v * scalp.get('sl_ratio', 1.5)
-        lot_base    = _calc_lot(balance_usd, risk_pct, sl_dist_est, contract_size,
-                                l_min, l_max, l_step, cfg['BRIDGE']['lot_size'])
-        lot         = max(l_min, min(l_max,
-                          round(lot_base * scalp_multi / l_step) * l_step))
+        # ── スキャルプロット計算（目標利益から逆算）──────────────────
+        # TP幅 = M5 ATR × tp_atr_fraction（先に価格距離を決める）
+        # lot  = target_usd / (tp_move × contract_size)
+        # SL損失 ≈ target_usd × sl_ratio（残高に依存しない固定リスク）
+        target_usd    = target / jpy_rate
+        tp_atr_frac   = scalp.get('tp_atr_fraction', 0.5)
+        tp_move       = atr_v * tp_atr_frac
+        sl_move       = tp_move * sl_ratio
+        lot_raw       = target_usd / (tp_move * contract_size) if tp_move > 0 else 0
+        lot           = max(l_min, min(l_max, round(lot_raw / l_step) * l_step))
 
         # ── 大変動検知: スキャルプ→通常モード自動切換え ──────────
         bm_lookback   = scalp.get('big_move_lookback',  12)
@@ -560,13 +558,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                 return normal_data
             # compute_signal 失敗時はスキャルプのまま継続
 
-        # TP/SL 価格幅を逆算
-        #   profit(JPY) = lot × contract_size × price_move × jpy_rate
-        #   price_move  = target_jpy / (lot × contract_size × jpy_rate)
-        target_usd    = target / jpy_rate
-        tp_move       = target_usd / (lot * contract_size)
-        sl_move       = tp_move * sl_ratio
-
+        # tp_move / sl_move はロット計算時に確定済み（上記参照）
         # M5 RSI クロス検出（複数閾値）
         # BUY : 50 / 55 / 60 のいずれかを上抜け
         # SELL: 45 / 40 / 35 のいずれかを下抜け
@@ -771,7 +763,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"RSI_M5={data['rsi_m5']:.1f}  "
                           f"ATR=${data['atr']:.2f}  "
                           f"残高=¥{bal}  "
-                          f"lot={data['lot_size']}({scalp_cfg.get('scalp_lot_multi',2.0)}x)  "
+                          f"lot={data['lot_size']}(TP={scalp_cfg.get('tp_atr_fraction',0.5)}×ATR)  "
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}  "
