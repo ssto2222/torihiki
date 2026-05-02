@@ -22,7 +22,7 @@ from core.plot       import plot_crash_analysis, plot_sl_comparison
 
 def main(args):
     cfg = {k: getattr(C, k) for k in
-           ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','OPTIMIZE','LOCAL','PLOT','BRIDGE']}
+           ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','OPTIMIZE','LOCAL','PLOT','BRIDGE','SCALP']}
     cfg['MT5'] = {**cfg['MT5'], 'symbol': args.symbol,
                   'h1_bars': args.h1, 'm1_bars': args.m1}
     out = args.output
@@ -100,16 +100,15 @@ def main(args):
         },
         # MT5 EA に直接コピペできるパラメータ
         'mt5_ea_params': {
-            'SL_ATR_multi_low':    cfg['SL']['sl_multi_low'],
-            'SL_ATR_multi_normal': cfg['SL']['sl_multi_normal'],
-            'SL_ATR_multi_medium': cfg['SL']['sl_multi_medium'],
-            'SL_ATR_multi_high':   cfg['SL']['sl_multi_high'],
-            'ATR_ratio_thr_medium':cfg['SL']['atr_ratio_medium'],
-            'ATR_ratio_thr_high':  cfg['SL']['atr_ratio_high'],
-            'RSI_exit_thr':        cfg['SL']['rsi_exit_thr'],
-            'Trail_ATR_multi':     cfg['SL']['trail_multi'],
-            'Max_deviation_pt':    cfg['MT5']['deviation'],
-            'MagicNumber':         cfg['MT5']['magic'],
+            'SL_ATR_multi':    cfg['SL']['sl_multi'],
+            'TP_ATR_multi':    cfg['SL']['tp_atr_multi'],
+            'RSI_exit_thr':    cfg['SL']['rsi_exit_thr'],
+            'Trail_ATR_multi': cfg['SL']['trail_multi'],
+            'Max_deviation_pt':cfg['MT5']['deviation'],
+            'MagicNumber':     cfg['MT5']['magic'],
+            'risk_pct':        cfg['BRIDGE']['risk_pct'],
+            'total_risk_pct':  cfg['RULES']['total_risk_pct'],
+            'max_positions':   int(cfg['RULES']['total_risk_pct'] / cfg['BRIDGE']['risk_pct']),
         },
     }
     jp = f"{out}/mt5_backtest.json"
