@@ -20,8 +20,8 @@
       "max_consec_loss": 7,
       "reason_counts": {
         "tp": 25,
-        "sl": 26,
-        "sl_slip": 22
+        "sl_slip": 22,
+        "sl": 26
       }
     },
     {
@@ -41,9 +41,9 @@
       "max_consec_loss": 6,
       "reason_counts": {
         "tp": 28,
-        "sl_slip": 12,
         "sl": 24,
-        "timeout": 1
+        "timeout": 1,
+        "sl_slip": 12
       }
     },
     {
@@ -63,9 +63,9 @@
       "max_consec_loss": 6,
       "reason_counts": {
         "tp": 25,
-        "sl_slip": 13,
         "sl": 18,
-        "timeout": 2
+        "timeout": 2,
+        "sl_slip": 13
       }
     },
     {
@@ -85,8 +85,8 @@
       "max_consec_loss": 6,
       "reason_counts": {
         "tp": 27,
-        "sl": 20,
-        "sl_slip": 23
+        "sl_slip": 23,
+        "sl": 20
       }
     },
     {
@@ -106,8 +106,8 @@
       "max_consec_loss": 6,
       "reason_counts": {
         "tp": 28,
-        "sl_slip": 13,
-        "sl": 24
+        "sl": 24,
+        "sl_slip": 13
       }
     }
   ],
