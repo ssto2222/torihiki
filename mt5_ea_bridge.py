@@ -63,6 +63,12 @@ _sell_entry_in_window: int   = 0
 _sell_last_entry_price:float = 0.0
 _sell_window_key:      tuple = (None, None)
 
+# ── 時間帯バイアス状態 ────────────────────────────────────────
+_time_bias_hours:      set   = set()   # analyze_time_bias.py の出力から読み込む
+_danger_close_done_hr: int   = -1      # 同じ警告ウィンドウで複数回決済しない
+_prev_in_danger:       bool  = False   # 危険時間帯→安全への遷移検出
+_danger_exit_until:    list  = [None]  # 危険時間帯終了後の再エントリー待機タイマー [datetime|None]
+
 # ── スキャルプモード状態 ─────────────────────────────────────
 _scalp_prev_rsi: float | None    = None   # 前回足 RSI（クロス検出）
 _scalp_last_at:  datetime | None = None   # 直近エントリーシグナル時刻
@@ -170,6 +176,68 @@ def _regime_lot_multi(regime_h1: str, regime_m5: str, regime_cfg: dict) -> float
     if t_h1 or t_m5:
         return float(regime_cfg.get('lot_multi_weak',  1.0))
     return float(regime_cfg.get('lot_multi_range', 0.6))
+
+
+def _load_time_bias(path: str) -> set:
+    """time_bias.json から危険時間帯セットを返す。ファイルがなければ空セット。"""
+    try:
+        with open(path, encoding='utf-8') as f:
+            d = json.load(f)
+        return set(int(h) for h in d.get('danger_hours', []))
+    except FileNotFoundError:
+        return set()
+    except Exception as e:
+        print(f"[時間帯バイアス] {path} 読み込みエラー: {e}")
+        return set()
+
+
+def _close_profitable_positions(symbol: str, magic: int, deviation: int) -> int:
+    """MT5 の含み益ポジション（magic 一致）を全決済する。決済した件数を返す。"""
+    closed = 0
+    try:
+        import MetaTrader5 as mt5
+        positions = mt5.positions_get(symbol=symbol)
+        if not positions:
+            return 0
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return 0
+        for pos in positions:
+            if pos.magic != magic or pos.profit <= 0:
+                continue
+            is_buy = (pos.type == mt5.ORDER_TYPE_BUY)
+            req = {
+                'action':       mt5.TRADE_ACTION_DEAL,
+                'symbol':       symbol,
+                'volume':       pos.volume,
+                'type':         mt5.ORDER_TYPE_SELL if is_buy else mt5.ORDER_TYPE_BUY,
+                'position':     pos.ticket,
+                'price':        tick.bid if is_buy else tick.ask,
+                'deviation':    deviation,
+                'magic':        magic,
+                'comment':      'time_bias_close',
+                'type_time':    mt5.ORDER_TIME_GTC,
+                'type_filling': mt5.ORDER_FILLING_IOC,
+            }
+            res = mt5.order_send(req)
+            if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                closed += 1
+                print(f"    ticket={pos.ticket}  profit={pos.profit:+.2f}  → 決済完了")
+    except Exception as e:
+        print(f"  [時間帯バイアス] 決済エラー: {e}")
+    return closed
+
+
+def _reset_entry_windows():
+    """危険時間帯終了後に分散エントリーカウンタをリセットして入り直しを可能にする。"""
+    global _entry_in_window, _last_entry_price, _signal_window_key
+    global _sell_entry_in_window, _sell_last_entry_price, _sell_window_key
+    _entry_in_window       = 0
+    _last_entry_price      = 0.0
+    _signal_window_key     = (None, None)
+    _sell_entry_in_window  = 0
+    _sell_last_entry_price = 0.0
+    _sell_window_key       = (None, None)
 
 
 # ── リアルタイム指標・シグナル計算 ────────────────────────────
@@ -863,6 +931,15 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
     max_consec = cfg.get('RULES', {}).get('max_consecutive_losses', 3)
     min_score  = cfg.get('RULES', {}).get('min_score', 30)
     scalp_cfg  = cfg.get('SCALP', {})
+    tb_cfg     = cfg.get('TIME_BIAS', {})
+    magic      = cfg['MT5'].get('magic', 20240101)
+    deviation  = cfg['MT5'].get('deviation', 10)
+
+    # 時間帯バイアスファイルをスタートアップ時に読み込む
+    global _time_bias_hours, _danger_close_done_hr, _prev_in_danger, _danger_exit_until
+    if tb_cfg.get('enabled', False):
+        _time_bias_hours = _load_time_bias(
+            tb_cfg.get('bias_file', './output/time_bias.json'))
 
     Path(sig_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -878,6 +955,13 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
     else:
         print(f"  ロット数     : {lot_size}  最小スコア: {min_score}")
         print(f"  連続損失上限 : {max_consec}回")
+    if tb_cfg.get('enabled', False):
+        if _time_bias_hours:
+            print(f"  時間帯バイアス: {len(_time_bias_hours)}個の危険時間帯 "
+                  f"{sorted(_time_bias_hours)}  "
+                  f"（{tb_cfg.get('close_before_min',15)}分前に含み益決済）")
+        else:
+            print("  時間帯バイアス: bias_file 未生成 → analyze_time_bias.py を先に実行してください")
     print("=" * 60)
 
     if not connect_mt5(symbol, cfg['MT5']):
@@ -905,6 +989,49 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                 if consec_losses >= max_consec and data['action'] in ('buy', 'sell'):
                     data['action']      = 'none'
                     data['skip_reason'] = f'consecutive_losses={consec_losses}>={max_consec}'
+
+                # ── 時間帯バイアス回避 ───────────────────────────────
+                if tb_cfg.get('enabled', False) and _time_bias_hours:
+                    now_utc      = datetime.now(timezone.utc)
+                    close_before = tb_cfg.get('close_before_min', 15)
+                    warn_dt      = now_utc + timedelta(minutes=close_before)
+                    in_danger    = now_utc.hour in _time_bias_hours
+                    in_warning   = (not in_danger) and (warn_dt.hour in _time_bias_hours)
+
+                    # 危険時間帯 N 分前: 含み益ポジションを決済（同一ウィンドウで1回のみ）
+                    if in_warning:
+                        warn_hr = warn_dt.hour
+                        if _danger_close_done_hr != warn_hr:
+                            n_closed = _close_profitable_positions(symbol, magic, deviation)
+                            _danger_close_done_hr = warn_hr
+                            if n_closed:
+                                print(f"  [時間帯バイアス] {now_utc.strftime('%H:%M')}UTC"
+                                      f" → {warn_hr:02d}:00が危険時間帯"
+                                      f" → 含み益{n_closed}本を決済")
+
+                    # 危険時間帯中: 新規エントリーを抑制
+                    if in_danger and data.get('action') in ('buy', 'sell'):
+                        data['action']      = 'none'
+                        data['skip_reason'] = f'危険時間帯({now_utc.hour:02d}:00UTC)'
+
+                    # 危険時間帯終了直後: ウィンドウリセット + 再エントリー待機タイマーセット
+                    if _prev_in_danger and not in_danger:
+                        reentry_delay = tb_cfg.get('reentry_delay_min', 15)
+                        _reset_entry_windows()
+                        _danger_exit_until[0] = now_utc + timedelta(minutes=reentry_delay)
+                        print(f"  [時間帯バイアス] {now_utc.strftime('%H:%M')}UTC"
+                              f" 危険時間帯終了 → {reentry_delay}分後に再エントリー可")
+                    _prev_in_danger = in_danger
+
+                    # 再エントリー待機中はエントリーを抑制
+                    if (_danger_exit_until[0] is not None
+                            and now_utc < _danger_exit_until[0]
+                            and data.get('action') in ('buy', 'sell')):
+                        rem = int((_danger_exit_until[0] - now_utc).total_seconds() / 60) + 1
+                        data['action']      = 'none'
+                        data['skip_reason'] = f'危険時間帯後クールダウン(残{rem}分)'
+                    elif _danger_exit_until[0] and now_utc >= _danger_exit_until[0]:
+                        _danger_exit_until[0] = None  # 待機終了
 
                 write_signal(data, sig_path)
                 ts = datetime.now().strftime('%H:%M:%S')
