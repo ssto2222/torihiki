@@ -104,8 +104,8 @@ def _calc_lot(balance: float, risk_pct: float, sl_dist: float,
     SL距離（価格）× コントラクトサイズ で割ってロットを求める。
     """
     if sl_dist <= 0 or contract_size <= 0:
-        return fallback
-    risk_usd = balance * risk_pct
+        return fallback/150
+    risk_usd = balance/150 * risk_pct
     lot = risk_usd / (sl_dist * contract_size)
     lot = round(lot / lot_step) * lot_step
     return max(lot_min, min(lot_max, lot))
