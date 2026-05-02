@@ -477,9 +477,15 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                            f"（全{pos_st['total_positions']}本）")
 
         # ── 分散エントリーゲート ─────────────────────────────────
-        # シグナルウィンドウが変わったらエントリーカウントをリセット
-        max_ep   = regime_cfg.get('max_entry_per_signal', 3)
-        spacing  = regime_cfg.get('entry_spacing_atr',    0.5)
+        max_ep          = regime_cfg.get('max_entry_per_signal', 3)
+        spacing         = regime_cfg.get('entry_spacing_atr',    0.5)
+        scalp_reserve   = regime_cfg.get('scalp_reserve_slots',  1)
+        # H1・M5 両方トレンドなら侵入時に一括エントリー（押し目待ちなし）
+        is_full_trend   = regime_h1 in ('trend_up', 'trend_down') and \
+                          regime_m5 in ('trend_up', 'trend_down')
+        # トレンド時の上限: スキャルプ枠だけ残して残スロットを全使用
+        avail_for_trend = max(0, pos_st['available_slots'] - scalp_reserve)
+        trend_max_ep    = max(1, avail_for_trend)  # 0スロットでも1回は試みる
 
         if action == 'buy':
             cur_key = (_signal_active['type'], _signal_active['until'])
@@ -487,17 +493,27 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 _signal_window_key = cur_key
                 _entry_in_window   = 0
                 _last_entry_price  = 0.0
-            if _entry_in_window >= max_ep:
-                action      = 'none'
-                skip_reason = f'entry上限{max_ep}回到達'
-            elif (_last_entry_price > 0 and
-                  close_v > _last_entry_price - spacing * atr_v):
-                action      = 'none'
-                skip_reason = (f'押し目待ち(現{close_v:.0f}'
-                               f'<必要{_last_entry_price - spacing*atr_v:.0f})')
+            if is_full_trend:
+                # トレンド侵入: スキャルプ枠を除く空きスロット分を一気に使う（押し目待ちなし）
+                if _entry_in_window >= trend_max_ep:
+                    action      = 'none'
+                    skip_reason = f'トレンドentry上限{trend_max_ep}回到達'
+                else:
+                    _entry_in_window  += 1
+                    _last_entry_price  = close_v
             else:
-                _entry_in_window  += 1
-                _last_entry_price  = close_v
+                # レンジ/弱トレンド: 分散エントリー（押し目まで待機）
+                if _entry_in_window >= max_ep:
+                    action      = 'none'
+                    skip_reason = f'entry上限{max_ep}回到達'
+                elif (_last_entry_price > 0 and
+                      close_v > _last_entry_price - spacing * atr_v):
+                    action      = 'none'
+                    skip_reason = (f'押し目待ち(現{close_v:.0f}'
+                                   f'<必要{_last_entry_price - spacing*atr_v:.0f})')
+                else:
+                    _entry_in_window  += 1
+                    _last_entry_price  = close_v
 
         elif action == 'sell':
             cur_key = (_signal_sell_active['type'], _signal_sell_active['until'])
@@ -505,17 +521,25 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 _sell_window_key        = cur_key
                 _sell_entry_in_window   = 0
                 _sell_last_entry_price  = 0.0
-            if _sell_entry_in_window >= max_ep:
-                action      = 'none'
-                skip_reason = f'entry上限{max_ep}回到達'
-            elif (_sell_last_entry_price > 0 and
-                  close_v < _sell_last_entry_price + spacing * atr_v):
-                action      = 'none'
-                need_v = _sell_last_entry_price + spacing * atr_v
-                skip_reason = f'戻り待ち(現{close_v:.0f}需>{need_v:.0f})'
+            if is_full_trend:
+                if _sell_entry_in_window >= trend_max_ep:
+                    action      = 'none'
+                    skip_reason = f'トレンドentry上限{trend_max_ep}回到達'
+                else:
+                    _sell_entry_in_window  += 1
+                    _sell_last_entry_price  = close_v
             else:
-                _sell_entry_in_window  += 1
-                _sell_last_entry_price  = close_v
+                if _sell_entry_in_window >= max_ep:
+                    action      = 'none'
+                    skip_reason = f'entry上限{max_ep}回到達'
+                elif (_sell_last_entry_price > 0 and
+                      close_v < _sell_last_entry_price + spacing * atr_v):
+                    action      = 'none'
+                    need_v = _sell_last_entry_price + spacing * atr_v
+                    skip_reason = f'戻り待ち(現{close_v:.0f}需>{need_v:.0f})'
+                else:
+                    _sell_entry_in_window  += 1
+                    _sell_last_entry_price  = close_v
 
         return {
             'timestamp':          datetime.now(timezone.utc).strftime('%Y.%m.%d %H:%M:%S'),
@@ -558,6 +582,8 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             'regime_m5':          regime_m5,
             'regime_lot_multi':   round(r_multi, 2),
             'entry_in_window':    _entry_in_window,
+            'is_full_trend':      is_full_trend,
+            'scalp_reserve':      scalp_reserve,
         }
     except Exception as e:
         print(f"[ブリッジ] 計算エラー: {e}")
