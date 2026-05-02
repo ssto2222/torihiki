@@ -99,7 +99,7 @@ SCALP = dict(
     target_profit_jpy = 1000,     # 1トレードあたり目標利益（円）
     sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
     tp_atr_fraction   = 0.5,     # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
-    signal_tf         = 'M5',    # シグナル生成足（'M5' 推奨）
+    signal_tf         = 'M1',    # シグナル生成足（'M5' 推奨）
     rsi_buy_thrs      = [55.0, 60.0, 65.0],   # RSI 上抜け → BUY
     rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
     max_trades_day    = 20,      # 1日の最大エントリー回数
@@ -130,8 +130,8 @@ TIME_BIAS = dict(
     danger_win_rate_thr  = 0.40,    # win_rate がこの値未満 → 危険
     danger_avg_pnl       = 0.0,     # avg_pnl がこの値以下 → 危険（OR条件）
     min_trades_per_hour  = 5,       # サンプル不足の時間帯は判定スキップ
-    close_before_min      = 15,     # 危険時間帯の N 分前に含み益ポジションを決済
-    reentry_delay_min     = 15,     # 危険時間帯終了後 N 分待ってから再エントリー可
+    skip_before_min      = 30,      # 危険時間帯の N 分前からスキップ開始
+    skip_after_min       = 15,      # 危険時間帯終了後 N 分までスキップ継続
     rebias_interval_hours = 24,     # この間隔（時間）で自動再分析。0 = 起動時1回のみ
     bias_file             = "./output/time_bias.json",
 )

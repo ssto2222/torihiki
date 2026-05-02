@@ -73,10 +73,16 @@ _last_rebias_at:       float = 0.0     # 最後に時間帯分析を実行した
 
 # ── スキャルプモード状態 ─────────────────────────────────────
 _scalp_prev_rsi: float | None    = None   # 前回足 RSI（クロス検出）
+_scalp_last_bar_time: datetime | None = None   # 直近 M5 バー時刻
 _scalp_last_at:  datetime | None = None   # 直近エントリーシグナル時刻
 _scalp_count:       int              = 0      # 当日シグナル発火回数
 _scalp_date:        object           = None   # 日付リセット管理
 _scalp_last_action: str              = 'none' # 直近スキャルプエントリー方向（大変動継続判定用）
+_scalp_pending_action: str          = 'none' # 閾値クロス後の保留エントリー方向
+_scalp_pending_level:  float        = 0.0    # 保留中の閾値レベル
+_scalp_pending_m1_confirm_count: int = 0     # M1 で閾値を超えた連続本数（0-2で確定）
+_scalp_pending_m1_rsi_prev: float | None = None  # 前回ポーリング時の M1 RSI
+_scalp_pending_m1_start_time: datetime | None = None  # 待機開始時刻（30分でタイムアウト）
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -268,6 +274,26 @@ def _load_time_bias(path: str) -> set:
     except Exception as e:
         print(f"[時間帯バイアス] {path} 読み込みエラー: {e}")
         return set()
+
+
+def _is_in_danger_skip_window(now_utc: datetime, danger_hours: set, skip_before_min: int = 30, skip_after_min: int = 15) -> bool:
+    """危険時間帯の前 skip_before_min 分～後 skip_after_min 分をスキップ対象とする。"""
+    if not danger_hours:
+        return False
+    
+    for danger_hour in danger_hours:
+        # 危険時間帯: その時間の00分から59分まで
+        danger_start = datetime(now_utc.year, now_utc.month, now_utc.day, danger_hour, 0, tzinfo=timezone.utc)
+        danger_end = danger_start + timedelta(hours=1)
+        
+        # スキップ対象範囲: 危険時間帯-30分 ～ 危険時間帯+1時間+15分
+        skip_start = danger_start - timedelta(minutes=skip_before_min)
+        skip_end = danger_end + timedelta(minutes=skip_after_min)
+        
+        if skip_start <= now_utc < skip_end:
+            return True
+    
+    return False
 
 
 def _close_profitable_positions(symbol: str, magic: int, deviation: int) -> int:
@@ -749,8 +775,13 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
       - 日次 max_trades_day 回を超えたらスキップ
       - 前回エントリーから cooldown_min 分以内はスキップ
       - 禁止時間帯（UTC 9/16/21h）はスキップ
+      - 閾値クロス後は 1 本待機し、同傾向が継続する場合のみエントリー
     """
-    global _scalp_prev_rsi, _scalp_last_at, _scalp_count, _scalp_date, _scalp_last_action
+    global _scalp_prev_rsi, _scalp_last_bar_time, _scalp_last_at, \
+           _scalp_count, _scalp_date, _scalp_last_action, \
+           _scalp_pending_action, _scalp_pending_level, \
+           _scalp_pending_m1_confirm_count, _scalp_pending_m1_rsi_prev, \
+           _scalp_pending_m1_start_time
 
     try:
         import MetaTrader5 as mt5
@@ -782,9 +813,26 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         if df.empty:
             return None
 
+        bar_time = df.index[-1]
+        bar_changed = (bar_time != _scalp_last_bar_time)
+        if len(df) >= 2:
+            rsi_prev_bar = float(df['RSI'].iloc[-2])
+        else:
+            rsi_prev_bar = float(_scalp_prev_rsi or 0.0)
+
         rsi_cur = float(df['RSI'].iloc[-1])
         close_v = float(df['Close'].iloc[-1])
         atr_v   = float(df['ATR'].iloc[-1])         # M5 ATR（スキャルプに適切な短期ボラ）
+
+        # ── M1 データ取得（待機ロジック用）───────────────────────
+        df_m1_raw = fetch_ohlcv(symbol, 'M1', 50)
+        df_m1 = None
+        rsi_m1_cur = float('nan')
+        if df_m1_raw is not None:
+            from core.indicators import add_m1_indicators
+            df_m1 = add_m1_indicators(df_m1_raw, cfg)
+            if not df_m1.empty:
+                rsi_m1_cur = float(df_m1['RSI'].iloc[-1])
 
         # シンボル情報取得
         info          = mt5.symbol_info(symbol)
@@ -813,6 +861,10 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         lot_base_s    = max(l_min, min(l_max, round(lot_raw / l_step) * l_step))
         lot           = max(l_min, min(l_max,
                             round(lot_base_s * r_multi_s / l_step) * l_step))
+
+        # TP による実際の期待利益を計算（丸め後のロットベース）
+        expected_profit_usd = tp_move * contract_size * lot
+        expected_profit_jpy = expected_profit_usd * jpy_rate
 
         # ── 大変動検知: スキャルプ→通常モード自動切換え ──────────
         bm_lookback   = scalp.get('big_move_lookback',  12)
@@ -853,27 +905,81 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             # compute_signal 失敗時はスキャルプのまま継続
 
         # tp_move / sl_move はロット計算時に確定済み（上記参照）
-        # M5 RSI クロス検出（複数閾値）
-        # BUY : 50 / 55 / 60 のいずれかを上抜け
-        # SELL: 45 / 40 / 35 のいずれかを下抜け
-        new_cross     = None
-        crossed_level = 0.0
-        if _scalp_prev_rsi is not None:
+        # ── M1 2本待機ロジック: 閾値クロス後、M1で2本連続の上/下抜けで確定────
+        confirmed_signal = None
+        candidate_signal = None
+        crossed_level   = 0.0
+
+        # M1 待機状態チェック：2本連続で条件を満たしたら確定
+        if _scalp_pending_action != 'none':
+            timeout_min = 30  # 待機タイムアウト（分）
+            if (_scalp_pending_m1_start_time is not None and
+                    (now - _scalp_pending_m1_start_time).total_seconds() > timeout_min * 60):
+                # タイムアウト：待機をリセット
+                _scalp_pending_action = 'none'
+                _scalp_pending_level = 0.0
+                _scalp_pending_m1_confirm_count = 0
+                _scalp_pending_m1_rsi_prev = None
+                _scalp_pending_m1_start_time = None
+            elif not np.isnan(rsi_m1_cur):
+                # M1 RSI が取得できた場合、条件判定
+                condition_met = False
+                if _scalp_pending_action == 'buy':
+                    condition_met = rsi_m1_cur > _scalp_pending_level
+                elif _scalp_pending_action == 'sell':
+                    condition_met = rsi_m1_cur < _scalp_pending_level
+
+                if condition_met:
+                    _scalp_pending_m1_confirm_count += 1
+                else:
+                    # 条件を満たさなかった：カウントをリセット
+                    _scalp_pending_m1_confirm_count = 0
+
+                # 2本連続で条件を満たしたら確定
+                if _scalp_pending_m1_confirm_count >= 2:
+                    confirmed_signal = _scalp_pending_action
+                    crossed_level = _scalp_pending_level
+                    _scalp_pending_action = 'none'
+                    _scalp_pending_level = 0.0
+                    _scalp_pending_m1_confirm_count = 0
+                    _scalp_pending_m1_rsi_prev = None
+                    _scalp_pending_m1_start_time = None
+
+                _scalp_pending_m1_rsi_prev = rsi_m1_cur
+
+        # M5 で新規クロス検出（待機状態がない場合のみ）
+        if confirmed_signal is None and _scalp_pending_action == 'none' and _scalp_prev_rsi is not None:
             for thr in buy_thrs:
-                if rsi_cur > thr and _scalp_prev_rsi <= thr:
-                    new_cross     = 'buy'
-                    crossed_level = thr
+                if rsi_cur > thr and rsi_prev_bar <= thr:
+                    candidate_signal = 'buy'
+                    crossed_level    = thr
                     break
-            if new_cross is None:
+            if candidate_signal is None:
                 for thr in sell_thrs:
-                    if rsi_cur < thr and _scalp_prev_rsi >= thr:
-                        new_cross     = 'sell'
-                        crossed_level = thr
+                    if rsi_cur < thr and rsi_prev_bar >= thr:
+                        candidate_signal = 'sell'
+                        crossed_level    = thr
                         break
+
         _scalp_prev_rsi = rsi_cur
+        _scalp_last_bar_time = bar_time
 
         action = 'none'
         skip   = ''
+
+        if confirmed_signal is not None:
+            new_cross = confirmed_signal
+        elif candidate_signal is not None:
+            # 待機状態に入る
+            _scalp_pending_action = candidate_signal
+            _scalp_pending_level  = crossed_level
+            _scalp_pending_m1_confirm_count = 0
+            _scalp_pending_m1_rsi_prev = rsi_m1_cur
+            _scalp_pending_m1_start_time = now
+            skip = f'pending_scalp_{candidate_signal}_{int(crossed_level)}_wait_m1'
+            new_cross = None
+        else:
+            new_cross = None
 
         # ── ポジション数チェック（手動エントリー含む全ポジション）──
         risk_pct       = cfg['BRIDGE'].get('risk_pct', 0.01)
@@ -920,9 +1026,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'rsi_d1':             0.0,
             'rsi_m5':             round(rsi_cur, 1),
             'rsi_m5_prev':        0.0,
+            'rsi_m1':             round(rsi_m1_cur, 1) if not np.isnan(rsi_m1_cur) else 0.0,
             'm5_filter_ok':       False,
             'm5_surge':           'none',
-            'rsi_m1':             0.0,
             'scalp_type':         'none',
             'sma20':              0.0,
             'sl_multi':           round(sl_ratio, 2),
@@ -947,10 +1053,15 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             # スキャルプ専用フィールド（EA は参照しないが記録用）
             'scalp_mode':         True,
             'target_profit_jpy':  target,
-            'tp_move_usd':        round(target_usd, 4),
+            'target_profit_usd':  round(target_usd, 4),
+            'expected_profit_usd': round(expected_profit_usd, 4),
+            'expected_profit_jpy': round(expected_profit_jpy, 0),
+            'tp_move_usd':        round(tp_move * contract_size, 4),
             'trades_today':       _scalp_count,
             'cooldown_min':       cooldown,
             'scalp_cooldown_rem': 0,
+            'scalp_pending_action': _scalp_pending_action,
+            'scalp_pending_m1_confirm_count': _scalp_pending_m1_confirm_count,
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
@@ -1083,37 +1194,40 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
 
                 # ── 時間帯バイアス回避 ───────────────────────────────
                 if tb_cfg.get('enabled', False) and _time_bias_hours:
-                    now_utc      = datetime.now(timezone.utc)
-                    close_before = tb_cfg.get('close_before_min', 15)
-                    warn_dt      = now_utc + timedelta(minutes=close_before)
-                    in_danger    = now_utc.hour in _time_bias_hours
-                    in_warning   = (not in_danger) and (warn_dt.hour in _time_bias_hours)
-
-                    # 危険時間帯 N 分前: 含み益ポジションを決済（同一ウィンドウで1回のみ）
-                    if in_warning:
-                        warn_hr = warn_dt.hour
-                        if _danger_close_done_hr != warn_hr:
+                    now_utc       = datetime.now(timezone.utc)
+                    skip_before   = tb_cfg.get('skip_before_min', 30)
+                    skip_after    = tb_cfg.get('skip_after_min', 15)
+                    
+                    # スキップ対象時間帯（危険時間帯前30分～危険時間帯+1h+15分）
+                    in_skip_window = _is_in_danger_skip_window(now_utc, _time_bias_hours, skip_before, skip_after)
+                    
+                    # スキップ前30分：含み益ポジション決済警告
+                    for danger_hour in _time_bias_hours:
+                        danger_start = datetime(now_utc.year, now_utc.month, now_utc.day, danger_hour, 0, tzinfo=timezone.utc)
+                        pre_warn_start = danger_start - timedelta(minutes=skip_before)
+                        pre_warn_end = pre_warn_start + timedelta(minutes=5)  # 5分間のウィンドウ
+                        
+                        if pre_warn_start <= now_utc < pre_warn_end and _danger_close_done_hr != danger_hour:
                             n_closed = _close_profitable_positions(symbol, magic, deviation)
-                            _danger_close_done_hr = warn_hr
+                            _danger_close_done_hr = danger_hour
                             if n_closed:
                                 print(f"  [時間帯バイアス] {now_utc.strftime('%H:%M')}UTC"
-                                      f" → {warn_hr:02d}:00が危険時間帯"
-                                      f" → 含み益{n_closed}本を決済")
-
-                    # 危険時間帯中: 新規エントリーを抑制
-                    if in_danger and data.get('action') in ('buy', 'sell'):
+                                      f" → {danger_hour:02d}:00が危険時間帯"
+                                      f" → 30分前からスキップ開始 → 含み益{n_closed}本を決済")
+                    
+                    # スキップ対象時間帯中: 新規エントリーを抑制
+                    if in_skip_window and data.get('action') in ('buy', 'sell'):
                         data['action']      = 'none'
-                        data['skip_reason'] = f'危険時間帯({now_utc.hour:02d}:00UTC)'
-
-                    # 危険時間帯終了直後: ウィンドウリセット + 再エントリー待機タイマーセット
-                    if _prev_in_danger and not in_danger:
-                        reentry_delay = tb_cfg.get('reentry_delay_min', 15)
+                        data['skip_reason'] = f'禁止時間帯({now_utc.strftime("%H:%M")}UTC)'
+                    
+                    # スキップウィンドウを抜けた直後: ウィンドウリセット + 再エントリー待機タイマーセット
+                    if _prev_in_danger and not in_skip_window:
                         _reset_entry_windows()
-                        _danger_exit_until[0] = now_utc + timedelta(minutes=reentry_delay)
+                        _danger_exit_until[0] = now_utc + timedelta(minutes=skip_after)  # 15分待機
                         print(f"  [時間帯バイアス] {now_utc.strftime('%H:%M')}UTC"
-                              f" 危険時間帯終了 → {reentry_delay}分後に再エントリー可")
-                    _prev_in_danger = in_danger
-
+                              f" スキップウィンドウ終了 → {skip_after}分後に再エントリー可")
+                    _prev_in_danger = in_skip_window
+                    
                     # 再エントリー待機中はエントリーを抑制
                     if (_danger_exit_until[0] is not None
                             and now_utc < _danger_exit_until[0]
@@ -1139,15 +1253,20 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                     print(f"\n[{ts}] #{itr} [SCALP]  "
                           f"close=${data['close']:,.2f}  "
                           f"RSI_M5={data['rsi_m5']:.1f}  "
+                          f"RSI_M1={data['rsi_m1']:.1f}  "
                           f"ATR=${data['atr']:.2f}  "
                           f"残高=¥{bal}  "
                           f"lot={data['lot_size']}(TP={scalp_cfg.get('tp_atr_fraction',0.5)}×ATR)  "
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
+                    pending_tag = ''
+                    if data['scalp_pending_action'] != 'none':
+                        pending_tag = f"  [待機中] {data['scalp_pending_action'].upper()} {data['scalp_pending_m1_confirm_count']}/2本"
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}  "
-                          f"TP=+${data.get('tp_move_usd',0):.2f}"
-                          f"(¥{scalp_cfg.get('target_profit_jpy',300)})  "
-                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}")
+                          f"expected_profit=+${data.get('expected_profit_usd',0):.2f}"
+                          f"(¥{int(data.get('expected_profit_jpy',0))}) "
+                          f"target=¥{data.get('target_profit_jpy',0)}  "
+                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}{pending_tag}")
                 else:
                     # 通常モードログ
                     surge_tag = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
