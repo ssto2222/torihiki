@@ -65,6 +65,32 @@ _signal_sell_active: dict          = {        # 下落トレンドフォロー S
     'until': None,
 }
 
+# ── JPY/USD レートキャッシュ（1時間更新）────────────────────────
+_jpy_per_usd_cache: float          = 150.0
+_jpy_per_usd_at:    datetime | None = None
+
+
+def _get_jpy_per_usd(fallback: float = 150.0) -> float:
+    """USDJPY レートを MT5 から取得し 1 時間キャッシュする。"""
+    global _jpy_per_usd_cache, _jpy_per_usd_at
+    now = datetime.now(timezone.utc)
+    if _jpy_per_usd_at is not None and (now - _jpy_per_usd_at).total_seconds() < 3600:
+        return _jpy_per_usd_cache
+    try:
+        import MetaTrader5 as mt5
+        tick = mt5.symbol_info_tick("USDJPY")
+        if tick and tick.bid > 0:
+            _jpy_per_usd_cache = float(tick.bid)
+            _jpy_per_usd_at    = now
+            print(f"[JPY/USD] 更新: {_jpy_per_usd_cache:.3f}")
+            return _jpy_per_usd_cache
+    except Exception:
+        pass
+    # MT5 未対応ブローカー (USDJPY 非上場) のフォールバック
+    if _jpy_per_usd_at is None:
+        print(f"[JPY/USD] USDJPY 取得失敗 → フォールバック {fallback}")
+    return fallback
+
 
 # ── ロットサイズ計算ユーティリティ ──────────────────────────────
 
@@ -352,7 +378,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         account  = mt5.account_info()
         balance_jpy = (float(account.balance) if account
                        else cfg['BRIDGE'].get('fallback_balance', 1_500_000))
-        jpy_per_usd = cfg['SCALP'].get('jpy_per_usd', 150.0)
+        jpy_per_usd = _get_jpy_per_usd(cfg['SCALP'].get('jpy_per_usd', 150.0))
         balance_usd = balance_jpy / jpy_per_usd
         risk_pct    = cfg['BRIDGE'].get('risk_pct', 0.01)
         lot_size    = _calc_lot(balance_usd, risk_pct, atr_v * sl_multi,
@@ -416,7 +442,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         import MetaTrader5 as mt5
 
         scalp      = cfg.get('SCALP', {})
-        jpy_rate   = scalp.get('jpy_per_usd',       150.0)
+        jpy_rate   = _get_jpy_per_usd(scalp.get('jpy_per_usd', 150.0))
         target     = scalp.get('target_profit_jpy',  300)
         sl_ratio   = scalp.get('sl_ratio',           1.5)
         sig_tf     = scalp.get('signal_tf',          'M5')
