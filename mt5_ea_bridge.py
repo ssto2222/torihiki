@@ -34,7 +34,8 @@ from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicat
 from core.strategy   import check_m5_entry_filter, check_m5_surge, detect_big_move
 
 CFG = {k: getattr(C, k) for k in
-       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT','BRIDGE','SCALP','REGIME']}
+       ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT',
+        'BRIDGE','SCALP','REGIME','TIME_BIAS']}
 
 # ── RulesEngine ロード（なければフィルタなし）────────────────
 try:
@@ -64,10 +65,11 @@ _sell_last_entry_price:float = 0.0
 _sell_window_key:      tuple = (None, None)
 
 # ── 時間帯バイアス状態 ────────────────────────────────────────
-_time_bias_hours:      set   = set()   # analyze_time_bias.py の出力から読み込む
+_time_bias_hours:      set   = set()   # 危険時間帯セット（定期再分析で更新）
 _danger_close_done_hr: int   = -1      # 同じ警告ウィンドウで複数回決済しない
 _prev_in_danger:       bool  = False   # 危険時間帯→安全への遷移検出
 _danger_exit_until:    list  = [None]  # 危険時間帯終了後の再エントリー待機タイマー [datetime|None]
+_last_rebias_at:       float = 0.0     # 最後に時間帯分析を実行した time.time()
 
 # ── スキャルプモード状態 ─────────────────────────────────────
 _scalp_prev_rsi: float | None    = None   # 前回足 RSI（クロス検出）
@@ -176,6 +178,83 @@ def _regime_lot_multi(regime_h1: str, regime_m5: str, regime_cfg: dict) -> float
     if t_h1 or t_m5:
         return float(regime_cfg.get('lot_multi_weak',  1.0))
     return float(regime_cfg.get('lot_multi_range', 0.6))
+
+
+def _build_time_bias(cfg: dict) -> set:
+    """
+    バックテストを実行して時間帯別統計を計算し time_bias.json を更新する。
+    危険時間帯のセットを返す。MT5 接続中なら実データ、未接続なら合成データを使用。
+    """
+    from collections import defaultdict
+    from core.data       import load_data, generate_m5_from_h1
+    from core.indicators import add_d1_rsi_to_h1, add_m1_indicators
+    from core.strategy   import run_backtest, AtrSL
+
+    tb_cfg   = cfg.get('TIME_BIAS', {})
+    MIN_N    = tb_cfg.get('min_trades_per_hour',  5)
+    WR_THR   = tb_cfg.get('danger_win_rate_thr', 0.40)
+    APNL_THR = tb_cfg.get('danger_avg_pnl',      0.0)
+    out_path = tb_cfg.get('bias_file', './output/time_bias.json')
+
+    print("[時間帯バイアス] 再分析を開始...")
+    try:
+        df_h1_raw, df_m1_raw, is_real = load_data(cfg, force_synthetic=False)
+        df_m5_raw = generate_m5_from_h1(df_h1_raw)
+        df_h1 = add_h1_indicators(df_h1_raw, cfg)
+        df_h1 = add_d1_rsi_to_h1(df_h1, cfg)
+        df_m1 = add_m1_indicators(df_m1_raw, cfg)
+        df_m5 = add_m5_indicators(df_m5_raw, cfg)
+
+        strat = AtrSL(multi=cfg['SL']['sl_multi'])
+        all_trades: list = []
+        for direction in ('buy', 'sell'):
+            res = run_backtest(df_h1, df_m1, strat, cfg['SIGNAL'], cfg,
+                               direction=direction, df_m5=df_m5)
+            all_trades.extend(res.get('trades', []))
+
+        hour_pnls: dict = defaultdict(list)
+        for t in all_trades:
+            hour_pnls[int(t['entry_time'].hour)].append(t['pnl'])
+
+        hour_stats   = {}
+        danger_hours = []
+        for h in range(24):
+            pnls = hour_pnls.get(h, [])
+            n    = len(pnls)
+            if n == 0:
+                hour_stats[h] = {'n': 0, 'win_rate': None, 'avg_pnl': None, 'is_danger': False}
+                continue
+            wins      = sum(1 for p in pnls if p > 0)
+            wr        = wins / n
+            apnl      = float(np.mean(pnls))
+            is_danger = n >= MIN_N and (wr < WR_THR or apnl < APNL_THR)
+            if is_danger:
+                danger_hours.append(h)
+            hour_stats[h] = {'n': n, 'win_rate': round(wr, 3),
+                             'avg_pnl': round(apnl, 2), 'is_danger': is_danger}
+
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        result = {
+            'generated':      datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'symbol':         cfg['MT5']['symbol'],
+            'data_source':    'MT5実データ' if is_real else '合成データ',
+            'n_trades_total': len(all_trades),
+            'danger_hours':   danger_hours,
+            'params':         {'danger_win_rate_thr': WR_THR, 'danger_avg_pnl': APNL_THR,
+                               'min_trades_per_hour': MIN_N},
+            'hour_stats':     {str(h): v for h, v in hour_stats.items()},
+        }
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+
+        src = 'MT5実データ' if is_real else '合成データ'
+        print(f"[時間帯バイアス] 完了 ({src}, {len(all_trades)}トレード)"
+              f" → 危険時間帯: {danger_hours}")
+        return set(danger_hours)
+
+    except Exception as e:
+        print(f"[時間帯バイアス] 分析エラー: {e}")
+        return set()
 
 
 def _load_time_bias(path: str) -> set:
@@ -937,9 +1016,21 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
 
     # 時間帯バイアスファイルをスタートアップ時に読み込む
     global _time_bias_hours, _danger_close_done_hr, _prev_in_danger, _danger_exit_until
+    global _last_rebias_at
+    rebias_interval = tb_cfg.get('rebias_interval_hours', 24)
+    bias_file       = tb_cfg.get('bias_file', './output/time_bias.json')
+
     if tb_cfg.get('enabled', False):
-        _time_bias_hours = _load_time_bias(
-            tb_cfg.get('bias_file', './output/time_bias.json'))
+        # 起動時: bias_file の鮮度チェック → 古い or 存在しない場合は即時分析
+        bias_path = Path(bias_file)
+        file_age_h = ((time.time() - bias_path.stat().st_mtime) / 3600
+                      if bias_path.exists() else float('inf'))
+        if file_age_h >= max(rebias_interval, 1):
+            _time_bias_hours = _build_time_bias(cfg)
+            _last_rebias_at  = time.time()
+        else:
+            _time_bias_hours = _load_time_bias(bias_file)
+            _last_rebias_at  = bias_path.stat().st_mtime if bias_path.exists() else 0.0
 
     Path(sig_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -1034,6 +1125,13 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                         _danger_exit_until[0] = None  # 待機終了
 
                 write_signal(data, sig_path)
+
+                # 定期再分析（rebias_interval_hours ごと）
+                if (tb_cfg.get('enabled', False) and rebias_interval > 0
+                        and time.time() - _last_rebias_at >= rebias_interval * 3600):
+                    _time_bias_hours = _build_time_bias(cfg)
+                    _last_rebias_at  = time.time()
+
                 ts = datetime.now().strftime('%H:%M:%S')
 
                 if mode == 'scalp' and data.get('scalp_mode', True):
