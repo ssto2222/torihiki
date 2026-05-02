@@ -80,6 +80,9 @@ _scalp_date:        object           = None   # 日付リセット管理
 _scalp_last_action: str              = 'none' # 直近スキャルプエントリー方向（大変動継続判定用）
 _scalp_pending_action: str          = 'none' # 閾値クロス後の保留エントリー方向
 _scalp_pending_level:  float        = 0.0    # 保留中の閾値レベル
+_scalp_pending_m1_confirm_count: int = 0     # M1 で閾値を超えた連続本数（0-2で確定）
+_scalp_pending_m1_rsi_prev: float | None = None  # 前回ポーリング時の M1 RSI
+_scalp_pending_m1_start_time: datetime | None = None  # 待機開始時刻（30分でタイムアウト）
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -756,7 +759,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
     """
     global _scalp_prev_rsi, _scalp_last_bar_time, _scalp_last_at, \
            _scalp_count, _scalp_date, _scalp_last_action, \
-           _scalp_pending_action, _scalp_pending_level
+           _scalp_pending_action, _scalp_pending_level, \
+           _scalp_pending_m1_confirm_count, _scalp_pending_m1_rsi_prev, \
+           _scalp_pending_m1_start_time
 
     try:
         import MetaTrader5 as mt5
@@ -799,6 +804,16 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         close_v = float(df['Close'].iloc[-1])
         atr_v   = float(df['ATR'].iloc[-1])         # M5 ATR（スキャルプに適切な短期ボラ）
 
+        # ── M1 データ取得（待機ロジック用）───────────────────────
+        df_m1_raw = fetch_ohlcv(symbol, 'M1', 50)
+        df_m1 = None
+        rsi_m1_cur = float('nan')
+        if df_m1_raw is not None:
+            from core.indicators import add_m1_indicators
+            df_m1 = add_m1_indicators(df_m1_raw, cfg)
+            if not df_m1.empty:
+                rsi_m1_cur = float(df_m1['RSI'].iloc[-1])
+
         # シンボル情報取得
         info          = mt5.symbol_info(symbol)
         contract_size = float(info.trade_contract_size) if info else 1.0
@@ -826,6 +841,10 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         lot_base_s    = max(l_min, min(l_max, round(lot_raw / l_step) * l_step))
         lot           = max(l_min, min(l_max,
                             round(lot_base_s * r_multi_s / l_step) * l_step))
+
+        # TP による実際の期待利益を計算（丸め後のロットベース）
+        expected_profit_usd = tp_move * contract_size * lot
+        expected_profit_jpy = expected_profit_usd * jpy_rate
 
         # ── 大変動検知: スキャルプ→通常モード自動切換え ──────────
         bm_lookback   = scalp.get('big_move_lookback',  12)
@@ -866,23 +885,50 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             # compute_signal 失敗時はスキャルプのまま継続
 
         # tp_move / sl_move はロット計算時に確定済み（上記参照）
-        # M5 RSI クロス検出（複数閾値）
-        # BUY : 50 / 55 / 60 のいずれかを上抜け
-        # SELL: 45 / 40 / 35 のいずれかを下抜け
+        # ── M1 2本待機ロジック: 閾値クロス後、M1で2本連続の上/下抜けで確定────
         confirmed_signal = None
         candidate_signal = None
         crossed_level   = 0.0
 
-        # 1本待機ロジック: 閾値クロス後は次のM5足で傾向継続を確認してから成立
-        if bar_changed and _scalp_pending_action != 'none':
-            if (_scalp_pending_action == 'buy' and rsi_cur > _scalp_pending_level) or \
-               (_scalp_pending_action == 'sell' and rsi_cur < _scalp_pending_level):
-                confirmed_signal = _scalp_pending_action
-                crossed_level = _scalp_pending_level
-            _scalp_pending_action = 'none'
-            _scalp_pending_level  = 0.0
+        # M1 待機状態チェック：2本連続で条件を満たしたら確定
+        if _scalp_pending_action != 'none':
+            timeout_min = 30  # 待機タイムアウト（分）
+            if (_scalp_pending_m1_start_time is not None and
+                    (now - _scalp_pending_m1_start_time).total_seconds() > timeout_min * 60):
+                # タイムアウト：待機をリセット
+                _scalp_pending_action = 'none'
+                _scalp_pending_level = 0.0
+                _scalp_pending_m1_confirm_count = 0
+                _scalp_pending_m1_rsi_prev = None
+                _scalp_pending_m1_start_time = None
+            elif not np.isnan(rsi_m1_cur):
+                # M1 RSI が取得できた場合、条件判定
+                condition_met = False
+                if _scalp_pending_action == 'buy':
+                    condition_met = rsi_m1_cur > _scalp_pending_level
+                elif _scalp_pending_action == 'sell':
+                    condition_met = rsi_m1_cur < _scalp_pending_level
 
-        if confirmed_signal is None and _scalp_prev_rsi is not None:
+                if condition_met:
+                    _scalp_pending_m1_confirm_count += 1
+                else:
+                    # 条件を満たさなかった：カウントをリセット
+                    _scalp_pending_m1_confirm_count = 0
+
+                # 2本連続で条件を満たしたら確定
+                if _scalp_pending_m1_confirm_count >= 2:
+                    confirmed_signal = _scalp_pending_action
+                    crossed_level = _scalp_pending_level
+                    _scalp_pending_action = 'none'
+                    _scalp_pending_level = 0.0
+                    _scalp_pending_m1_confirm_count = 0
+                    _scalp_pending_m1_rsi_prev = None
+                    _scalp_pending_m1_start_time = None
+
+                _scalp_pending_m1_rsi_prev = rsi_m1_cur
+
+        # M5 で新規クロス検出（待機状態がない場合のみ）
+        if confirmed_signal is None and _scalp_pending_action == 'none' and _scalp_prev_rsi is not None:
             for thr in buy_thrs:
                 if rsi_cur > thr and rsi_prev_bar <= thr:
                     candidate_signal = 'buy'
@@ -903,10 +949,14 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
 
         if confirmed_signal is not None:
             new_cross = confirmed_signal
-        elif candidate_signal is not None and _scalp_pending_action == 'none':
+        elif candidate_signal is not None:
+            # 待機状態に入る
             _scalp_pending_action = candidate_signal
             _scalp_pending_level  = crossed_level
-            skip = f'pending_scalp_{candidate_signal}_{int(crossed_level)}'
+            _scalp_pending_m1_confirm_count = 0
+            _scalp_pending_m1_rsi_prev = rsi_m1_cur
+            _scalp_pending_m1_start_time = now
+            skip = f'pending_scalp_{candidate_signal}_{int(crossed_level)}_wait_m1'
             new_cross = None
         else:
             new_cross = None
@@ -956,9 +1006,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'rsi_d1':             0.0,
             'rsi_m5':             round(rsi_cur, 1),
             'rsi_m5_prev':        0.0,
+            'rsi_m1':             round(rsi_m1_cur, 1) if not np.isnan(rsi_m1_cur) else 0.0,
             'm5_filter_ok':       False,
             'm5_surge':           'none',
-            'rsi_m1':             0.0,
             'scalp_type':         'none',
             'sma20':              0.0,
             'sl_multi':           round(sl_ratio, 2),
@@ -990,6 +1040,8 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'trades_today':       _scalp_count,
             'cooldown_min':       cooldown,
             'scalp_cooldown_rem': 0,
+            'scalp_pending_action': _scalp_pending_action,
+            'scalp_pending_m1_confirm_count': _scalp_pending_m1_confirm_count,
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
@@ -1178,16 +1230,20 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                     print(f"\n[{ts}] #{itr} [SCALP]  "
                           f"close=${data['close']:,.2f}  "
                           f"RSI_M5={data['rsi_m5']:.1f}  "
+                          f"RSI_M1={data['rsi_m1']:.1f}  "
                           f"ATR=${data['atr']:.2f}  "
                           f"残高=¥{bal}  "
                           f"lot={data['lot_size']}(TP={scalp_cfg.get('tp_atr_fraction',0.5)}×ATR)  "
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
+                    pending_tag = ''
+                    if data['scalp_pending_action'] != 'none':
+                        pending_tag = f"  [待機中] {data['scalp_pending_action'].upper()} {data['scalp_pending_m1_confirm_count']}/2本"
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}  "
                           f"expected_profit=+${data.get('expected_profit_usd',0):.2f}"
                           f"(¥{int(data.get('expected_profit_jpy',0))}) "
                           f"target=¥{data.get('target_profit_jpy',0)}  "
-                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}")
+                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}{pending_tag}")
                 else:
                     # 通常モードログ
                     surge_tag = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
