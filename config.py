@@ -100,7 +100,7 @@ SCALP = dict(
     sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
     tp_atr_fraction   = 0.5,     # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
     signal_tf         = 'M5',    # シグナル生成足（'M5' 推奨）
-    rsi_buy_thrs      = [50.0, 55.0, 60.0],   # RSI 上抜け → BUY
+    rsi_buy_thrs      = [55.0, 60.0, 65,0],   # RSI 上抜け → BUY
     rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
     max_trades_day    = 20,      # 1日の最大エントリー回数
     cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
