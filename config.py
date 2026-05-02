@@ -51,11 +51,11 @@ EXECUTION = dict(
 # ── SL & イグジット ────────────────────────────────────────
 SL = dict(
     spread_usd   = 0.30,
-    sl_multi     = 1.0,         # SL = Entry ± ATR × sl_multi        ★最適化済み(旧1.5)
-    tp_atr_multi = 3.0,         # TP  = Entry ± ATR × tp_atr_multi
+    sl_multi     = 1.5,         # SL = Entry ± ATR × sl_multi  ★BT最適(WR52%,SL刈55%,Sharpe26.4)
+    tp_atr_multi = 3.0,         # TP  = Entry ± ATR × tp_atr_multi  (R:R=2.0)
     hold_max_h1  = 48,
-    rsi_exit_thr = 65,          # RSI≥65 でトレーリング起動           ★最適化済み(旧75)
-    trail_multi  = 2.5,         # トレーリング幅 = ATR × trail_multi  ★最適化済み(旧1.5)
+    rsi_exit_thr = 65,          # RSI≥65 でトレーリング起動
+    trail_multi  = 2.5,         # トレーリング幅 = ATR × trail_multi
 )
 
 # ── トレードルール（trading_rules.json から導出）────────────────
@@ -65,7 +65,7 @@ RULES = dict(
     cooldown_large_loss_min  = 1440,  # 大損失後のクールダウン（分）= 翌日まで
     large_loss_threshold_usd = -10000,
     min_hold_minutes         = 15,
-    total_risk_pct           = 0.20,  # 全体許容損失（残高比）; max_positions = total/risk_pct = 20
+    total_risk_pct           = 0.30,  # 全体許容損失（残高比）; max_positions = total/risk_pct = 10
 )
 
 # ── 最適化 ────────────────────────────────────────────────
@@ -87,7 +87,7 @@ BRIDGE = dict(
     status_file      = "C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json",
     poll_sec         = 5,
     lot_size         = 0.05,         # フォールバックロット（残高取得失敗時）
-    risk_pct         = 0.01,         # 1トレードあたりリスク = 残高 × 1%
+    risk_pct         = 0.03,         # 1トレードあたりリスク = 残高 × 3%  ★Quarter-Kelly(7.1%)の保守側上限
     fallback_balance = 15_000,    # MT5残高取得失敗時のデフォルト残高（円）
     scalp_lot_multi  = 5.0,          # スキャルプモードのロット倍率
 )
