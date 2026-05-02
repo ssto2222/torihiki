@@ -296,6 +296,19 @@ def _is_in_danger_skip_window(now_utc: datetime, danger_hours: set, skip_before_
     return False
 
 
+def _has_positions_in_direction(symbol: str, magic: int, direction: str) -> bool:
+    """指定シンボル・magic のポジションが direction 方向に存在するか調べる。"""
+    try:
+        import MetaTrader5 as mt5
+        positions = mt5.positions_get(symbol=symbol)
+        if not positions:
+            return False
+        order_type = mt5.ORDER_TYPE_BUY if direction == 'buy' else mt5.ORDER_TYPE_SELL
+        return any(p.magic == magic and p.type == order_type for p in positions)
+    except Exception:
+        return False
+
+
 def _close_profitable_positions(symbol: str, magic: int, deviation: int) -> int:
     """MT5 の含み益ポジション（magic 一致）を全決済する。決済した件数を返す。"""
     closed = 0
@@ -418,13 +431,15 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                     dim_m5   = float(df_m5['DI_minus'].iloc[-1])
 
         # M1 RSI（スキャルプ判定用: RSI(14) を M1 足で計算）
-        rsi_m1_cur      = float('nan')
-        rsi_m1_bar_prev = float('nan')   # 直前 M1 バーとの比較（rising 判定）
+        rsi_m1_cur       = float('nan')
+        rsi_m1_bar_prev  = float('nan')   # 直前 M1 バー RSI（rising 判定用）
+        rsi_m1_bar_prev2 = float('nan')   # 2本前 M1 バー RSI（2本継続確認用）
         if df_m1_raw is not None and len(df_m1_raw) >= 3:
             df_m1 = add_m5_indicators(df_m1_raw, cfg)   # RSI(14) ロジック共用
-            if not df_m1.empty and len(df_m1) >= 2:
-                rsi_m1_cur      = float(df_m1['RSI'].iloc[-1])
-                rsi_m1_bar_prev = float(df_m1['RSI'].iloc[-2])
+            if not df_m1.empty and len(df_m1) >= 3:
+                rsi_m1_cur       = float(df_m1['RSI'].iloc[-1])
+                rsi_m1_bar_prev  = float(df_m1['RSI'].iloc[-2])
+                rsi_m1_bar_prev2 = float(df_m1['RSI'].iloc[-3])
 
         sl_multi       = cfg['SL']['sl_multi']
         sig_p          = cfg['SIGNAL']
@@ -598,6 +613,31 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                            if _signal_active['until'] else '')
         sell_valid_until_str = (_signal_sell_active['until'].strftime('%Y.%m.%d %H:%M:%S')
                                 if _signal_sell_active['until'] else '')
+
+        # ── M1 執行フィルタ: 指定閾値を 2本以上継続上/下抜け ───────
+        # スキャルプ（scalp_type != 'none'）は独自 M1 ロジック済みのためスキップ
+        exec_cfg = cfg.get('EXECUTION', {})
+        m1_buy_thrs  = exec_cfg.get('m1_exec_buy_thrs',  [65.0, 70.0, 75.0])
+        m1_sell_thrs = exec_cfg.get('m1_exec_sell_thrs', [35.0, 30.0, 25.0])
+        if (action in ('buy', 'sell') and scalp_type == 'none'
+                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)):
+            orig_action = action
+            if orig_action == 'buy':
+                m1_exec_ok = any(
+                    rsi_m1_bar_prev >= thr and rsi_m1_bar_prev2 >= thr
+                    for thr in m1_buy_thrs
+                )
+                thr_str = '/'.join(str(int(t)) for t in m1_buy_thrs) + '↑'
+            else:
+                m1_exec_ok = any(
+                    rsi_m1_bar_prev <= thr and rsi_m1_bar_prev2 <= thr
+                    for thr in m1_sell_thrs
+                )
+                thr_str = '/'.join(str(int(t)) for t in m1_sell_thrs) + '↓'
+            if not m1_exec_ok:
+                action      = 'none'
+                skip_reason = (f'M1執行待機: RSI_M1={rsi_m1_cur:.1f}'
+                               f'(要{thr_str} 2本以上)')
 
         # ── SL/TP（方向・種別に応じて切り替え）──────────────────
         if scalp_type == 'surge_scalp':
@@ -910,6 +950,29 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         candidate_signal = None
         crossed_level   = 0.0
 
+        # ── M1 早期執行: M5 RSI が閾値に接近中かつ M1 がすでに先行クロス ──────
+        # 待機状態がない場合のみ評価。df_m1 は上で取得済みのものを再利用。
+        is_m1_early    = False
+        m1_early_margin = scalp.get('m1_early_margin', 2.0)
+        if (confirmed_signal is None and _scalp_pending_action == 'none'
+                and df_m1 is not None and len(df_m1) >= 2 and m1_early_margin > 0):
+            rsi_m1_prev2 = float(df_m1['RSI'].iloc[-2])
+            for thr in buy_thrs:
+                if thr - m1_early_margin <= rsi_cur <= thr:     # M5 が閾値の手前
+                    if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:  # M1 が先行クロス
+                        confirmed_signal = 'buy'
+                        crossed_level    = thr
+                        is_m1_early      = True
+                    break
+            if confirmed_signal is None:
+                for thr in sell_thrs:
+                    if thr <= rsi_cur <= thr + m1_early_margin:  # M5 が閾値の手前
+                        if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
+                            confirmed_signal = 'sell'
+                            crossed_level    = thr
+                            is_m1_early      = True
+                        break
+
         # M1 待機状態チェック：2本連続で条件を満たしたら確定
         if _scalp_pending_action != 'none':
             timeout_min = 30  # 待機タイムアウト（分）
@@ -999,8 +1062,12 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                 rem  = int((_scalp_last_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
                 skip = f'cooldown残{rem}分'
             elif pos_st['available_slots'] <= 0:
-                skip = (f"max_positions={pos_st['max_positions']}に到達"
-                        f"（全{pos_st['total_positions']}本）")
+                # スキャルプ: 保有ポジションと逆方向ならスロット上限を超えて許可（ヘッジ）
+                opp_dir = 'sell' if new_cross == 'buy' else 'buy'
+                magic_n = cfg['MT5'].get('magic', 20240101)
+                if not _has_positions_in_direction(symbol, magic_n, opp_dir):
+                    skip = (f"max_positions={pos_st['max_positions']}に到達"
+                            f"（全{pos_st['total_positions']}本）")
             else:
                 action              = new_cross
                 _scalp_last_action  = new_cross
@@ -1034,7 +1101,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
             'signal_type':        (f'scalp_{action}_{int(crossed_level)}'
+                                   f'{"_m1early" if is_m1_early else ""}'
                                    if action != 'none' else 'none'),
+            'execution_tf':       'm1_early' if is_m1_early else 'm5',
             'signal_valid_until': '',
             'downtrend_ok':       False,
             'sell_signal_type':   'none',
@@ -1250,7 +1319,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
 
                 if mode == 'scalp' and data.get('scalp_mode', True):
                     # スキャルプ専用ログ
-                    print(f"\n[{ts}] #{itr} [SCALP]  "
+                    early_tag = ' [M1早期]' if data.get('execution_tf') == 'm1_early' else ''
+                    print(f"\n[{ts}] #{itr} [SCALP]{early_tag}  "
                           f"close=${data['close']:,.2f}  "
                           f"RSI_M5={data['rsi_m5']:.1f}  "
                           f"RSI_M1={data['rsi_m1']:.1f}  "

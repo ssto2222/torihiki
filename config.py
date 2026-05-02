@@ -44,9 +44,11 @@ SIGNAL = dict(
 
 # ── M1 執行 ────────────────────────────────────────────────
 EXECUTION = dict(
-    touch_margin    = 0.20,
-    m1_rsi_offset   = 20.0,
-    signal_valid_m1 = 240,      # シグナルON有効期限（M1本数）
+    touch_margin        = 0.20,
+    m1_rsi_offset       = 20.0,
+    signal_valid_m1     = 240,          # シグナルON有効期限（M1本数）
+    m1_exec_buy_thrs    = [65.0, 70.0, 75.0],   # BUY 執行: M1 RSI がいずれかを 2本以上上抜け
+    m1_exec_sell_thrs   = [35.0, 30.0, 25.0],   # SELL 執行: M1 RSI がいずれかを 2本以上下抜け
 )
 
 # ── SL & イグジット ────────────────────────────────────────
@@ -104,8 +106,9 @@ SCALP = dict(
     rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
     max_trades_day    = 20,      # 1日の最大エントリー回数
     cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
-    big_move_lookback = 12,      # 大変動判定: 過去 N 本（12本=60分）
-    big_move_atr_multi= 5.0,     # 大変動判定: 価格変動 > ATR × N で切換え
+    big_move_lookback  = 12,     # 大変動判定: 過去 N 本（12本=60分）
+    big_move_atr_multi = 5.0,   # 大変動判定: 価格変動 > ATR × N で切換え
+    m1_early_margin    = 2.0,   # M5 RSI が閾値からこの値以内に接近 + M1 先行クロスで早期執行
 )
 
 # ── レジーム判定・分散エントリー ──────────────────────────────────
