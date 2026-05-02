@@ -44,9 +44,11 @@ SIGNAL = dict(
 
 # ── M1 執行 ────────────────────────────────────────────────
 EXECUTION = dict(
-    touch_margin    = 0.20,
-    m1_rsi_offset   = 20.0,
-    signal_valid_m1 = 240,      # シグナルON有効期限（M1本数）
+    touch_margin        = 0.20,
+    m1_rsi_offset       = 20.0,
+    signal_valid_m1     = 240,          # シグナルON有効期限（M1本数）
+    m1_exec_buy_thrs    = [65.0, 70.0, 75.0],   # BUY 執行: M1 RSI がいずれかを 2本以上上抜け
+    m1_exec_sell_thrs   = [35.0, 30.0, 25.0],   # SELL 執行: M1 RSI がいずれかを 2本以上下抜け
 )
 
 # ── SL & イグジット ────────────────────────────────────────

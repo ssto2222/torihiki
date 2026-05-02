@@ -431,13 +431,15 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                     dim_m5   = float(df_m5['DI_minus'].iloc[-1])
 
         # M1 RSI（スキャルプ判定用: RSI(14) を M1 足で計算）
-        rsi_m1_cur      = float('nan')
-        rsi_m1_bar_prev = float('nan')   # 直前 M1 バーとの比較（rising 判定）
+        rsi_m1_cur       = float('nan')
+        rsi_m1_bar_prev  = float('nan')   # 直前 M1 バー RSI（rising 判定用）
+        rsi_m1_bar_prev2 = float('nan')   # 2本前 M1 バー RSI（2本継続確認用）
         if df_m1_raw is not None and len(df_m1_raw) >= 3:
             df_m1 = add_m5_indicators(df_m1_raw, cfg)   # RSI(14) ロジック共用
-            if not df_m1.empty and len(df_m1) >= 2:
-                rsi_m1_cur      = float(df_m1['RSI'].iloc[-1])
-                rsi_m1_bar_prev = float(df_m1['RSI'].iloc[-2])
+            if not df_m1.empty and len(df_m1) >= 3:
+                rsi_m1_cur       = float(df_m1['RSI'].iloc[-1])
+                rsi_m1_bar_prev  = float(df_m1['RSI'].iloc[-2])
+                rsi_m1_bar_prev2 = float(df_m1['RSI'].iloc[-3])
 
         sl_multi       = cfg['SL']['sl_multi']
         sig_p          = cfg['SIGNAL']
@@ -611,6 +613,31 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                            if _signal_active['until'] else '')
         sell_valid_until_str = (_signal_sell_active['until'].strftime('%Y.%m.%d %H:%M:%S')
                                 if _signal_sell_active['until'] else '')
+
+        # ── M1 執行フィルタ: 指定閾値を 2本以上継続上/下抜け ───────
+        # スキャルプ（scalp_type != 'none'）は独自 M1 ロジック済みのためスキップ
+        exec_cfg = cfg.get('EXECUTION', {})
+        m1_buy_thrs  = exec_cfg.get('m1_exec_buy_thrs',  [65.0, 70.0, 75.0])
+        m1_sell_thrs = exec_cfg.get('m1_exec_sell_thrs', [35.0, 30.0, 25.0])
+        if (action in ('buy', 'sell') and scalp_type == 'none'
+                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)):
+            orig_action = action
+            if orig_action == 'buy':
+                m1_exec_ok = any(
+                    rsi_m1_bar_prev >= thr and rsi_m1_bar_prev2 >= thr
+                    for thr in m1_buy_thrs
+                )
+                thr_str = '/'.join(str(int(t)) for t in m1_buy_thrs) + '↑'
+            else:
+                m1_exec_ok = any(
+                    rsi_m1_bar_prev <= thr and rsi_m1_bar_prev2 <= thr
+                    for thr in m1_sell_thrs
+                )
+                thr_str = '/'.join(str(int(t)) for t in m1_sell_thrs) + '↓'
+            if not m1_exec_ok:
+                action      = 'none'
+                skip_reason = (f'M1執行待機: RSI_M1={rsi_m1_cur:.1f}'
+                               f'(要{thr_str} 2本以上)')
 
         # ── SL/TP（方向・種別に応じて切り替え）──────────────────
         if scalp_type == 'surge_scalp':
