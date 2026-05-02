@@ -65,6 +65,32 @@ _signal_sell_active: dict          = {        # 下落トレンドフォロー S
     'until': None,
 }
 
+# ── JPY/USD レートキャッシュ（1時間更新）────────────────────────
+_jpy_per_usd_cache: float          = 150.0
+_jpy_per_usd_at:    datetime | None = None
+
+
+def _get_jpy_per_usd(fallback: float = 150.0) -> float:
+    """USDJPY レートを MT5 から取得し 1 時間キャッシュする。"""
+    global _jpy_per_usd_cache, _jpy_per_usd_at
+    now = datetime.now(timezone.utc)
+    if _jpy_per_usd_at is not None and (now - _jpy_per_usd_at).total_seconds() < 3600:
+        return _jpy_per_usd_cache
+    try:
+        import MetaTrader5 as mt5
+        tick = mt5.symbol_info_tick("USDJPY")
+        if tick and tick.bid > 0:
+            _jpy_per_usd_cache = float(tick.bid)
+            _jpy_per_usd_at    = now
+            print(f"[JPY/USD] 更新: {_jpy_per_usd_cache:.3f}")
+            return _jpy_per_usd_cache
+    except Exception:
+        pass
+    # MT5 未対応ブローカー (USDJPY 非上場) のフォールバック
+    if _jpy_per_usd_at is None:
+        print(f"[JPY/USD] USDJPY 取得失敗 → フォールバック {fallback}")
+    return fallback
+
 
 # ── ロットサイズ計算ユーティリティ ──────────────────────────────
 
@@ -350,10 +376,12 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         l_max    = float(tick.volume_max)          if tick else 100.0
         l_step   = float(tick.volume_step)         if tick else 0.01
         account  = mt5.account_info()
-        balance  = (float(account.balance) if account
-                    else cfg['BRIDGE'].get('fallback_balance', 10000.0))
-        risk_pct = cfg['BRIDGE'].get('risk_pct', 0.01)
-        lot_size = _calc_lot(balance, risk_pct, atr_v * sl_multi,
+        balance_jpy = (float(account.balance) if account
+                       else cfg['BRIDGE'].get('fallback_balance', 1_500_000))
+        jpy_per_usd = _get_jpy_per_usd(cfg['SCALP'].get('jpy_per_usd', 150.0))
+        balance_usd = balance_jpy / jpy_per_usd
+        risk_pct    = cfg['BRIDGE'].get('risk_pct', 0.01)
+        lot_size    = _calc_lot(balance_usd, risk_pct, atr_v * sl_multi,
                              c_sz, l_min, l_max, l_step,
                              cfg['BRIDGE']['lot_size'])
 
@@ -414,7 +442,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         import MetaTrader5 as mt5
 
         scalp      = cfg.get('SCALP', {})
-        jpy_rate   = scalp.get('jpy_per_usd',       150.0)
+        jpy_rate   = _get_jpy_per_usd(scalp.get('jpy_per_usd', 150.0))
         target     = scalp.get('target_profit_jpy',  300)
         sl_ratio   = scalp.get('sl_ratio',           1.5)
         sig_tf     = scalp.get('signal_tf',          'M5')
@@ -451,14 +479,15 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         l_max         = float(info.volume_max)          if info else 100.0
         l_step        = float(info.volume_step)         if info else 0.01
         account       = mt5.account_info()
-        balance       = (float(account.balance) if account
-                         else cfg['BRIDGE'].get('fallback_balance', 10000.0))
+        balance_jpy   = (float(account.balance) if account
+                         else cfg['BRIDGE'].get('fallback_balance', 1_500_000))
+        balance_usd   = balance_jpy / jpy_rate          # jpy_rate は上で取得済み
         risk_pct      = cfg['BRIDGE'].get('risk_pct',        0.01)
         scalp_multi   = cfg['BRIDGE'].get('scalp_lot_multi', 2.0)
 
         # 残高ベースのロット計算（スキャルプは scalp_lot_multi 倍）
         sl_dist_est = atr_v * scalp.get('sl_ratio', 1.5)
-        lot_base    = _calc_lot(balance, risk_pct, sl_dist_est, contract_size,
+        lot_base    = _calc_lot(balance_usd, risk_pct, sl_dist_est, contract_size,
                                 l_min, l_max, l_step, cfg['BRIDGE']['lot_size'])
         lot         = max(l_min, min(l_max,
                           round(lot_base * scalp_multi / l_step) * l_step))
@@ -701,7 +730,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"close=${data['close']:,.2f}  "
                           f"RSI_M5={data['rsi_m5']:.1f}  "
                           f"ATR=${data['atr']:.2f}  "
-                          f"残高={bal}円  "
+                          f"残高=¥{bal}  "
                           f"lot={data['lot_size']}({scalp_cfg.get('scalp_lot_multi',2.0)}x)  "
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
                     print(f"  action={data['action'].upper():4s}  "
@@ -735,7 +764,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                     print(f"  skip: {data['skip_reason']}")
                 if data.get('sell_skip_reason'):
                     print(f"  sell_skip: {data['sell_skip_reason']}")
-                print(f"  残高={bal}  ポジション={pos}件  連続損失={consec_losses}回")
+                print(f"  残高=¥{bal}  ポジション={pos}件  連続損失={consec_losses}回")
             else:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}  データ取得失敗")
 
