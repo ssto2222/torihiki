@@ -983,7 +983,10 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             # スキャルプ専用フィールド（EA は参照しないが記録用）
             'scalp_mode':         True,
             'target_profit_jpy':  target,
-            'tp_move_usd':        round(target_usd, 4),
+            'target_profit_usd':  round(target_usd, 4),
+            'expected_profit_usd': round(expected_profit_usd, 4),
+            'expected_profit_jpy': round(expected_profit_jpy, 0),
+            'tp_move_usd':        round(tp_move * contract_size, 4),
             'trades_today':       _scalp_count,
             'cooldown_min':       cooldown,
             'scalp_cooldown_rem': 0,
@@ -1181,8 +1184,9 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}  "
-                          f"TP=+${data.get('tp_move_usd',0):.2f}"
-                          f"(¥{scalp_cfg.get('target_profit_jpy',300)})  "
+                          f"expected_profit=+${data.get('expected_profit_usd',0):.2f}"
+                          f"(¥{int(data.get('expected_profit_jpy',0))}) "
+                          f"target=¥{data.get('target_profit_jpy',0)}  "
                           f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}")
                 else:
                     # 通常モードログ
