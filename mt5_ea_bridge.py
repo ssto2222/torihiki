@@ -73,10 +73,13 @@ _last_rebias_at:       float = 0.0     # 最後に時間帯分析を実行した
 
 # ── スキャルプモード状態 ─────────────────────────────────────
 _scalp_prev_rsi: float | None    = None   # 前回足 RSI（クロス検出）
+_scalp_last_bar_time: datetime | None = None   # 直近 M5 バー時刻
 _scalp_last_at:  datetime | None = None   # 直近エントリーシグナル時刻
 _scalp_count:       int              = 0      # 当日シグナル発火回数
 _scalp_date:        object           = None   # 日付リセット管理
 _scalp_last_action: str              = 'none' # 直近スキャルプエントリー方向（大変動継続判定用）
+_scalp_pending_action: str          = 'none' # 閾値クロス後の保留エントリー方向
+_scalp_pending_level:  float        = 0.0    # 保留中の閾値レベル
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -749,8 +752,11 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
       - 日次 max_trades_day 回を超えたらスキップ
       - 前回エントリーから cooldown_min 分以内はスキップ
       - 禁止時間帯（UTC 9/16/21h）はスキップ
+      - 閾値クロス後は 1 本待機し、同傾向が継続する場合のみエントリー
     """
-    global _scalp_prev_rsi, _scalp_last_at, _scalp_count, _scalp_date, _scalp_last_action
+    global _scalp_prev_rsi, _scalp_last_bar_time, _scalp_last_at, \
+           _scalp_count, _scalp_date, _scalp_last_action, \
+           _scalp_pending_action, _scalp_pending_level
 
     try:
         import MetaTrader5 as mt5
@@ -781,6 +787,13 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         df = add_m5_indicators(df_raw, cfg)
         if df.empty:
             return None
+
+        bar_time = df.index[-1]
+        bar_changed = (bar_time != _scalp_last_bar_time)
+        if len(df) >= 2:
+            rsi_prev_bar = float(df['RSI'].iloc[-2])
+        else:
+            rsi_prev_bar = float(_scalp_prev_rsi or 0.0)
 
         rsi_cur = float(df['RSI'].iloc[-1])
         close_v = float(df['Close'].iloc[-1])
@@ -856,24 +869,47 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         # M5 RSI クロス検出（複数閾値）
         # BUY : 50 / 55 / 60 のいずれかを上抜け
         # SELL: 45 / 40 / 35 のいずれかを下抜け
-        new_cross     = None
-        crossed_level = 0.0
-        if _scalp_prev_rsi is not None:
+        confirmed_signal = None
+        candidate_signal = None
+        crossed_level   = 0.0
+
+        # 1本待機ロジック: 閾値クロス後は次のM5足で傾向継続を確認してから成立
+        if bar_changed and _scalp_pending_action != 'none':
+            if (_scalp_pending_action == 'buy' and rsi_cur > _scalp_pending_level) or \
+               (_scalp_pending_action == 'sell' and rsi_cur < _scalp_pending_level):
+                confirmed_signal = _scalp_pending_action
+                crossed_level = _scalp_pending_level
+            _scalp_pending_action = 'none'
+            _scalp_pending_level  = 0.0
+
+        if confirmed_signal is None and _scalp_prev_rsi is not None:
             for thr in buy_thrs:
-                if rsi_cur > thr and _scalp_prev_rsi <= thr:
-                    new_cross     = 'buy'
-                    crossed_level = thr
+                if rsi_cur > thr and rsi_prev_bar <= thr:
+                    candidate_signal = 'buy'
+                    crossed_level    = thr
                     break
-            if new_cross is None:
+            if candidate_signal is None:
                 for thr in sell_thrs:
-                    if rsi_cur < thr and _scalp_prev_rsi >= thr:
-                        new_cross     = 'sell'
-                        crossed_level = thr
+                    if rsi_cur < thr and rsi_prev_bar >= thr:
+                        candidate_signal = 'sell'
+                        crossed_level    = thr
                         break
+
         _scalp_prev_rsi = rsi_cur
+        _scalp_last_bar_time = bar_time
 
         action = 'none'
         skip   = ''
+
+        if confirmed_signal is not None:
+            new_cross = confirmed_signal
+        elif candidate_signal is not None and _scalp_pending_action == 'none':
+            _scalp_pending_action = candidate_signal
+            _scalp_pending_level  = crossed_level
+            skip = f'pending_scalp_{candidate_signal}_{int(crossed_level)}'
+            new_cross = None
+        else:
+            new_cross = None
 
         # ── ポジション数チェック（手動エントリー含む全ポジション）──
         risk_pct       = cfg['BRIDGE'].get('risk_pct', 0.01)
