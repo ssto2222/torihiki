@@ -23,6 +23,7 @@ MT5 = dict(
 INDICATOR = dict(
     rsi_period   = 14,
     atr_period   = 14,
+    adx_period   = 14,          # ADX / +DI / -DI 期間
     bb_period    = 20,
     bb_sigma     = 3.0,
     sma_m1       = 20,
@@ -95,8 +96,9 @@ BRIDGE = dict(
 # ── スキャルプモード（--mode scalp で有効）────────────────────
 SCALP = dict(
     jpy_per_usd       = 150.0,   # JPY/USD レート（定期的に手動更新）
-    target_profit_jpy = 300,     # 1トレードあたり目標利益（円）
-    sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio
+    target_profit_jpy = 500,     # 1トレードあたり目標利益（円）
+    sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
+    tp_atr_fraction   = 0.5,     # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
     signal_tf         = 'M5',    # シグナル生成足（'M5' 推奨）
     rsi_buy_thrs      = [50.0, 55.0, 60.0],   # RSI 上抜け → BUY
     rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
@@ -104,6 +106,20 @@ SCALP = dict(
     cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
     big_move_lookback = 12,      # 大変動判定: 過去 N 本（12本=60分）
     big_move_atr_multi= 2.0,     # 大変動判定: 価格変動 > ATR × N で切換え
+)
+
+# ── レジーム判定・分散エントリー ──────────────────────────────────
+REGIME = dict(
+    # ADX によるトレンド/レンジ判定（H1・M5 それぞれ独立評価）
+    trend_thr            = 25.0,   # ADX ≥ この値 → トレンド
+    range_thr            = 20.0,   # ADX < この値 → レンジ
+    # レジーム別ロット倍率（_calc_lot の結果に乗算）
+    lot_multi_trend      = 1.5,    # H1・M5 両方トレンド時
+    lot_multi_weak       = 1.0,    # 片方のみトレンド時
+    lot_multi_range      = 0.6,    # 両方レンジ時
+    # 分散エントリー
+    max_entry_per_signal = 3,      # 1シグナルウィンドウ内の最大エントリー回数
+    entry_spacing_atr    = 0.5,    # 追加エントリーの最小間隔（ATR × この値 の押し目/戻り）
 )
 
 # ── 可視化 ────────────────────────────────────────────────
