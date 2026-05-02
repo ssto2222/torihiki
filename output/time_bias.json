@@ -1,0 +1,158 @@
+{
+  "generated": "2026-05-02 20:33:04",
+  "symbol": "BTCUSD",
+  "data_source": "合成データ",
+  "n_trades_total": 65,
+  "danger_hours": [],
+  "params": {
+    "danger_win_rate_thr": 0.4,
+    "danger_avg_pnl": 0.0,
+    "min_trades_per_hour": 5
+  },
+  "hour_stats": {
+    "0": {
+      "n": 0,
+      "win_rate": null,
+      "avg_pnl": null,
+      "is_danger": false
+    },
+    "1": {
+      "n": 3,
+      "win_rate": 0.667,
+      "avg_pnl": 2475.47,
+      "is_danger": false
+    },
+    "2": {
+      "n": 3,
+      "win_rate": 1.0,
+      "avg_pnl": 5807.14,
+      "is_danger": false
+    },
+    "3": {
+      "n": 3,
+      "win_rate": 0.0,
+      "avg_pnl": -2081.53,
+      "is_danger": false
+    },
+    "4": {
+      "n": 7,
+      "win_rate": 0.429,
+      "avg_pnl": 480.27,
+      "is_danger": false
+    },
+    "5": {
+      "n": 4,
+      "win_rate": 0.5,
+      "avg_pnl": 1899.11,
+      "is_danger": false
+    },
+    "6": {
+      "n": 7,
+      "win_rate": 0.571,
+      "avg_pnl": 2357.37,
+      "is_danger": false
+    },
+    "7": {
+      "n": 3,
+      "win_rate": 0.333,
+      "avg_pnl": 533.79,
+      "is_danger": false
+    },
+    "8": {
+      "n": 3,
+      "win_rate": 0.667,
+      "avg_pnl": 2254.84,
+      "is_danger": false
+    },
+    "9": {
+      "n": 1,
+      "win_rate": 1.0,
+      "avg_pnl": 6555.89,
+      "is_danger": false
+    },
+    "10": {
+      "n": 3,
+      "win_rate": 0.667,
+      "avg_pnl": 1255.34,
+      "is_danger": false
+    },
+    "11": {
+      "n": 0,
+      "win_rate": null,
+      "avg_pnl": null,
+      "is_danger": false
+    },
+    "12": {
+      "n": 3,
+      "win_rate": 0.333,
+      "avg_pnl": 54.59,
+      "is_danger": false
+    },
+    "13": {
+      "n": 3,
+      "win_rate": 0.333,
+      "avg_pnl": -2403.47,
+      "is_danger": false
+    },
+    "14": {
+      "n": 3,
+      "win_rate": 0.0,
+      "avg_pnl": -4117.5,
+      "is_danger": false
+    },
+    "15": {
+      "n": 2,
+      "win_rate": 1.0,
+      "avg_pnl": 7163.34,
+      "is_danger": false
+    },
+    "16": {
+      "n": 0,
+      "win_rate": null,
+      "avg_pnl": null,
+      "is_danger": false
+    },
+    "17": {
+      "n": 2,
+      "win_rate": 1.0,
+      "avg_pnl": 6456.98,
+      "is_danger": false
+    },
+    "18": {
+      "n": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -2675.02,
+      "is_danger": false
+    },
+    "19": {
+      "n": 3,
+      "win_rate": 0.333,
+      "avg_pnl": 753.38,
+      "is_danger": false
+    },
+    "20": {
+      "n": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -2713.9,
+      "is_danger": false
+    },
+    "21": {
+      "n": 3,
+      "win_rate": 0.667,
+      "avg_pnl": 2964.08,
+      "is_danger": false
+    },
+    "22": {
+      "n": 2,
+      "win_rate": 0.5,
+      "avg_pnl": 189.64,
+      "is_danger": false
+    },
+    "23": {
+      "n": 5,
+      "win_rate": 0.8,
+      "avg_pnl": 3535.96,
+      "is_danger": false
+    }
+  }
+}

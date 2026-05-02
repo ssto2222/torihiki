@@ -149,15 +149,20 @@ REGIME = dict(
 ```python
 TIME_BIAS = dict(
     enabled              = True,
-    danger_win_rate_thr  = 0.40,
-    danger_avg_pnl       = 0.0,
-    min_trades_per_hour  = 5,
-    close_before_min     = 15,
-    reentry_delay_min    = 15,
-    rebias_interval_hours= 24,
+    danger_win_rate_thr  = 0.40,    # win_rate < 40% → 危険時間帯
+    danger_avg_pnl       = 0.0,     # avg_pnl <= 0 → 危険時間帯（OR条件）
+    min_trades_per_hour  = 5,       # サンプル不足の時間帯は判定スキップ
+    skip_before_min      = 30,      # 危険時間帯の 30分前からスキップ開始
+    skip_after_min       = 15,      # 危険時間帯終了後 15分までスキップ継続
+    rebias_interval_hours= 24,      # 時間帯分析の再実行間隔（時間）
     bias_file            = "./output/time_bias.json",
 )
 ```
+
+**スキップ対象時間帯**
+- 危険時間帯の開始時刻から30分前 ～ 危険時間帯終了後15分
+- 例：危険時間帯が 13:00 UTC なら 12:30～14:15 がスキップ対象
+- スキップ対象時間帯中は新規エントリー禁止
 
 ## 主要機能
 

@@ -276,6 +276,26 @@ def _load_time_bias(path: str) -> set:
         return set()
 
 
+def _is_in_danger_skip_window(now_utc: datetime, danger_hours: set, skip_before_min: int = 30, skip_after_min: int = 15) -> bool:
+    """危険時間帯の前 skip_before_min 分～後 skip_after_min 分をスキップ対象とする。"""
+    if not danger_hours:
+        return False
+    
+    for danger_hour in danger_hours:
+        # 危険時間帯: その時間の00分から59分まで
+        danger_start = datetime(now_utc.year, now_utc.month, now_utc.day, danger_hour, 0, tzinfo=timezone.utc)
+        danger_end = danger_start + timedelta(hours=1)
+        
+        # スキップ対象範囲: 危険時間帯-30分 ～ 危険時間帯+1時間+15分
+        skip_start = danger_start - timedelta(minutes=skip_before_min)
+        skip_end = danger_end + timedelta(minutes=skip_after_min)
+        
+        if skip_start <= now_utc < skip_end:
+            return True
+    
+    return False
+
+
 def _close_profitable_positions(symbol: str, magic: int, deviation: int) -> int:
     """MT5 の含み益ポジション（magic 一致）を全決済する。決済した件数を返す。"""
     closed = 0
@@ -1174,37 +1194,40 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
 
                 # ── 時間帯バイアス回避 ───────────────────────────────
                 if tb_cfg.get('enabled', False) and _time_bias_hours:
-                    now_utc      = datetime.now(timezone.utc)
-                    close_before = tb_cfg.get('close_before_min', 15)
-                    warn_dt      = now_utc + timedelta(minutes=close_before)
-                    in_danger    = now_utc.hour in _time_bias_hours
-                    in_warning   = (not in_danger) and (warn_dt.hour in _time_bias_hours)
-
-                    # 危険時間帯 N 分前: 含み益ポジションを決済（同一ウィンドウで1回のみ）
-                    if in_warning:
-                        warn_hr = warn_dt.hour
-                        if _danger_close_done_hr != warn_hr:
+                    now_utc       = datetime.now(timezone.utc)
+                    skip_before   = tb_cfg.get('skip_before_min', 30)
+                    skip_after    = tb_cfg.get('skip_after_min', 15)
+                    
+                    # スキップ対象時間帯（危険時間帯前30分～危険時間帯+1h+15分）
+                    in_skip_window = _is_in_danger_skip_window(now_utc, _time_bias_hours, skip_before, skip_after)
+                    
+                    # スキップ前30分：含み益ポジション決済警告
+                    for danger_hour in _time_bias_hours:
+                        danger_start = datetime(now_utc.year, now_utc.month, now_utc.day, danger_hour, 0, tzinfo=timezone.utc)
+                        pre_warn_start = danger_start - timedelta(minutes=skip_before)
+                        pre_warn_end = pre_warn_start + timedelta(minutes=5)  # 5分間のウィンドウ
+                        
+                        if pre_warn_start <= now_utc < pre_warn_end and _danger_close_done_hr != danger_hour:
                             n_closed = _close_profitable_positions(symbol, magic, deviation)
-                            _danger_close_done_hr = warn_hr
+                            _danger_close_done_hr = danger_hour
                             if n_closed:
                                 print(f"  [時間帯バイアス] {now_utc.strftime('%H:%M')}UTC"
-                                      f" → {warn_hr:02d}:00が危険時間帯"
-                                      f" → 含み益{n_closed}本を決済")
-
-                    # 危険時間帯中: 新規エントリーを抑制
-                    if in_danger and data.get('action') in ('buy', 'sell'):
+                                      f" → {danger_hour:02d}:00が危険時間帯"
+                                      f" → 30分前からスキップ開始 → 含み益{n_closed}本を決済")
+                    
+                    # スキップ対象時間帯中: 新規エントリーを抑制
+                    if in_skip_window and data.get('action') in ('buy', 'sell'):
                         data['action']      = 'none'
-                        data['skip_reason'] = f'危険時間帯({now_utc.hour:02d}:00UTC)'
-
-                    # 危険時間帯終了直後: ウィンドウリセット + 再エントリー待機タイマーセット
-                    if _prev_in_danger and not in_danger:
-                        reentry_delay = tb_cfg.get('reentry_delay_min', 15)
+                        data['skip_reason'] = f'禁止時間帯({now_utc.strftime("%H:%M")}UTC)'
+                    
+                    # スキップウィンドウを抜けた直後: ウィンドウリセット + 再エントリー待機タイマーセット
+                    if _prev_in_danger and not in_skip_window:
                         _reset_entry_windows()
-                        _danger_exit_until[0] = now_utc + timedelta(minutes=reentry_delay)
+                        _danger_exit_until[0] = now_utc + timedelta(minutes=skip_after)  # 15分待機
                         print(f"  [時間帯バイアス] {now_utc.strftime('%H:%M')}UTC"
-                              f" 危険時間帯終了 → {reentry_delay}分後に再エントリー可")
-                    _prev_in_danger = in_danger
-
+                              f" スキップウィンドウ終了 → {skip_after}分後に再エントリー可")
+                    _prev_in_danger = in_skip_window
+                    
                     # 再エントリー待機中はエントリーを抑制
                     if (_danger_exit_until[0] is not None
                             and now_utc < _danger_exit_until[0]

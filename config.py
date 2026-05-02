@@ -130,8 +130,8 @@ TIME_BIAS = dict(
     danger_win_rate_thr  = 0.40,    # win_rate がこの値未満 → 危険
     danger_avg_pnl       = 0.0,     # avg_pnl がこの値以下 → 危険（OR条件）
     min_trades_per_hour  = 5,       # サンプル不足の時間帯は判定スキップ
-    close_before_min      = 15,     # 危険時間帯の N 分前に含み益ポジションを決済
-    reentry_delay_min     = 15,     # 危険時間帯終了後 N 分待ってから再エントリー可
+    skip_before_min      = 30,      # 危険時間帯の N 分前からスキップ開始
+    skip_after_min       = 15,      # 危険時間帯終了後 N 分までスキップ継続
     rebias_interval_hours = 24,     # この間隔（時間）で自動再分析。0 = 起動時1回のみ
     bias_file             = "./output/time_bias.json",
 )
