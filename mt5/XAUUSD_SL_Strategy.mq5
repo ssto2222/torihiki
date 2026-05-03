@@ -24,6 +24,7 @@
 //--- 入力パラメータ
 input string InpSignalFile    = "signal.json";
 input string InpStateFile     = "ea_state.json";
+input string InpResetFile     = "ea_reset.json";
 input double InpLotSize       = 0.05;    // デフォルトロット（signal.json で上書き）
 input int    InpTimerSec      = 5;
 input int    InpMagic         = 20240101;
@@ -35,8 +36,12 @@ input bool   InpDebugLog      = true;
 
 CTrade        g_trade;
 CPositionInfo g_pos;
-datetime      g_last_ts  = 0;
-double        g_lot_size = 0.0;
+string        g_signal_file = "";
+string        g_state_file  = "";
+string        g_reset_file  = "";
+datetime      g_last_ts     = 0;
+datetime      g_reset_since = 0;
+double        g_lot_size    = 0.0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -44,8 +49,26 @@ int OnInit()
    g_trade.SetExpertMagicNumber(InpMagic);
    g_trade.SetDeviationInPoints(20);
    EventSetTimer(InpTimerSec);
+   if(StringCompare(InpSignalFile, "signal.json") == 0)
+      g_signal_file = StringFormat("signal_%s.json", _Symbol);
+   else
+      g_signal_file = InpSignalFile;
+
+   if(StringCompare(InpStateFile, "ea_state.json") == 0)
+      g_state_file = StringFormat("ea_state_%s.json", _Symbol);
+   else
+      g_state_file = InpStateFile;
+
+   if(StringCompare(InpResetFile, "ea_reset.json") == 0)
+      g_reset_file = StringFormat("ea_reset_%s.json", _Symbol);
+   else
+      g_reset_file = InpResetFile;
+
    if(InpDebugLog)
-      Print("[EA] 起動  Signal=", InpSignalFile,
+      Print("[EA] 起動  Signal=", g_signal_file,
+            "  State=", g_state_file,
+            "  Reset=", 
+            g_reset_file,
             "  MinScore=", InpMinScore,
             "  MaxConsecLoss=", InpMaxConsecLoss,
             "  TpMulti=", InpTpMulti, "  TpMaxExt=", InpTpMaxExt);
@@ -92,6 +115,10 @@ void OnTimer()
 
    g_lot_size = (lot_sig > 0.0) ? lot_sig : InpLotSize;
    if(max_slip > 0) g_trade.SetDeviationInPoints(max_slip);
+
+   // リセットファイルが存在すれば読み込み
+   if(ReadResetState(g_reset_since) && InpDebugLog)
+      Print("[EA] reset_losses を検出 -> reset_since=", TimeToString(g_reset_since, TIME_DATE|TIME_SECONDS));
 
    int consec = GetConsecLosses();
    if(consec >= InpMaxConsecLoss)
@@ -287,6 +314,9 @@ int GetConsecLosses()
       if(HistoryDealGetInteger(ticket, DEAL_MAGIC)  != InpMagic) continue;
       if(HistoryDealGetString(ticket,  DEAL_SYMBOL) != _Symbol)  continue;
       if(HistoryDealGetInteger(ticket, DEAL_ENTRY)  != DEAL_ENTRY_OUT) continue;
+      datetime deal_time = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
+      if(g_reset_since > 0 && deal_time < g_reset_since)
+         break;
       double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT)
                     + HistoryDealGetDouble(ticket, DEAL_SWAP)
                     + HistoryDealGetDouble(ticket, DEAL_COMMISSION);
@@ -305,7 +335,7 @@ bool ReadSignal(string &action, double &sl, double &tp,
                 double &lot_size, int &score, string &strength,
                 int &tp_hold_min, string &ts, int &max_pos)
 {
-   int fh = FileOpen(InpSignalFile, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   int fh = FileOpen(g_signal_file, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(fh == INVALID_HANDLE) return false;
    string raw = "";
    while(!FileIsEnding(fh)) raw += FileReadString(fh);
@@ -328,6 +358,40 @@ bool ReadSignal(string &action, double &sl, double &tp,
    max_pos     = (int)JDbl(raw, "max_positions");
    if(max_pos <= 0) max_pos = 1;   // フォールバック: 旧フォーマット互換
    return StringLen(action) > 0;
+}
+
+bool ReadResetState(datetime &reset_since)
+{
+   if(!FileIsExist(g_reset_file, FILE_COMMON))
+      return false;
+
+   int fh = FileOpen(g_reset_file, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+   {
+      FileDelete(g_reset_file, FILE_COMMON);
+      return false;
+   }
+
+   string raw = "";
+   while(!FileIsEnding(fh)) raw += FileReadString(fh);
+   FileClose(fh);
+
+   if(StringLen(raw) < 10)
+   {
+      FileDelete(g_reset_file, FILE_COMMON);
+      return false;
+   }
+
+   double reset_val = JDbl(raw, "reset_since");
+   if(reset_val <= 0.0)
+   {
+      FileDelete(g_reset_file, FILE_COMMON);
+      return false;
+   }
+
+   reset_since = (datetime)reset_val;
+   FileDelete(g_reset_file, FILE_COMMON);
+   return reset_since > 0;
 }
 
 string JStr(const string &j, const string &k)
@@ -377,7 +441,7 @@ void WriteState(int consec_losses)
       TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS),
       _Symbol, InpMagic);
 
-   int fh = FileOpen(InpStateFile, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   int fh = FileOpen(g_state_file, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(fh == INVALID_HANDLE) return;
    FileWriteString(fh, json);
    FileClose(fh);
