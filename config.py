@@ -112,6 +112,8 @@ SCALP = dict(
     big_move_atr_multi = 5.0,   # 大変動判定: 価格変動 > ATR × N で切換え
     m1_early_margin    = 2.0,   # M5 RSI が閾値からこの値以内に接近 + M1 先行クロスで早期執行
     lot_max            = {'XAUUSD': 0.05},  # シンボル別ロット上限。未設定 = 上限なし
+    sma20_slope_bars   = 5,     # SELL SMA20タッチ判定: 傾き計算に使う M1 バー数
+    sma20_slope_atr_thr = 0.10, # SELL SMA20タッチ判定: SMA20がATR×この値以上下落していること
 )
 
 # ── レジーム判定・分散エントリー ──────────────────────────────────

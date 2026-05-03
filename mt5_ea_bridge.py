@@ -1103,10 +1103,20 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                     symbol, cfg.get('EXECUTION', {}).get('touch_margin', 0.20))
                 close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
                 if close_m1 >= sma20_m1 - touch_margin_cfg:
-                    confirmed_signal        = 'sell'
-                    crossed_level           = _scalp_sell_sma_level
-                    _scalp_sell_sma_pending = False
-                    _scalp_sell_sma_at      = None
+                    # SMA20 傾き確認: 直近 N 本で ATR × 閾値 以上の下落が必要
+                    slope_bars = scalp.get('sma20_slope_bars', 5)
+                    slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
+                    atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
+                    sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
+                    sma20_slope_ok = (
+                        np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
+                        (sma20_m1 - sma20_prev) < -(atr_m1_v * slope_thr)
+                    )
+                    if sma20_slope_ok:
+                        confirmed_signal        = 'sell'
+                        crossed_level           = _scalp_sell_sma_level
+                        _scalp_sell_sma_pending = False
+                        _scalp_sell_sma_at      = None
 
         # M1 待機状態チェック：2本連続で条件を満たしたら確定
         if _scalp_pending_action != 'none':
