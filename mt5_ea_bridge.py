@@ -1184,8 +1184,12 @@ def read_ea_state(path: str) -> dict:
 
 def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
     symbol     = cfg['MT5']['symbol']
-    sig_path   = cfg['BRIDGE']['signal_file']
-    state_path = cfg['BRIDGE']['status_file']
+    # シンボルごとにファイルを分ける: signal.json → signal_BTCUSD.json 等
+    def _sym_path(base: str) -> str:
+        p = Path(base)
+        return str(p.with_name(p.stem + f'_{symbol}' + p.suffix))
+    sig_path   = _sym_path(cfg['BRIDGE']['signal_file'])
+    state_path = _sym_path(cfg['BRIDGE']['status_file'])
     poll_sec   = cfg['BRIDGE']['poll_sec']
     lot_size   = cfg['BRIDGE']['lot_size']
     max_consec = cfg.get('RULES', {}).get('max_consecutive_losses', 3)
