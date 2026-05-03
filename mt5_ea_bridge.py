@@ -1150,10 +1150,44 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                             (sma20_m1 - sma20_prev) < -(atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok:
-                            confirmed_signal        = 'sell'
-                            crossed_level           = _scalp_sell_sma_level
-                            _scalp_sell_sma_pending = False
-                            _scalp_sell_sma_at      = None
+                            # SMA20タッチ確認 → 折り返し下落2本待ちへ移行
+                            _scalp_sell_sma_pending      = False
+                            _scalp_sell_sma_at           = None
+                            _scalp_sell_confirm_pending  = True
+                            _scalp_sell_confirm_at       = now
+                            _scalp_sell_confirm_count    = 0
+                            _scalp_sell_confirm_bar_time = None
+                            _scalp_sell_confirm_level    = _scalp_sell_sma_level
+
+        # SELL 下落確認チェック: SMA20タッチ後にM1下落バー2本確定で執行
+        if confirmed_signal is None and _scalp_sell_confirm_pending:
+            timeout_min = 30
+            if (_scalp_sell_confirm_at is not None and
+                    (now - _scalp_sell_confirm_at).total_seconds() > timeout_min * 60):
+                _scalp_sell_confirm_pending  = False
+                _scalp_sell_confirm_at       = None
+                _scalp_sell_confirm_count    = 0
+                _scalp_sell_confirm_bar_time = None
+            elif df_m1 is not None and not df_m1.empty and len(df_m1) >= 2:
+                m1_bar_cur   = df_m1.index[-1]
+                close_m1_cur = float(df_m1['Close'].iloc[-1])
+                close_m1_prv = float(df_m1['Close'].iloc[-2])
+                is_down_bar  = close_m1_cur < close_m1_prv
+
+                if is_down_bar and m1_bar_cur != _scalp_sell_confirm_bar_time:
+                    _scalp_sell_confirm_count   += 1
+                    _scalp_sell_confirm_bar_time = m1_bar_cur
+                elif not is_down_bar:
+                    _scalp_sell_confirm_count    = 0
+                    _scalp_sell_confirm_bar_time = None
+
+                if _scalp_sell_confirm_count >= 2:
+                    confirmed_signal             = 'sell'
+                    crossed_level                = _scalp_sell_confirm_level
+                    _scalp_sell_confirm_pending  = False
+                    _scalp_sell_confirm_at       = None
+                    _scalp_sell_confirm_count    = 0
+                    _scalp_sell_confirm_bar_time = None
 
         # BUY SMA20 タッチ待ちチェック
         if confirmed_signal is None and _scalp_buy_sma_pending:
