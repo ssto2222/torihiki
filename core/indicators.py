@@ -39,17 +39,34 @@ def calc_price_acceleration(close: pd.Series, period: int = 5) -> pd.Series:
     return sma.pct_change(periods=1) * 100
 
 
-def detect_volume_surge(volume: pd.Series, rvol: pd.Series,
-                        volume_threshold: float = 2.0,
-                        rvol_threshold: float = 1.5) -> pd.Series:
-    """
-    出来高急増検知
-    volume_threshold: 直近出来高 vs 過去平均の倍率
-    rvol_threshold: RVOLの閾値
-    """
-    vol_surge = volume > volume.rolling(20).mean() * volume_threshold
-    rvol_surge = rvol > rvol_threshold
-    return vol_surge & rvol_surge
+def calc_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+    """ADX / +DI / -DI を計算して返す (Wilder smoothing)"""
+    high, low, close = df['High'], df['Low'], df['Close']
+
+    up   = high.diff()
+    down = -low.diff()
+    plus_dm  = np.where((up > down) & (up > 0), up, 0.0)
+    minus_dm = np.where((down > up) & (down > 0), down, 0.0)
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low  - close.shift()).abs(),
+    ], axis=1).max(axis=1)
+
+    alpha   = 1 / period
+    kw      = dict(alpha=alpha, min_periods=period, adjust=False)
+    atr_s   = tr.ewm(**kw).mean()
+    plus_di = (pd.Series(plus_dm,  index=df.index).ewm(**kw).mean() / atr_s * 100)
+    minus_di= (pd.Series(minus_dm, index=df.index).ewm(**kw).mean() / atr_s * 100)
+    dx      = ((plus_di - minus_di).abs()
+               / (plus_di + minus_di).replace(0, np.nan) * 100)
+    adx     = dx.ewm(**kw).mean()
+
+    return pd.DataFrame(
+        {'ADX': adx, 'DI_plus': plus_di, 'DI_minus': minus_di},
+        index=df.index,
+    )
 
 
 def add_h1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:

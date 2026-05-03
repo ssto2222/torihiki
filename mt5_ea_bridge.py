@@ -30,7 +30,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import connect_mt5, fetch_ohlcv
-from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicators
+from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicators, calc_adx, calc_price_acceleration, detect_volume_surge
 from core.strategy   import check_m5_entry_filter, check_m5_surge, detect_big_move
 
 CFG = {k: getattr(C, k) for k in
