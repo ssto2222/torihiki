@@ -39,6 +39,19 @@ def calc_price_acceleration(close: pd.Series, period: int = 5) -> pd.Series:
     return sma.pct_change(periods=1) * 100
 
 
+def detect_volume_surge(volume: pd.Series, rvol: pd.Series,
+                        volume_threshold: float = 2.0,
+                        rvol_threshold: float = 1.5) -> pd.Series:
+    """
+    出来高急増検知
+    volume_threshold: 直近出来高 vs 過去平均の倍率
+    rvol_threshold: RVOLの閾値
+    """
+    vol_surge = volume > volume.rolling(20).mean() * volume_threshold
+    rvol_surge = rvol > rvol_threshold
+    return vol_surge & rvol_surge
+
+
 def calc_adx(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     """ADX / +DI / -DI を計算して返す (Wilder smoothing)"""
     high, low, close = df['High'], df['Low'], df['Close']
