@@ -101,7 +101,7 @@ BRIDGE = dict(
 SCALP = dict(
     jpy_per_usd       = 150.0,   # JPY/USD レート（定期的に手動更新）
     target_profit_jpy = 1000,     # 1トレードあたり目標利益（円）
-    sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
+    sl_ratio          = 3,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
     tp_atr_fraction   = 0.5,     # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
     signal_tf         = 'M5',    # シグナル生成足（M5クロス→M1で執行確認）
     rsi_buy_thrs      = [55.0, 60.0, 65.0],   # RSI 上抜け → BUY
