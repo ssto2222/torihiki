@@ -103,7 +103,7 @@ SCALP = dict(
     target_profit_jpy = 1000,     # 1トレードあたり目標利益（円）
     sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
     tp_atr_fraction   = 0.5,     # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
-    signal_tf         = 'M1',    # シグナル生成足（'M5' 推奨）
+    signal_tf         = 'M5',    # シグナル生成足（M5クロス→M1で執行確認）
     rsi_buy_thrs      = [55.0, 60.0, 65.0],   # RSI 上抜け → BUY
     rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
     max_trades_day    = 20,      # 1日の最大エントリー回数

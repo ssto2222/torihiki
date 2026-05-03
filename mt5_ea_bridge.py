@@ -80,9 +80,10 @@ _scalp_date:        object           = None   # 日付リセット管理
 _scalp_last_action: str              = 'none' # 直近スキャルプエントリー方向（大変動継続判定用）
 _scalp_pending_action: str          = 'none' # 閾値クロス後の保留エントリー方向
 _scalp_pending_level:  float        = 0.0    # 保留中の閾値レベル
-_scalp_pending_m1_confirm_count: int = 0     # M1 で閾値を超えた連続本数（0-2で確定）
+_scalp_pending_m1_confirm_count: int = 0     # M1 で閾値を超えた確定バー本数（0→2で確定）
 _scalp_pending_m1_rsi_prev: float | None = None  # 前回ポーリング時の M1 RSI
 _scalp_pending_m1_start_time: datetime | None = None  # 待機開始時刻（30分でタイムアウト）
+_scalp_pending_m1_bar_time: object = None    # 最後にカウントアップしたM1バー時刻（同一バー二重カウント防止）
 _scalp_sell_sma_pending: bool          = False    # SELL シグナル点灯, M1 SMA20 タッチ待ち
 _scalp_sell_sma_at:    'datetime | None' = None   # 点灯時刻（タイムアウト管理）
 _scalp_sell_sma_level: float           = 0.0      # 点灯した RSI 閾値
@@ -933,7 +934,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
            _scalp_count, _scalp_date, _scalp_last_action, \
            _scalp_pending_action, _scalp_pending_level, \
            _scalp_pending_m1_confirm_count, _scalp_pending_m1_rsi_prev, \
-           _scalp_pending_m1_start_time, \
+           _scalp_pending_m1_start_time, _scalp_pending_m1_bar_time, \
            _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level
 
     try:
@@ -1118,38 +1119,44 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                         _scalp_sell_sma_pending = False
                         _scalp_sell_sma_at      = None
 
-        # M1 待機状態チェック：2本連続で条件を満たしたら確定
+        # M1 待機状態チェック：M1バー確定2本連続で条件を満たしたら確定
         if _scalp_pending_action != 'none':
-            timeout_min = 30  # 待機タイムアウト（分）
+            timeout_min = 30
             if (_scalp_pending_m1_start_time is not None and
                     (now - _scalp_pending_m1_start_time).total_seconds() > timeout_min * 60):
                 # タイムアウト：待機をリセット
-                _scalp_pending_action = 'none'
-                _scalp_pending_level = 0.0
+                _scalp_pending_action           = 'none'
+                _scalp_pending_level            = 0.0
                 _scalp_pending_m1_confirm_count = 0
-                _scalp_pending_m1_rsi_prev = None
-                _scalp_pending_m1_start_time = None
-            elif not np.isnan(rsi_m1_cur):
-                # M1 RSI が取得できた場合、条件判定
-                condition_met = False
-                if _scalp_pending_action == 'buy':
-                    condition_met = rsi_m1_cur > _scalp_pending_level
+                _scalp_pending_m1_rsi_prev      = None
+                _scalp_pending_m1_start_time    = None
+                _scalp_pending_m1_bar_time      = None
+            elif not np.isnan(rsi_m1_cur) and df_m1 is not None and not df_m1.empty:
+                m1_bar_time_cur = df_m1.index[-1]   # 現在の M1 バー確定時刻
+                condition_met = (
+                    _scalp_pending_action == 'buy' and rsi_m1_cur > _scalp_pending_level
+                )
 
                 if condition_met:
-                    _scalp_pending_m1_confirm_count += 1
+                    # 同一バーの重複カウントを防ぐ
+                    if m1_bar_time_cur != _scalp_pending_m1_bar_time:
+                        _scalp_pending_m1_confirm_count += 1
+                        _scalp_pending_m1_bar_time = m1_bar_time_cur
                 else:
-                    # 条件を満たさなかった：カウントをリセット
+                    # 条件を満たさなかった：カウントとバー時刻をリセット
                     _scalp_pending_m1_confirm_count = 0
+                    _scalp_pending_m1_bar_time      = None
 
-                # 2本連続で条件を満たしたら確定
+                # M1 確定バー 2本分の条件クリアで確定
                 if _scalp_pending_m1_confirm_count >= 2:
-                    confirmed_signal = _scalp_pending_action
-                    crossed_level = _scalp_pending_level
-                    _scalp_pending_action = 'none'
-                    _scalp_pending_level = 0.0
+                    confirmed_signal                = _scalp_pending_action
+                    crossed_level                   = _scalp_pending_level
+                    _scalp_pending_action           = 'none'
+                    _scalp_pending_level            = 0.0
                     _scalp_pending_m1_confirm_count = 0
-                    _scalp_pending_m1_rsi_prev = None
-                    _scalp_pending_m1_start_time = None
+                    _scalp_pending_m1_rsi_prev      = None
+                    _scalp_pending_m1_start_time    = None
+                    _scalp_pending_m1_bar_time      = None
 
                 _scalp_pending_m1_rsi_prev = rsi_m1_cur
 
@@ -1176,12 +1183,13 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         if confirmed_signal is not None:
             new_cross = confirmed_signal
         elif candidate_signal == 'buy':
-            # BUY: M1 RSI 2本待機
-            _scalp_pending_action = 'buy'
-            _scalp_pending_level  = crossed_level
+            # BUY: M1 確定バー 2本待機
+            _scalp_pending_action           = 'buy'
+            _scalp_pending_level            = crossed_level
             _scalp_pending_m1_confirm_count = 0
-            _scalp_pending_m1_rsi_prev = rsi_m1_cur
-            _scalp_pending_m1_start_time = now
+            _scalp_pending_m1_rsi_prev      = rsi_m1_cur
+            _scalp_pending_m1_start_time    = now
+            _scalp_pending_m1_bar_time      = None
             skip = f'pending_scalp_buy_{int(crossed_level)}_wait_m1'
             new_cross = None
         elif candidate_signal == 'sell' and not _scalp_sell_sma_pending:
