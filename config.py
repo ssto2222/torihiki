@@ -106,6 +106,7 @@ SCALP = dict(
     signal_tf         = 'M1',    # シグナル生成足（'M5' 推奨）
     rsi_buy_thrs      = [55.0, 60.0, 65.0],   # RSI 上抜け → BUY
     rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
+    sell_enabled      = True,     # scalp sell を有効化 / 無効化
     max_trades_day    = 20,      # 1日の最大エントリー回数
     cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
     big_move_lookback  = 12,     # 大変動判定: 過去 N 本（12本=60分）
