@@ -90,6 +90,16 @@ _scalp_sell_sma_level: float           = 0.0      # 点灯した RSI 閾値
 _scalp_buy_sma_pending: bool          = False    # BUY シグナル点灯, M1 SMA20 タッチ待ち
 _scalp_buy_sma_at:    'datetime | None' = None   # 点灯時刻（タイムアウト管理）
 _scalp_buy_sma_level: float           = 0.0      # 点灯した RSI 閾値
+_scalp_buy_confirm_pending: bool     = False    # BUY SMA20 タッチ確認待ち
+_scalp_buy_confirm_at: datetime | None = None    # BUY 確認開始時刻
+_scalp_buy_confirm_count: int        = 0        # BUY 上昇バー確定本数
+_scalp_buy_confirm_bar_time: object  = None     # BUY 最後にカウントしたバー時刻
+_scalp_buy_confirm_level: float      = 0.0      # BUY 確認中のRSIレベル
+_scalp_sell_confirm_pending: bool    = False    # SELL SMA20 タッチ確認待ち
+_scalp_sell_confirm_at: datetime | None = None  # SELL 確認開始時刻
+_scalp_sell_confirm_count: int       = 0        # SELL 下落バー確定本数
+_scalp_sell_confirm_bar_time: object = None     # SELL 最後にカウントしたバー時刻
+_scalp_sell_confirm_level: float     = 0.0      # SELL 確認中のRSIレベル
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -939,7 +949,11 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
            _scalp_pending_m1_confirm_count, _scalp_pending_m1_rsi_prev, \
            _scalp_pending_m1_start_time, _scalp_pending_m1_bar_time, \
            _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
-           _scalp_buy_sma_pending, _scalp_buy_sma_at, _scalp_buy_sma_level
+           _scalp_buy_sma_pending, _scalp_buy_sma_at, _scalp_buy_sma_level, \
+           _scalp_buy_confirm_pending, _scalp_buy_confirm_at, _scalp_buy_confirm_count, \
+           _scalp_buy_confirm_bar_time, _scalp_buy_confirm_level, \
+           _scalp_sell_confirm_pending, _scalp_sell_confirm_at, _scalp_sell_confirm_count, \
+           _scalp_sell_confirm_bar_time, _scalp_sell_confirm_level
 
     try:
         import MetaTrader5 as mt5
@@ -960,6 +974,11 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             _scalp_buy_sma_pending = False
             _scalp_buy_sma_at      = None
             _scalp_buy_sma_level   = 0.0
+        if not buy_enabled and _scalp_buy_confirm_pending:
+            _scalp_buy_confirm_pending  = False
+            _scalp_buy_confirm_at       = None
+            _scalp_buy_confirm_count    = 0
+            _scalp_buy_confirm_bar_time = None
         if not sell_enabled and _scalp_sell_sma_pending:
             _scalp_sell_sma_pending = False
             _scalp_sell_sma_at      = None
@@ -1033,6 +1052,11 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         elif regime_m5s == 'trend_down' and _scalp_buy_sma_pending:
             _scalp_buy_sma_pending = False
             _scalp_buy_sma_at      = None
+        elif regime_m5s == 'trend_down' and _scalp_buy_confirm_pending:
+            _scalp_buy_confirm_pending  = False
+            _scalp_buy_confirm_at       = None
+            _scalp_buy_confirm_count    = 0
+            _scalp_buy_confirm_bar_time = None
 
         # TP幅 = M5 ATR × tp_atr_fraction（先に価格距離を決める）
         # lot  = target_usd / (tp_move × contract_size) × regime_multi
@@ -1215,10 +1239,44 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                             (sma20_m1 - sma20_prev) > (atr_m1_v * slope_thr)  # 上昇確認
                         )
                         if sma20_slope_ok:
-                            confirmed_signal        = 'buy'
-                            crossed_level           = _scalp_buy_sma_level
-                            _scalp_buy_sma_pending = False
-                            _scalp_buy_sma_at      = None
+                            # SMA20タッチ確認 → 折り返し上昇2本待ちへ移行
+                            _scalp_buy_sma_pending      = False
+                            _scalp_buy_sma_at           = None
+                            _scalp_buy_confirm_pending  = True
+                            _scalp_buy_confirm_at       = now
+                            _scalp_buy_confirm_count    = 0
+                            _scalp_buy_confirm_bar_time = None
+                            _scalp_buy_confirm_level    = _scalp_buy_sma_level
+
+        # BUY 上昇確認チェック: SMA20タッチ後にM1上昇バー2本確定で執行
+        if confirmed_signal is None and _scalp_buy_confirm_pending:
+            timeout_min = 30
+            if (_scalp_buy_confirm_at is not None and
+                    (now - _scalp_buy_confirm_at).total_seconds() > timeout_min * 60):
+                _scalp_buy_confirm_pending  = False
+                _scalp_buy_confirm_at       = None
+                _scalp_buy_confirm_count    = 0
+                _scalp_buy_confirm_bar_time = None
+            elif df_m1 is not None and not df_m1.empty and len(df_m1) >= 2:
+                m1_bar_cur   = df_m1.index[-1]
+                close_m1_cur = float(df_m1['Close'].iloc[-1])
+                close_m1_prv = float(df_m1['Close'].iloc[-2])
+                is_up_bar    = close_m1_cur > close_m1_prv
+
+                if is_up_bar and m1_bar_cur != _scalp_buy_confirm_bar_time:
+                    _scalp_buy_confirm_count   += 1
+                    _scalp_buy_confirm_bar_time = m1_bar_cur
+                elif not is_up_bar:
+                    _scalp_buy_confirm_count    = 0
+                    _scalp_buy_confirm_bar_time = None
+
+                if _scalp_buy_confirm_count >= 2:
+                    confirmed_signal            = 'buy'
+                    crossed_level               = _scalp_buy_confirm_level
+                    _scalp_buy_confirm_pending  = False
+                    _scalp_buy_confirm_at       = None
+                    _scalp_buy_confirm_count    = 0
+                    _scalp_buy_confirm_bar_time = None
 
         # M1 待機状態チェック：M1バー確定2本連続で条件を満たしたら確定
         if _scalp_pending_action != 'none':
@@ -1395,6 +1453,8 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'scalp_pending_m1_confirm_count': _scalp_pending_m1_confirm_count,
             'scalp_sell_sma_pending': _scalp_sell_sma_pending,
             'scalp_buy_sma_pending': _scalp_buy_sma_pending,
+            'scalp_buy_confirm_pending': _scalp_buy_confirm_pending,
+            'scalp_buy_confirm_count': _scalp_buy_confirm_count,
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
