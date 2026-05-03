@@ -31,6 +31,15 @@ INDICATOR = dict(
     ema_fast     = 21,
     ema_slow     = 50,
     atr_ma_bars  = 50,          # ATR_ratio の分母期間
+    # ── 出来高・急騰検知関連 ──────────────────────────────
+    rvol_period               = 20,     # RVOL計算期間
+    accel_period              = 5,      # 価格加速計算期間
+    volume_surge_threshold    = 2.0,    # 出来高急増閾値（倍率）
+    rvol_surge_threshold      = 1.5,    # RVOL急増閾値
+    early_surge_rvol_threshold = 1.3,   # 急騰初期RVOL閾値
+    early_surge_accel_threshold = 0.5,  # 急騰初期価格加速閾値
+    surge_overbought_threshold = 70.0,  # 急騰中段階RSI閾値
+    surge_avoid_accel_threshold = 1.5,  # 急騰回避価格加速閾値
 )
 
 # ── H1 シグナル検出（SMA20 + RSI）────────────────────────────
@@ -101,7 +110,7 @@ BRIDGE = dict(
 SCALP = dict(
     jpy_per_usd       = 150.0,   # JPY/USD レート（定期的に手動更新）
     target_profit_jpy = 1000,     # 1トレードあたり目標利益（円）
-    sl_ratio          = 1.5,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
+    sl_ratio          = 3,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
     tp_atr_fraction   = 0.5,     # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
     signal_tf         = 'M5',    # シグナル生成足（M5クロス→M1で執行確認）
     rsi_buy_thrs      = [55.0, 60.0, 65.0],   # RSI 上抜け → BUY

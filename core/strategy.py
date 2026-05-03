@@ -133,6 +133,84 @@ def check_m5_surge(df_m5: pd.DataFrame,
     return 'none'
 
 
+def detect_early_surge(df_m5: pd.DataFrame, cfg: dict) -> dict:
+    """
+    急騰初期検知: RVOLと価格加速を使って急騰の始まりを検知
+
+    Returns: {
+        'is_early_surge': bool,
+        'surge_strength': float (0-1),
+        'confidence': float (0-1)
+    }
+    """
+    if df_m5 is None or len(df_m5) < 20:
+        return {'is_early_surge': False, 'surge_strength': 0.0, 'confidence': 0.0}
+
+    # RVOLと価格加速の確認
+    has_volume_data = 'RVOL' in df_m5.columns and 'Price_Accel' in df_m5.columns
+
+    if not has_volume_data:
+        # 出来高データがない場合は従来のRSI急変検知を使用
+        surge_type = check_m5_surge(df_m5)
+        is_early = surge_type == 'rapid_rise'
+        return {
+            'is_early_surge': is_early,
+            'surge_strength': 1.0 if is_early else 0.0,
+            'confidence': 0.5 if is_early else 0.0
+        }
+
+    # RVOLベースの検知
+    rvol = df_m5['RVOL'].iloc[-1]
+    price_accel = df_m5['Price_Accel'].iloc[-1]
+    volume_surge = df_m5['Volume_Surge'].iloc[-1] if 'Volume_Surge' in df_m5.columns else False
+
+    # 急騰初期の条件
+    rvol_threshold = cfg.get('INDICATOR', {}).get('early_surge_rvol_threshold', 1.3)
+    accel_threshold = cfg.get('INDICATOR', {}).get('early_surge_accel_threshold', 0.5)
+
+    is_early_surge = (
+        rvol > rvol_threshold and
+        price_accel > accel_threshold and
+        volume_surge
+    )
+
+    # 強度と信頼度の計算
+    surge_strength = min(1.0, (rvol - 1.0) * 0.5 + price_accel * 0.3)
+    confidence = min(1.0, rvol * 0.4 + (1.0 if volume_surge else 0.0) * 0.6)
+
+    return {
+        'is_early_surge': is_early_surge,
+        'surge_strength': surge_strength,
+        'confidence': confidence
+    }
+
+
+def should_avoid_entry_during_surge(df_m5: pd.DataFrame, cfg: dict) -> bool:
+    """
+    急騰中段階でのエントリーを避けるべきかを判定
+
+    急騰がすでに進んでいて、反転リスクが高い場合にTrueを返す
+    """
+    if df_m5 is None or len(df_m5) < 10:
+        return False
+
+    # RSIがすでに高すぎる場合（70以上）は避ける
+    rsi_current = df_m5['RSI'].iloc[-1]
+    rsi_overbought = cfg.get('INDICATOR', {}).get('surge_overbought_threshold', 70.0)
+
+    if rsi_current > rsi_overbought:
+        return True
+
+    # 価格加速が極端に高い場合（すでに急騰が長時間続いている）
+    if 'Price_Accel' in df_m5.columns:
+        accel_recent = df_m5['Price_Accel'].tail(5).mean()
+        accel_threshold = cfg.get('INDICATOR', {}).get('surge_avoid_accel_threshold', 1.5)
+        if accel_recent > accel_threshold:
+            return True
+
+    return False
+
+
 def detect_big_move(df_m5: pd.DataFrame,
                     lookback: int = 12,
                     atr_multi: float = 2.0) -> str:
