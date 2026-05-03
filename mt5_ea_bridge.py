@@ -1004,6 +1004,18 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         # スキャルプはH1不使用のためM5のみで判定（H1は 'weak_trend' 相当として扱う）
         r_multi_s  = _regime_lot_multi('weak_trend', regime_m5s, regime_cfg)
 
+        # トレンド転換時に逆方向の待機状態をキャンセル
+        if regime_m5s == 'trend_down' and _scalp_pending_action == 'buy':
+            _scalp_pending_action           = 'none'
+            _scalp_pending_level            = 0.0
+            _scalp_pending_m1_confirm_count = 0
+            _scalp_pending_m1_rsi_prev      = None
+            _scalp_pending_m1_start_time    = None
+            _scalp_pending_m1_bar_time      = None
+        elif regime_m5s == 'trend_up' and _scalp_sell_sma_pending:
+            _scalp_sell_sma_pending = False
+            _scalp_sell_sma_at      = None
+
         # TP幅 = M5 ATR × tp_atr_fraction（先に価格距離を決める）
         # lot  = target_usd / (tp_move × contract_size) × regime_multi
         # SL損失 ≈ target_usd × sl_ratio × regime_multi（レジームで調整）
@@ -1211,7 +1223,11 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             hour_utc = now.hour
             eff_hour = (hour_utc + 1) % 24 if now.minute >= 45 else hour_utc
 
-            if eff_hour in {9, 16, 21}:
+            # トレンド逆行チェック（trend_up 時は SELL 禁止、trend_down 時は BUY 禁止）
+            if (regime_m5s == 'trend_up'   and new_cross == 'sell') or \
+               (regime_m5s == 'trend_down' and new_cross == 'buy'):
+                skip = f'逆トレンドエントリー禁止(regime={regime_m5s})'
+            elif eff_hour in {9, 16, 21}:
                 skip = f'forbidden_hour={eff_hour}'
             elif _scalp_count >= max_day:
                 skip = f'daily_limit={_scalp_count}/{max_day}'
