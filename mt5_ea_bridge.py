@@ -1116,7 +1116,16 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                 return normal_data
             # compute_signal 失敗時はスキャルプのまま継続
 
-        # tp_move / sl_move はロット計算時に確定済み（上記参照）
+        # ── 急騰初期検知と中段階回避 ─────────────────────────────
+        from core.strategy import detect_early_surge, should_avoid_entry_during_surge
+        surge_info = detect_early_surge(df_m5, cfg)
+        avoid_surge = should_avoid_entry_during_surge(df_m5, cfg)
+
+        # 急騰中段階の場合はエントリーを控える
+        if avoid_surge and not surge_info['is_early_surge']:
+            print(f"[急騰回避] RSI={rsi_cur:.1f} が高すぎるためエントリー見送り")
+            return None
+
         # ── M1 2本待機ロジック: 閾値クロス後、M1で2本連続の上/下抜けで確定────
         confirmed_signal = None
         candidate_signal = None
@@ -1133,20 +1142,33 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                 for thr in buy_thrs:
                     if thr - m1_early_margin <= rsi_cur <= thr:     # M5 が閾値の手前
                         if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:  # M1 が先行クロス
-                            # BUY: SMA20 タッチ待ち状態へ移行（即時執行しない）
-                            _scalp_buy_sma_pending = True
-                            _scalp_buy_sma_at      = now
-                            _scalp_buy_sma_level   = thr
-                        break
+                            # 急騰の兆候検知時はBUYも強制許可
+                            if not surge_info['is_early_surge'] or surge_info['confidence'] >= 0.3:
+                                # BUY: SMA20 タッチ待ち状態へ移行（即時執行しない）
+                                _scalp_buy_sma_pending = True
+                                _scalp_buy_sma_at      = now
+                                _scalp_buy_sma_level   = thr
+                                if surge_info['is_early_surge']:
+                                    print(f"[急騰兆候BUY] 急騰初期でもBUY許可 "
+                                          f"Confidence={surge_info['confidence']:.2f}")
+                                else:
+                                    print(f"[押し目BUY] 通常の押し目エントリー "
+                                          f"Confidence={surge_info['confidence']:.2f}")
+                            break
             if confirmed_signal is None and sell_enabled and not _scalp_sell_sma_pending:
                 for thr in sell_thrs:
                     if thr <= rsi_cur <= thr + m1_early_margin:  # M5 が閾値の手前
                         if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
-                            # SELL: SMA20 タッチ待ち状態へ移行（即時執行しない）
-                            _scalp_sell_sma_pending = True
-                            _scalp_sell_sma_at      = now
-                            _scalp_sell_sma_level   = thr
-                        break
+                            # 急騰初期でのみSELLエントリーを許可
+                            if surge_info['is_early_surge'] and surge_info['confidence'] > 0.6:
+                                # SELL: SMA20 タッチ待ち状態へ移行（即時執行しない）
+                                _scalp_sell_sma_pending = True
+                                _scalp_sell_sma_at      = now
+                                _scalp_sell_sma_level   = thr
+                                print(f"[急騰初期SELL] RVOL={df_m5['RVOL'].iloc[-1]:.2f} "
+                                      f"Accel={df_m5['Price_Accel'].iloc[-1]:.2f} "
+                                      f"Confidence={surge_info['confidence']:.2f}")
+                            break
 
         # SELL SMA20 タッチ待ちチェック
         if confirmed_signal is None and _scalp_sell_sma_pending:

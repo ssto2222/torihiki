@@ -31,6 +31,15 @@ INDICATOR = dict(
     ema_fast     = 21,
     ema_slow     = 50,
     atr_ma_bars  = 50,          # ATR_ratio の分母期間
+    # ── 出来高・急騰検知関連 ──────────────────────────────
+    rvol_period               = 20,     # RVOL計算期間
+    accel_period              = 5,      # 価格加速計算期間
+    volume_surge_threshold    = 2.0,    # 出来高急増閾値（倍率）
+    rvol_surge_threshold      = 1.5,    # RVOL急増閾値
+    early_surge_rvol_threshold = 1.3,   # 急騰初期RVOL閾値
+    early_surge_accel_threshold = 0.5,  # 急騰初期価格加速閾値
+    surge_overbought_threshold = 70.0,  # 急騰中段階RSI閾値
+    surge_avoid_accel_threshold = 1.5,  # 急騰回避価格加速閾値
 )
 
 # ── H1 シグナル検出（SMA20 + RSI）────────────────────────────
