@@ -87,6 +87,9 @@ _scalp_pending_m1_bar_time: object = None    # 最後にカウントアップし
 _scalp_sell_sma_pending: bool          = False    # SELL シグナル点灯, M1 SMA20 タッチ待ち
 _scalp_sell_sma_at:    'datetime | None' = None   # 点灯時刻（タイムアウト管理）
 _scalp_sell_sma_level: float           = 0.0      # 点灯した RSI 閾値
+_scalp_buy_sma_pending: bool          = False    # BUY シグナル点灯, M1 SMA20 タッチ待ち
+_scalp_buy_sma_at:    'datetime | None' = None   # 点灯時刻（タイムアウト管理）
+_scalp_buy_sma_level: float           = 0.0      # 点灯した RSI 閾値
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -935,7 +938,8 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
            _scalp_pending_action, _scalp_pending_level, \
            _scalp_pending_m1_confirm_count, _scalp_pending_m1_rsi_prev, \
            _scalp_pending_m1_start_time, _scalp_pending_m1_bar_time, \
-           _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level
+           _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
+           _scalp_buy_sma_pending, _scalp_buy_sma_at, _scalp_buy_sma_level
 
     try:
         import MetaTrader5 as mt5
@@ -947,10 +951,15 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         sig_tf     = scalp.get('signal_tf',          'M5')
         buy_thrs   = sorted(scalp.get('rsi_buy_thrs',  [50.0, 55.0, 60.0]))         # 小→大
         sell_thrs  = sorted(scalp.get('rsi_sell_thrs', [45.0, 40.0, 35.0]), reverse=True)  # 大→小
+        buy_enabled  = bool(scalp.get('buy_enabled', True))
         sell_enabled = bool(scalp.get('sell_enabled', True))
         max_day    = scalp.get('max_trades_day',     20)
         cooldown   = scalp.get('cooldown_min',       30)
 
+        if not buy_enabled and _scalp_buy_sma_pending:
+            _scalp_buy_sma_pending = False
+            _scalp_buy_sma_at      = None
+            _scalp_buy_sma_level   = 0.0
         if not sell_enabled and _scalp_sell_sma_pending:
             _scalp_sell_sma_pending = False
             _scalp_sell_sma_at      = None
@@ -1021,6 +1030,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         elif regime_m5s == 'trend_up' and _scalp_sell_sma_pending:
             _scalp_sell_sma_pending = False
             _scalp_sell_sma_at      = None
+        elif regime_m5s == 'trend_down' and _scalp_buy_sma_pending:
+            _scalp_buy_sma_pending = False
+            _scalp_buy_sma_at      = None
 
         # TP幅 = M5 ATR × tp_atr_fraction（先に価格距離を決める）
         # lot  = target_usd / (tp_move × contract_size) × regime_multi
@@ -1093,13 +1105,15 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         if (confirmed_signal is None and _scalp_pending_action == 'none'
                 and df_m1 is not None and len(df_m1) >= 2 and m1_early_margin > 0):
             rsi_m1_prev2 = float(df_m1['RSI'].iloc[-2])
-            for thr in buy_thrs:
-                if thr - m1_early_margin <= rsi_cur <= thr:     # M5 が閾値の手前
-                    if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:  # M1 が先行クロス
-                        confirmed_signal = 'buy'
-                        crossed_level    = thr
-                        is_m1_early      = True
-                    break
+            if buy_enabled and not _scalp_buy_sma_pending:
+                for thr in buy_thrs:
+                    if thr - m1_early_margin <= rsi_cur <= thr:     # M5 が閾値の手前
+                        if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:  # M1 が先行クロス
+                            # BUY: SMA20 タッチ待ち状態へ移行（即時執行しない）
+                            _scalp_buy_sma_pending = True
+                            _scalp_buy_sma_at      = now
+                            _scalp_buy_sma_level   = thr
+                        break
             if confirmed_signal is None and sell_enabled and not _scalp_sell_sma_pending:
                 for thr in sell_thrs:
                     if thr <= rsi_cur <= thr + m1_early_margin:  # M5 が閾値の手前
@@ -1140,6 +1154,37 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                             crossed_level           = _scalp_sell_sma_level
                             _scalp_sell_sma_pending = False
                             _scalp_sell_sma_at      = None
+
+        # BUY SMA20 タッチ待ちチェック
+        if confirmed_signal is None and _scalp_buy_sma_pending:
+            if not buy_enabled:
+                _scalp_buy_sma_pending = False
+                _scalp_buy_sma_at      = None
+            else:
+                timeout_min = 30
+                sma20_m1 = float(df_m1['SMA20'].iloc[-1]) if (df_m1 is not None and 'SMA20' in df_m1.columns and not df_m1.empty) else float('nan')
+                if _scalp_buy_sma_at is not None and (now - _scalp_buy_sma_at).total_seconds() > timeout_min * 60:
+                    _scalp_buy_sma_pending = False
+                    _scalp_buy_sma_at      = None
+                elif not np.isnan(sma20_m1):
+                    touch_margin_cfg = _sma20_touch_margins.get(
+                        symbol, cfg.get('EXECUTION', {}).get('touch_margin', 0.20))
+                    close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
+                    if close_m1 <= sma20_m1 + touch_margin_cfg:  # 買いなので下からタッチ
+                        # SMA20 傾き確認: 直近 N 本で ATR × 閾値 以上の上昇が必要
+                        slope_bars = scalp.get('sma20_slope_bars', 5)
+                        slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
+                        atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
+                        sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
+                        sma20_slope_ok = (
+                            np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
+                            (sma20_m1 - sma20_prev) > (atr_m1_v * slope_thr)  # 上昇確認
+                        )
+                        if sma20_slope_ok:
+                            confirmed_signal        = 'buy'
+                            crossed_level           = _scalp_buy_sma_level
+                            _scalp_buy_sma_pending = False
+                            _scalp_buy_sma_at      = None
 
         # M1 待機状態チェック：M1バー確定2本連続で条件を満たしたら確定
         if _scalp_pending_action != 'none':
@@ -1204,15 +1249,12 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
 
         if confirmed_signal is not None:
             new_cross = confirmed_signal
-        elif candidate_signal == 'buy':
-            # BUY: M1 確定バー 2本待機
-            _scalp_pending_action           = 'buy'
-            _scalp_pending_level            = crossed_level
-            _scalp_pending_m1_confirm_count = 0
-            _scalp_pending_m1_rsi_prev      = rsi_m1_cur
-            _scalp_pending_m1_start_time    = now
-            _scalp_pending_m1_bar_time      = None
-            skip = f'pending_scalp_buy_{int(crossed_level)}_wait_m1'
+        elif candidate_signal == 'buy' and not _scalp_buy_sma_pending:
+            # BUY: SMA20 タッチ待ち状態へ移行
+            _scalp_buy_sma_pending = True
+            _scalp_buy_sma_at      = now
+            _scalp_buy_sma_level   = crossed_level
+            skip = f'pending_scalp_buy_{int(crossed_level)}_wait_sma20'
             new_cross = None
         elif candidate_signal == 'sell' and not _scalp_sell_sma_pending:
             # SELL: SMA20 タッチ待ち状態へ移行
@@ -1305,6 +1347,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'lot_size':           lot,
             # スキャルプ専用フィールド（EA は参照しないが記録用）
             'scalp_mode':         True,
+            'scalp_buy_enabled':  buy_enabled,
             'scalp_sell_enabled': sell_enabled,
             'target_profit_jpy':  target,
             'target_profit_usd':  round(target_usd, 4),
@@ -1317,6 +1360,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'scalp_pending_action': _scalp_pending_action,
             'scalp_pending_m1_confirm_count': _scalp_pending_m1_confirm_count,
             'scalp_sell_sma_pending': _scalp_sell_sma_pending,
+            'scalp_buy_sma_pending': _scalp_buy_sma_pending,
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
