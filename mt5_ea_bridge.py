@@ -898,8 +898,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         tp_move       = atr_v * tp_atr_frac
         sl_move       = tp_move * sl_ratio
         lot_raw       = target_usd / (tp_move * contract_size) if tp_move > 0 else 0
+        scalp_lot_max = scalp.get('lot_max', float('inf'))
         lot_base_s    = max(l_min, min(l_max, round(lot_raw / l_step) * l_step))
-        lot           = max(l_min, min(l_max,
+        lot           = max(l_min, min(l_max, scalp_lot_max,
                             round(lot_base_s * r_multi_s / l_step) * l_step))
 
         # TP による実際の期待利益を計算（丸め後のロットベース）
