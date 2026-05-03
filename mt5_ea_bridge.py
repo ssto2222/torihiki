@@ -83,6 +83,9 @@ _scalp_pending_level:  float        = 0.0    # 保留中の閾値レベル
 _scalp_pending_m1_confirm_count: int = 0     # M1 で閾値を超えた連続本数（0-2で確定）
 _scalp_pending_m1_rsi_prev: float | None = None  # 前回ポーリング時の M1 RSI
 _scalp_pending_m1_start_time: datetime | None = None  # 待機開始時刻（30分でタイムアウト）
+_scalp_sell_sma_pending: bool          = False    # SELL シグナル点灯, M1 SMA20 タッチ待ち
+_scalp_sell_sma_at:    'datetime | None' = None   # 点灯時刻（タイムアウト管理）
+_scalp_sell_sma_level: float           = 0.0      # 点灯した RSI 閾値
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -821,7 +824,8 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
            _scalp_count, _scalp_date, _scalp_last_action, \
            _scalp_pending_action, _scalp_pending_level, \
            _scalp_pending_m1_confirm_count, _scalp_pending_m1_rsi_prev, \
-           _scalp_pending_m1_start_time
+           _scalp_pending_m1_start_time, \
+           _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level
 
     try:
         import MetaTrader5 as mt5
@@ -898,8 +902,9 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
         tp_move       = atr_v * tp_atr_frac
         sl_move       = tp_move * sl_ratio
         lot_raw       = target_usd / (tp_move * contract_size) if tp_move > 0 else 0
+        scalp_lot_max = scalp.get('lot_max', float('inf'))
         lot_base_s    = max(l_min, min(l_max, round(lot_raw / l_step) * l_step))
-        lot           = max(l_min, min(l_max,
+        lot           = max(l_min, min(l_max, scalp_lot_max,
                             round(lot_base_s * r_multi_s / l_step) * l_step))
 
         # TP による実際の期待利益を計算（丸め後のロットベース）
@@ -964,14 +969,31 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                         crossed_level    = thr
                         is_m1_early      = True
                     break
-            if confirmed_signal is None:
+            if confirmed_signal is None and not _scalp_sell_sma_pending:
                 for thr in sell_thrs:
                     if thr <= rsi_cur <= thr + m1_early_margin:  # M5 が閾値の手前
                         if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
-                            confirmed_signal = 'sell'
-                            crossed_level    = thr
-                            is_m1_early      = True
+                            # SELL: SMA20 タッチ待ち状態へ移行（即時執行しない）
+                            _scalp_sell_sma_pending = True
+                            _scalp_sell_sma_at      = now
+                            _scalp_sell_sma_level   = thr
                         break
+
+        # SELL SMA20 タッチ待ちチェック
+        if confirmed_signal is None and _scalp_sell_sma_pending:
+            timeout_min = 30
+            sma20_m1 = float(df_m1['SMA20'].iloc[-1]) if (df_m1 is not None and 'SMA20' in df_m1.columns and not df_m1.empty) else float('nan')
+            if _scalp_sell_sma_at is not None and (now - _scalp_sell_sma_at).total_seconds() > timeout_min * 60:
+                _scalp_sell_sma_pending = False
+                _scalp_sell_sma_at      = None
+            elif not np.isnan(sma20_m1):
+                touch_margin_cfg = cfg.get('EXECUTION', {}).get('touch_margin', 0.20)
+                close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
+                if close_m1 >= sma20_m1 - touch_margin_cfg:
+                    confirmed_signal        = 'sell'
+                    crossed_level           = _scalp_sell_sma_level
+                    _scalp_sell_sma_pending = False
+                    _scalp_sell_sma_at      = None
 
         # M1 待機状態チェック：2本連続で条件を満たしたら確定
         if _scalp_pending_action != 'none':
@@ -989,8 +1011,6 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                 condition_met = False
                 if _scalp_pending_action == 'buy':
                     condition_met = rsi_m1_cur > _scalp_pending_level
-                elif _scalp_pending_action == 'sell':
-                    condition_met = rsi_m1_cur < _scalp_pending_level
 
                 if condition_met:
                     _scalp_pending_m1_confirm_count += 1
@@ -1017,7 +1037,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
                     candidate_signal = 'buy'
                     crossed_level    = thr
                     break
-            if candidate_signal is None:
+            if candidate_signal is None and not _scalp_sell_sma_pending:
                 for thr in sell_thrs:
                     if rsi_cur < thr and rsi_prev_bar >= thr:
                         candidate_signal = 'sell'
@@ -1032,14 +1052,21 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
 
         if confirmed_signal is not None:
             new_cross = confirmed_signal
-        elif candidate_signal is not None:
-            # 待機状態に入る
-            _scalp_pending_action = candidate_signal
+        elif candidate_signal == 'buy':
+            # BUY: M1 RSI 2本待機
+            _scalp_pending_action = 'buy'
             _scalp_pending_level  = crossed_level
             _scalp_pending_m1_confirm_count = 0
             _scalp_pending_m1_rsi_prev = rsi_m1_cur
             _scalp_pending_m1_start_time = now
-            skip = f'pending_scalp_{candidate_signal}_{int(crossed_level)}_wait_m1'
+            skip = f'pending_scalp_buy_{int(crossed_level)}_wait_m1'
+            new_cross = None
+        elif candidate_signal == 'sell' and not _scalp_sell_sma_pending:
+            # SELL: SMA20 タッチ待ち状態へ移行
+            _scalp_sell_sma_pending = True
+            _scalp_sell_sma_at      = now
+            _scalp_sell_sma_level   = crossed_level
+            skip = f'pending_scalp_sell_{int(crossed_level)}_wait_sma20'
             new_cross = None
         else:
             new_cross = None
@@ -1131,6 +1158,7 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             'scalp_cooldown_rem': 0,
             'scalp_pending_action': _scalp_pending_action,
             'scalp_pending_m1_confirm_count': _scalp_pending_m1_confirm_count,
+            'scalp_sell_sma_pending': _scalp_sell_sma_pending,
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
@@ -1183,8 +1211,12 @@ def read_ea_state(path: str) -> dict:
 
 def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
     symbol     = cfg['MT5']['symbol']
-    sig_path   = cfg['BRIDGE']['signal_file']
-    state_path = cfg['BRIDGE']['status_file']
+    # シンボルごとにファイルを分ける: signal.json → signal_BTCUSD.json 等
+    def _sym_path(base: str) -> str:
+        p = Path(base)
+        return str(p.with_name(p.stem + f'_{symbol}' + p.suffix))
+    sig_path   = _sym_path(cfg['BRIDGE']['signal_file'])
+    state_path = _sym_path(cfg['BRIDGE']['status_file'])
     poll_sec   = cfg['BRIDGE']['poll_sec']
     lot_size   = cfg['BRIDGE']['lot_size']
     max_consec = cfg.get('RULES', {}).get('max_consecutive_losses', 3)
