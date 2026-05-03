@@ -1582,15 +1582,22 @@ if __name__ == '__main__':
     if args.reset_losses:
         sym        = args.symbol
         state_path = Path(CFG['BRIDGE']['status_file'])
-        # シンボル別ファイル名に合わせる
         state_path = state_path.with_name(state_path.stem + f'_{sym}' + state_path.suffix)
+        reset_path = state_path.with_name(f'ea_reset_{sym}' + state_path.suffix)
         ea = read_ea_state(str(state_path))
         prev = ea.get('consecutive_losses', 0)
         ea['consecutive_losses'] = 0
+        reset_body = {
+            'reset_since': int(datetime.now(timezone.utc).timestamp()),
+            'symbol':       sym,
+        }
         try:
             state_path.write_text(
                 json.dumps(ea, indent=2, ensure_ascii=False), encoding='ascii')
+            reset_path.write_text(
+                json.dumps(reset_body, indent=2, ensure_ascii=False), encoding='ascii')
             print(f"[リセット] {state_path.name}  consecutive_losses: {prev} → 0")
+            print(f"[リセット] EAリセットファイル作成: {reset_path.name}")
         except Exception as e:
             print(f"[リセット] 書き込み失敗: {e}")
         sys.exit(0)
