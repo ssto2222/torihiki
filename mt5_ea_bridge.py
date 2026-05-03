@@ -1549,6 +1549,8 @@ if __name__ == '__main__':
     ap.add_argument('--output', default='./output')
     ap.add_argument('--lot',    type=float, default=None,
                     help=f'1回の取引ロット数（省略時: {C.BRIDGE["lot_size"]}）')
+    ap.add_argument('--reset-losses', action='store_true',
+                    help='ea_state.json の consecutive_losses を 0 にリセットして終了')
     ap.add_argument('--mode',   choices=['normal', 'scalp'], default='normal',
                     help='normal: H1クロス戦略（デフォルト）/ scalp: M5 RSI50クロス, 円建てTP')
     ap.add_argument('--target', type=int, default=None,
@@ -1566,5 +1568,21 @@ if __name__ == '__main__':
         CFG['SCALP']['target_profit_jpy']  = args.target
     if args.jpy    is not None:
         CFG['SCALP']['jpy_per_usd']        = args.jpy
+
+    if args.reset_losses:
+        sym        = args.symbol
+        state_path = Path(CFG['BRIDGE']['status_file'])
+        # シンボル別ファイル名に合わせる
+        state_path = state_path.with_name(state_path.stem + f'_{sym}' + state_path.suffix)
+        ea = read_ea_state(str(state_path))
+        prev = ea.get('consecutive_losses', 0)
+        ea['consecutive_losses'] = 0
+        try:
+            state_path.write_text(
+                json.dumps(ea, indent=2, ensure_ascii=False), encoding='ascii')
+            print(f"[リセット] {state_path.name}  consecutive_losses: {prev} → 0")
+        except Exception as e:
+            print(f"[リセット] 書き込み失敗: {e}")
+        sys.exit(0)
 
     run_bridge(CFG, once=args.once, mode=args.mode)
