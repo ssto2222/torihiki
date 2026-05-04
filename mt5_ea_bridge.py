@@ -677,7 +677,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 skip_reason = ' | '.join(result.reasons[:2])
         
 
-　　　　　  # 【追加】15分足SMA20の傾きフィルタ
+　　　　# 【追加】15分足SMA20の傾きフィルタ
         if active_buy and sma20_m15_is_down:
             # スキャルプ系(surge_scalp/rebound_scalp)も制限するかは戦略によりますが、
             # 一般的なBUYシグナルは強い下落トレンド中（M15 SMA下向き）は抑制します。
