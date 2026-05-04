@@ -69,7 +69,7 @@ SL = dict(
     tp_atr_multi = 3.0,         # TP  = Entry ± ATR × tp_atr_multi  (R:R=2.0)
     hold_max_h1  = 48,
     rsi_exit_thr = 65,          # RSI≥65 でトレーリング起動
-    trail_multi  = 2.5,         # トレーリング幅 = ATR × trail_multi
+    trail_multi  = 2.0,         # トレーリング幅 = ATR × trail_multi (遅らせるため2.5→2.0)
 )
 
 # ── トレードルール（trading_rules.json から導出）────────────────

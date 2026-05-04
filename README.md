@@ -82,13 +82,39 @@ python mt5_ea_bridge.py --once
 python mt5_ea_bridge.py --mode scalp --symbol BTCUSD --lot 0.05 --target 1000 --jpy 150
 ```
 
-**急騰初期検知機能:**
-- RVOL（相対出来高）1.3倍以上 + 価格加速0.5%以上で急騰初期と判定
-- 急騰初期ではSELLエントリーを優先（信頼度60%以上）
-- 急騰中段階（RSI>70）ではエントリー回避
-- 急騰時はロットサイズを最大50%削減してリスク制御
+### 6. RVOL リアルタイム監視
 
-`--mode` の選択:
+```bash
+# XAUUSD の RVOL を120分間リアルタイム表示
+python monitor_rvol.py --symbol XAUUSD --minutes 120
+
+# BTCUSD の RVOL を60分間、10秒間隔で更新
+python monitor_rvol.py --symbol BTCUSD --minutes 60 --interval 10
+```
+
+**表示内容:**
+- **価格チャート**: M5足の終値と推移
+- **RVOL**: 相対出来高（1.0x = 正常 / 1.3x = 急騰初期 / 1.5x以上 = 高い出来高）
+- **Price Accel**: 価格加速度（%）短期SMAの変化率
+- **Volume Surge**: 出来高急増フラグ（出来高2倍以上かつRVOL1.5倍以上）
+
+### 7. RVOL 分析プロット（静的）
+
+```bash
+# 過去24時間のRVOL分析をプロット
+python plot_rvol_analysis.py --symbol XAUUSD --hours 24
+
+# 過去72時間のRVOL分析をプロット
+python plot_rvol_analysis.py --symbol BTCUSD --hours 72 --output ./result
+```
+
+**出力内容:**
+- RVOL時系列 + 価格チャート
+- RVOL分布（ヒストグラム）
+- 価格加速度分析
+- 急騰初期検知統計（該当本数・発生頻度）
+
+## config.py の主要設定
 - `normal`: H1/M5 クロス戦略
 - `scalp` : M5 RSI 閾値クロス / 円建て TP でエントリー
 

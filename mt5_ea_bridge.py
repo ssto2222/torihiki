@@ -100,6 +100,7 @@ _scalp_sell_confirm_at: datetime | None = None  # SELL 確認開始時刻
 _scalp_sell_confirm_count: int       = 0        # SELL 下落バー確定本数
 _scalp_sell_confirm_bar_time: object = None     # SELL 最後にカウントしたバー時刻
 _scalp_sell_confirm_level: float     = 0.0      # SELL 確認中のRSIレベル
+_scalp_m1_rsi_above_65: bool        = False     # M1 RSI 65超えフラグ（追加注文抑制）
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -953,7 +954,8 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
            _scalp_buy_confirm_pending, _scalp_buy_confirm_at, _scalp_buy_confirm_count, \
            _scalp_buy_confirm_bar_time, _scalp_buy_confirm_level, \
            _scalp_sell_confirm_pending, _scalp_sell_confirm_at, _scalp_sell_confirm_count, \
-           _scalp_sell_confirm_bar_time, _scalp_sell_confirm_level
+           _scalp_sell_confirm_bar_time, _scalp_sell_confirm_level, \
+           _scalp_m1_rsi_above_65
 
     try:
         import MetaTrader5 as mt5
@@ -1021,6 +1023,13 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             df_m1 = add_m1_indicators(df_m1_raw, cfg)
             if not df_m1.empty:
                 rsi_m1_cur = float(df_m1['RSI'].iloc[-1])
+
+        # ── M1 RSI 65超え追跡（追加注文制御）─────────────────────
+        if not np.isnan(rsi_m1_cur):
+            if rsi_m1_cur > 65:
+                _scalp_m1_rsi_above_65 = True
+            elif rsi_m1_cur < 65:
+                _scalp_m1_rsi_above_65 = False
 
         # シンボル情報取得
         info          = mt5.symbol_info(symbol)
@@ -1389,9 +1398,12 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             hour_utc = now.hour
             eff_hour = (hour_utc + 1) % 24 if now.minute >= 45 else hour_utc
 
+            # ── M1 RSI 65超え時の追加注文抑制 ──────────────────────
+            if _scalp_m1_rsi_above_65 and pos_st['total_positions'] > 0:
+                skip = 'M1 RSI >65 追加注文控え'
             # トレンド逆行チェック（trend_up 時は SELL 禁止、trend_down 時は BUY 禁止）
-            if (regime_m5s == 'trend_up'   and new_cross == 'sell') or \
-               (regime_m5s == 'trend_down' and new_cross == 'buy'):
+            elif (regime_m5s == 'trend_up'   and new_cross == 'sell') or \
+                 (regime_m5s == 'trend_down' and new_cross == 'buy'):
                 skip = f'逆トレンドエントリー禁止(regime={regime_m5s})'
             elif eff_hour in {9, 16, 21}:
                 skip = f'forbidden_hour={eff_hour}'
