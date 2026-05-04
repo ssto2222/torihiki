@@ -3,7 +3,7 @@
   "symbol": "BTCUSD",
   "data_source": "合成データ",
   "n_trades_total": 65,
-  "danger_hours": [],
+  "danger_hours": [14],
   "params": {
     "danger_win_rate_thr": 0.4,
     "danger_avg_pnl": 0.0,

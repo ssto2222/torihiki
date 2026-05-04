@@ -100,6 +100,7 @@ _scalp_sell_confirm_at: datetime | None = None  # SELL 確認開始時刻
 _scalp_sell_confirm_count: int       = 0        # SELL 下落バー確定本数
 _scalp_sell_confirm_bar_time: object = None     # SELL 最後にカウントしたバー時刻
 _scalp_sell_confirm_level: float     = 0.0      # SELL 確認中のRSIレベル
+_scalp_m1_rsi_above_65: bool        = False     # M1 RSI 65超えフラグ（追加注文抑制）
 _signal_sell_active: dict          = {        # 下落トレンドフォロー SELL ウィンドウ
     'type':  None,
     'until': None,
@@ -516,6 +517,22 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         df_d1_raw = fetch_ohlcv(symbol, 'D1', 50)
         df_m5_raw = fetch_ohlcv(symbol, 'M5', 60)
         df_m1_raw = fetch_ohlcv(symbol, 'M1', 30)
+                # --- (中略：M1データ取得の後あたりに追加) ---
+
+        # M15 RSI/SMA 判定用
+        sma20_m15_is_down = False
+        df_m15_raw = fetch_ohlcv(symbol, 'M15', 40)
+        if df_m15_raw is not None and len(df_m15_raw) >= 21:
+            # SMA20を計算（既存の共通関数がない場合は pandas で計算）
+            df_m15_raw['SMA20'] = df_m15_raw['Close'].rolling(window=20).mean()
+            if not np.isnan(df_m15_raw['SMA20'].iloc[-1]) and not np.isnan(df_m15_raw['SMA20'].iloc[-2]):
+                current_sma15 = df_m15_raw['SMA20'].iloc[-1]
+                prev_sma15    = df_m15_raw['SMA20'].iloc[-2]
+                # 「SMA20が負」＝ 傾きがマイナス（下向き）と定義
+                if current_sma15 < prev_sma15:
+                    sma20_m15_is_down = True
+
+        
         if df_h1_raw is None or df_d1_raw is None:
             return None
 
@@ -530,11 +547,18 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         rsi_h1_v = float(last['RSI'])
         sma20    = float(last['SMA20'])
         rsi_d1_v = float(df_d1['RSI'].iloc[-1])
+        d1_sma200 = (float(df_d1['Close'].rolling(200).mean().iloc[-1])
+                     if len(df_d1) >= 200 else float('nan'))
+        d1_above_sma200 = (False if np.isnan(d1_sma200)
+                           else float(df_d1['Close'].iloc[-1]) > d1_sma200)
 
         # H1 ADX（レジーム判定用）
         adx_h1_v  = float(last['ADX'])    if 'ADX'      in df_h1.columns else float('nan')
         dip_h1    = float(last['DI_plus']) if 'DI_plus'  in df_h1.columns else float('nan')
         dim_h1    = float(last['DI_minus'])if 'DI_minus' in df_h1.columns else float('nan')
+        
+        
+
 
         # M5 RSI（直近2本で rising 判定 + 急騰急落検出）
         rsi_m5_cur  = float('nan')
@@ -645,12 +669,22 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             strength        = result.strength or 'none'
             tp_hold_minutes = result.tp_hold_minutes or 0
 
-            if m5_ok:
+        if m5_ok:
                 score = min(100, score + 10)
 
-            if result.signal != 'BUY':
+        if result.signal != 'BUY':
                 active_buy  = False
                 skip_reason = ' | '.join(result.reasons[:2])
+        
+
+　　　　　  # 【追加】15分足SMA20の傾きフィルタ
+        if active_buy and sma20_m15_is_down:
+            # スキャルプ系(surge_scalp/rebound_scalp)も制限するかは戦略によりますが、
+            # 一般的なBUYシグナルは強い下落トレンド中（M15 SMA下向き）は抑制します。
+            active_buy = False
+            skip_reason = "M15 SMA20 is downward"
+      
+
 
         # ── 急騰急落スキャルプ判定 ──────────────────────────────
         # surge が検出されたとき H1 ウィンドウ/RulesEngine の結果を上書きして
@@ -772,13 +806,23 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         elif scalp_type == 'rebound_scalp':
             sl_price = close_v - atr_v * 0.8
             tp_price = close_v + atr_v * 0.8
-        elif action == 'sell':
-            # SELL: SL は上、TP は下
-            sl_price = close_v + atr_v * sl_multi
-            tp_price = close_v - atr_v * cfg['SL']['tp_atr_multi']
         else:
-            sl_price = close_v - atr_v * sl_multi
-            tp_price = close_v + atr_v * cfg['SL']['tp_atr_multi']
+            # H1 RSI レベルに基づいて TP 倍率を決定（優先ファクター）
+            # RSI 70以上の強い領域では早期利確、低い領域ではTP幅を広めに
+            if rsi_h1_v >= 70.0:
+                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_high', 2.0)
+            elif rsi_h1_v >= 50.0:
+                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_mid', 2.5)
+            else:
+                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_low', 3.0)
+
+            if action == 'sell':
+                # SELL: SL は上、TP は下
+                sl_price = close_v + atr_v * sl_multi
+                tp_price = close_v - atr_v * tp_multi
+            else:
+                sl_price = close_v - atr_v * sl_multi
+                tp_price = close_v + atr_v * tp_multi
 
         tick  = mt5.symbol_info(symbol)
         point = tick.point if tick else 0.01
@@ -953,7 +997,8 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
            _scalp_buy_confirm_pending, _scalp_buy_confirm_at, _scalp_buy_confirm_count, \
            _scalp_buy_confirm_bar_time, _scalp_buy_confirm_level, \
            _scalp_sell_confirm_pending, _scalp_sell_confirm_at, _scalp_sell_confirm_count, \
-           _scalp_sell_confirm_bar_time, _scalp_sell_confirm_level
+           _scalp_sell_confirm_bar_time, _scalp_sell_confirm_level, \
+           _scalp_m1_rsi_above_65
 
     try:
         import MetaTrader5 as mt5
@@ -1021,6 +1066,13 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             df_m1 = add_m1_indicators(df_m1_raw, cfg)
             if not df_m1.empty:
                 rsi_m1_cur = float(df_m1['RSI'].iloc[-1])
+
+        # ── M1 RSI 65超え追跡（追加注文制御）─────────────────────
+        if not np.isnan(rsi_m1_cur):
+            if rsi_m1_cur > 65:
+                _scalp_m1_rsi_above_65 = True
+            elif rsi_m1_cur < 65:
+                _scalp_m1_rsi_above_65 = False
 
         # シンボル情報取得
         info          = mt5.symbol_info(symbol)
@@ -1389,9 +1441,12 @@ def compute_scalp_signal(symbol: str, cfg: dict) -> dict | None:
             hour_utc = now.hour
             eff_hour = (hour_utc + 1) % 24 if now.minute >= 45 else hour_utc
 
+            # ── M1 RSI 65超え時の追加注文抑制 ──────────────────────
+            if _scalp_m1_rsi_above_65 and pos_st['total_positions'] > 0:
+                skip = 'M1 RSI >65 追加注文控え'
             # トレンド逆行チェック（trend_up 時は SELL 禁止、trend_down 時は BUY 禁止）
-            if (regime_m5s == 'trend_up'   and new_cross == 'sell') or \
-               (regime_m5s == 'trend_down' and new_cross == 'buy'):
+            elif (regime_m5s == 'trend_up'   and new_cross == 'sell') or \
+                 (regime_m5s == 'trend_down' and new_cross == 'buy'):
                 skip = f'逆トレンドエントリー禁止(regime={regime_m5s})'
             elif eff_hour in {9, 16, 21}:
                 skip = f'forbidden_hour={eff_hour}'
