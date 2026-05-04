@@ -517,6 +517,22 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         df_d1_raw = fetch_ohlcv(symbol, 'D1', 50)
         df_m5_raw = fetch_ohlcv(symbol, 'M5', 60)
         df_m1_raw = fetch_ohlcv(symbol, 'M1', 30)
+                # --- (中略：M1データ取得の後あたりに追加) ---
+
+        # M15 RSI/SMA 判定用
+        sma20_m15_is_down = False
+        df_m15_raw = fetch_ohlcv(symbol, 'M15', 40)
+        if df_m15_raw is not None and len(df_m15_raw) >= 21:
+            # SMA20を計算（既存の共通関数がない場合は pandas で計算）
+            df_m15_raw['SMA20'] = df_m15_raw['Close'].rolling(window=20).mean()
+            if not np.isnan(df_m15_raw['SMA20'].iloc[-1]) and not np.isnan(df_m15_raw['SMA20'].iloc[-2]):
+                current_sma15 = df_m15_raw['SMA20'].iloc[-1]
+                prev_sma15    = df_m15_raw['SMA20'].iloc[-2]
+                # 「SMA20が負」＝ 傾きがマイナス（下向き）と定義
+                if current_sma15 < prev_sma15:
+                    sma20_m15_is_down = True
+
+        
         if df_h1_raw is None or df_d1_raw is None:
             return None
 
@@ -540,6 +556,9 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         adx_h1_v  = float(last['ADX'])    if 'ADX'      in df_h1.columns else float('nan')
         dip_h1    = float(last['DI_plus']) if 'DI_plus'  in df_h1.columns else float('nan')
         dim_h1    = float(last['DI_minus'])if 'DI_minus' in df_h1.columns else float('nan')
+        
+        
+
 
         # M5 RSI（直近2本で rising 判定 + 急騰急落検出）
         rsi_m5_cur  = float('nan')
@@ -650,12 +669,22 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             strength        = result.strength or 'none'
             tp_hold_minutes = result.tp_hold_minutes or 0
 
-            if m5_ok:
+        if m5_ok:
                 score = min(100, score + 10)
 
-            if result.signal != 'BUY':
+        if result.signal != 'BUY':
                 active_buy  = False
                 skip_reason = ' | '.join(result.reasons[:2])
+        
+
+　　　　　  # 【追加】15分足SMA20の傾きフィルタ
+        if active_buy and sma20_m15_is_down:
+            # スキャルプ系(surge_scalp/rebound_scalp)も制限するかは戦略によりますが、
+            # 一般的なBUYシグナルは強い下落トレンド中（M15 SMA下向き）は抑制します。
+            active_buy = False
+            skip_reason = "M15 SMA20 is downward"
+      
+
 
         # ── 急騰急落スキャルプ判定 ──────────────────────────────
         # surge が検出されたとき H1 ウィンドウ/RulesEngine の結果を上書きして
