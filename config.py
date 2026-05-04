@@ -56,8 +56,8 @@ EXECUTION = dict(
     touch_margin             = 0.20,    # SMA20 タッチ判定マージン（フォールバック）
     m1_rsi_offset            = 20.0,
     signal_valid_m1          = 240,     # シグナルON有効期限（M1本数）
-    m1_exec_buy_thrs         = [65.0, 70.0, 75.0],   # BUY 執行: M1 RSI がいずれかを 2本以上上抜け
-    m1_exec_sell_thrs        = [35.0, 30.0, 25.0],   # SELL 執行: M1 RSI がいずれかを 2本以上下抜け
+    m1_exec_buy_thrs         = [57.0, 60.0, 65.0, 70.0, 75.0],   # BUY 執行: M1 RSI がいずれかを 2本以上上抜け
+    m1_exec_sell_thrs        = [40.0, 35.0, 30.0, 25.0],   # SELL 執行: M1 RSI がいずれかを 2本以上下抜け
     sma20_touch_pct          = 70,      # 過去シグナルの何%をキャッチする touch_margin にするか
     sma20_touch_margin_file  = "./output/sma20_touch_margins.json",  # キャッシュファイル
 )
@@ -67,19 +67,40 @@ SL = dict(
     spread_usd   = 0.30,
     sl_multi     = 1.5,         # SL = Entry ± ATR × sl_multi  ★BT最適(WR52%,SL刈55%,Sharpe26.4)
     tp_atr_multi = 3.0,         # TP  = Entry ± ATR × tp_atr_multi  (R:R=2.0)
+    tp_atr_multi_above_d1_sma200 = 3.0,  # D1 SMA200 上での TP 倍率
+    tp_atr_multi_below_d1_sma200 = 2.5,  # D1 SMA200 下での TP 倍率
+    tp_atr_multi_rsi_high = 1.5,  # H1 RSI >= 70 での TP 倍率（強いRSI領域で早期利確）
+    tp_atr_multi_rsi_mid  = 2.5,  # H1 50 <= RSI < 70 での TP 倍率
+    tp_atr_multi_rsi_low  = 3.0,  # H1 RSI < 50 での TP 倍率
     hold_max_h1  = 48,
     rsi_exit_thr = 65,          # RSI≥65 でトレーリング起動
     trail_multi  = 2.0,         # トレーリング幅 = ATR × trail_multi (遅らせるため2.5→2.0)
 )
 
-# ── トレードルール（trading_rules.json から導出）────────────────
-RULES = dict(
+# ── ルール分類: general / entry / risk / exit ────────────────────────────
+RULES_GENERAL = dict(
+    total_risk_pct           = 0.30,  # 全体許容損失（残高比）; max_positions = total_risk_pct / BRIDGE.risk_pct
+)
+
+RULES_ENTRY = dict(
     min_score                = 30,    # RulesEngine スコア閾値（以下はエントリースキップ）
+)
+
+RULES_RISK = dict(
     max_consecutive_losses   = 3,     # 連続損失この回数でその日の取引停止
     cooldown_large_loss_min  = 1440,  # 大損失後のクールダウン（分）= 翌日まで
     large_loss_threshold_usd = -10000,
-    min_hold_minutes         = 15,
-    total_risk_pct           = 0.30,  # 全体許容損失（残高比）; max_positions = total/risk_pct = 10
+)
+
+RULES_EXIT = dict(
+    min_hold_minutes         = 15,    # 最低保有時間
+)
+
+RULES = dict(
+    **RULES_GENERAL,
+    **RULES_ENTRY,
+    **RULES_RISK,
+    **RULES_EXIT,
 )
 
 # ── 最適化 ────────────────────────────────────────────────

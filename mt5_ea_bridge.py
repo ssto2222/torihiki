@@ -531,6 +531,10 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         rsi_h1_v = float(last['RSI'])
         sma20    = float(last['SMA20'])
         rsi_d1_v = float(df_d1['RSI'].iloc[-1])
+        d1_sma200 = (float(df_d1['Close'].rolling(200).mean().iloc[-1])
+                     if len(df_d1) >= 200 else float('nan'))
+        d1_above_sma200 = (False if np.isnan(d1_sma200)
+                           else float(df_d1['Close'].iloc[-1]) > d1_sma200)
 
         # H1 ADX（レジーム判定用）
         adx_h1_v  = float(last['ADX'])    if 'ADX'      in df_h1.columns else float('nan')
@@ -773,13 +777,23 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         elif scalp_type == 'rebound_scalp':
             sl_price = close_v - atr_v * 0.8
             tp_price = close_v + atr_v * 0.8
-        elif action == 'sell':
-            # SELL: SL は上、TP は下
-            sl_price = close_v + atr_v * sl_multi
-            tp_price = close_v - atr_v * cfg['SL']['tp_atr_multi']
         else:
-            sl_price = close_v - atr_v * sl_multi
-            tp_price = close_v + atr_v * cfg['SL']['tp_atr_multi']
+            # H1 RSI レベルに基づいて TP 倍率を決定（優先ファクター）
+            # RSI 70以上の強い領域では早期利確、低い領域ではTP幅を広めに
+            if rsi_h1_v >= 70.0:
+                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_high', 2.0)
+            elif rsi_h1_v >= 50.0:
+                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_mid', 2.5)
+            else:
+                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_low', 3.0)
+
+            if action == 'sell':
+                # SELL: SL は上、TP は下
+                sl_price = close_v + atr_v * sl_multi
+                tp_price = close_v - atr_v * tp_multi
+            else:
+                sl_price = close_v - atr_v * sl_multi
+                tp_price = close_v + atr_v * tp_multi
 
         tick  = mt5.symbol_info(symbol)
         point = tick.point if tick else 0.01
