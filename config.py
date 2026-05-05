@@ -40,6 +40,8 @@ INDICATOR = dict(
     early_surge_accel_threshold = 0.5,  # 急騰初期価格加速閾値
     surge_overbought_threshold = 70.0,  # 急騰中段階RSI閾値
     surge_avoid_accel_threshold = 1.5,  # 急騰回避価格加速閾値
+    bb_tp_sigma              = 2.0,    # H1 BB2σ を TP 初期位置に使う
+    bb_tp_near_pct           = 0.85,   # H1 BB2σ 近傍判定（%）
 )
 
 # ── H1 シグナル検出（SMA20 + RSI）────────────────────────────

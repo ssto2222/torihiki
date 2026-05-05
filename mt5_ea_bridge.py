@@ -542,14 +542,18 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         if df_h1.empty or df_d1.empty or 'SMA20' not in df_h1.columns:
             return None
 
-        last     = df_h1.iloc[-1]
-        close_v  = float(last['Close'])
-        atr_v    = float(last['ATR'])
-        rsi_h1_v = float(last['RSI'])
-        sma20    = float(last['SMA20'])
-        rsi_d1_v = float(df_d1['RSI'].iloc[-1])
-        d1_sma200 = (float(df_d1['Close'].rolling(200).mean().iloc[-1])
-                     if len(df_d1) >= 200 else float('nan'))
+        last       = df_h1.iloc[-1]
+        close_v    = float(last['Close'])
+        atr_v      = float(last['ATR'])
+        rsi_h1_v   = float(last['RSI'])
+        sma20      = float(last['SMA20'])
+        h1_bb_mid  = float(last['BB_mid']) if 'BB_mid' in df_h1.columns else float('nan')
+        h1_bb_upper2 = float(last['BB_upper2']) if 'BB_upper2' in df_h1.columns else float('nan')
+        h1_bb_lower2 = float(last['BB_lower2']) if 'BB_lower2' in df_h1.columns else float('nan')
+        h1_bb2_pct  = float(last['BB2_pct']) if 'BB2_pct' in df_h1.columns else float('nan')
+        rsi_d1_v    = float(df_d1['RSI'].iloc[-1])
+        d1_sma200   = (float(df_d1['Close'].rolling(200).mean().iloc[-1])
+                       if len(df_d1) >= 200 else float('nan'))
         d1_above_sma200 = (False if np.isnan(d1_sma200)
                            else float(df_d1['Close'].iloc[-1]) > d1_sma200)
 
@@ -807,14 +811,19 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             sl_price = close_v - atr_v * 0.8
             tp_price = close_v + atr_v * 0.8
         else:
-            # H1 RSI レベルに基づいて TP 倍率を決定（優先ファクター）
-            # RSI 70以上の強い領域では早期利確、低い領域ではTP幅を広めに
+            # D1 SMA200 と H1 RSI の両方を考慮した TP 倍率
+            tp_multi = cfg['SL'].get('tp_atr_multi', 3.0)
+            if not np.isnan(d1_sma200):
+                tp_multi = (cfg['SL'].get('tp_atr_multi_above_d1_sma200', tp_multi)
+                            if d1_above_sma200 else
+                            cfg['SL'].get('tp_atr_multi_below_d1_sma200', tp_multi))
+
             if rsi_h1_v >= 70.0:
-                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_high', 2.0)
+                tp_multi = min(tp_multi, cfg['SL'].get('tp_atr_multi_rsi_high', 2.0))
             elif rsi_h1_v >= 50.0:
-                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_mid', 2.5)
+                tp_multi = min(tp_multi, cfg['SL'].get('tp_atr_multi_rsi_mid', 2.5))
             else:
-                tp_multi = cfg['SL'].get('tp_atr_multi_rsi_low', 3.0)
+                tp_multi = min(tp_multi, cfg['SL'].get('tp_atr_multi_rsi_low', 3.0))
 
             if action == 'sell':
                 # SELL: SL は上、TP は下
@@ -823,6 +832,17 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             else:
                 sl_price = close_v - atr_v * sl_multi
                 tp_price = close_v + atr_v * tp_multi
+
+            # 1H BB2σ 近傍なら TP を一旦 BB2σまでに抑える
+            bb_near_pct = cfg['INDICATOR'].get('bb_tp_near_pct', 0.85)
+            if action == 'buy' and not np.isnan(h1_bb_upper2) and h1_bb_upper2 > close_v:
+                if h1_bb2_pct >= bb_near_pct or (h1_bb_upper2 - close_v) <= atr_v * 0.5:
+                    tp_price = min(tp_price, h1_bb_upper2)
+            elif action == 'sell' and not np.isnan(h1_bb_lower2) and h1_bb_lower2 < close_v:
+                sell_bb2_pct = ((h1_bb_mid - close_v) / (h1_bb_mid - h1_bb_lower2)
+                                if h1_bb_mid != h1_bb_lower2 else 0.0)
+                if sell_bb2_pct >= bb_near_pct or (close_v - h1_bb_lower2) <= atr_v * 0.5:
+                    tp_price = max(tp_price, h1_bb_lower2)
 
         tick  = mt5.symbol_info(symbol)
         point = tick.point if tick else 0.01
