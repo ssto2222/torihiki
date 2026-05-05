@@ -90,7 +90,7 @@ RULES_ENTRY = dict(
 )
 
 RULES_RISK = dict(
-    max_consecutive_losses   = 3,     # 連続損失この回数でその日の取引停止
+    max_consecutive_losses   = 10,     # 連続損失この回数でその日の取引停止
     cooldown_large_loss_min  = 1440,  # 大損失後のクールダウン（分）= 翌日まで
     large_loss_threshold_usd = -10000,
 )
