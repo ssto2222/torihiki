@@ -565,13 +565,13 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
 
         # ── BB2σ タッチ検出（押し目買い用）────────────────────────────
         if not np.isnan(h1_bb_upper2) and close_v >= h1_bb_upper2:
-            if not _bb2_touched_buy:
-                _bb2_touched_buy = True
-                _bb2_touched_at_buy = now
+            if not globals()['_bb2_touched_buy']:
+                globals()['_bb2_touched_buy'] = True
+                globals()['_bb2_touched_at_buy'] = now
         if not np.isnan(h1_bb_lower2) and close_v <= h1_bb_lower2:
-            if not _bb2_touched_sell:
-                _bb2_touched_sell = True
-                _bb2_touched_at_sell = now
+            if not globals()['_bb2_touched_sell']:
+                globals()['_bb2_touched_sell'] = True
+                globals()['_bb2_touched_at_sell'] = now
 
         # ── 慎重分散エントリー条件（2本連続陽線後3本目BB2σタッチ）──────
         careful_entry = False
@@ -845,7 +845,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
 
         # ── BB2σ タッチ後押し目待ちフィルタ ─────────────────────
         limit_prices = []
-        if action == 'buy' and _bb2_touched_buy and not np.isnan(sma20_m5_current):
+        if action == 'buy' and globals()['_bb2_touched_buy'] and not np.isnan(sma20_m5_current):
             # BUY: BB2σ タッチ後、M5 SMA20 付近に3本のリミット注文を分散
             spacing = atr_v * 0.1  # 0.1 ATR 間隔
             limit_prices = [
@@ -1938,10 +1938,10 @@ if __name__ == '__main__':
             print(f"[リセット] {state_path.name}  consecutive_losses: {prev} → 0")
             print(f"[リセット] EAリセットファイル作成: {reset_path.name}")
             # BB2σ タッチ状態もリセット
-            _bb2_touched_buy = False
-            _bb2_touched_sell = False
-            _bb2_touched_at_buy = None
-            _bb2_touched_at_sell = None
+            globals()['_bb2_touched_buy'] = False
+            globals()['_bb2_touched_sell'] = False
+            globals()['_bb2_touched_at_buy'] = None
+            globals()['_bb2_touched_at_sell'] = None
             print(f"[リセット] BB2σ タッチ状態をリセット")
         except Exception as e:
             print(f"[リセット] 書き込み失敗: {e}")
