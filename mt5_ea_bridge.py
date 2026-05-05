@@ -517,11 +517,12 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         df_d1_raw = fetch_ohlcv(symbol, 'D1', 50)
         df_m5_raw = fetch_ohlcv(symbol, 'M5', 60)
         df_m1_raw = fetch_ohlcv(symbol, 'M1', 30)
+        df_m15_raw = fetch_ohlcv(symbol, 'M15', 40)
                 # --- (中略：M1データ取得の後あたりに追加) ---
 
         # M15 RSI/SMA 判定用
         sma20_m15_is_down = False
-        df_m15_raw = fetch_ohlcv(symbol, 'M15', 40)
+       
         if df_m15_raw is not None and len(df_m15_raw) >= 21:
             # SMA20を計算（既存の共通関数がない場合は pandas で計算）
             df_m15_raw['SMA20'] = df_m15_raw['Close'].rolling(window=20).mean()
