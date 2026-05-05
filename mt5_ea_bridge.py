@@ -650,6 +650,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
 
         now      = datetime.now(timezone.utc)
         hour_utc = now.hour
+        hour_jst = (hour_utc + 9) % 24
         dow      = now.weekday()
 
         # ── クロス検出（BUY + SELL）────────────────────────────
@@ -842,6 +843,17 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 action      = 'none'
                 skip_reason = (f'M1執行待機: RSI_M1={rsi_m1_cur:.1f}'
                                f'(要{thr_str} 2本以上)')
+
+        # M5 SMA20 下向きは BUY 禁止
+        if action == 'buy' and not np.isnan(sma20_m5_current) and not np.isnan(sma20_m5_prev):
+            if sma20_m5_current < sma20_m5_prev:
+                action = 'none'
+                skip_reason = 'M5_SMA20_down_buy禁止'
+
+        # JST 14時台は BUY 禁止
+        if action == 'buy' and hour_jst == 14:
+            action = 'none'
+            skip_reason = 'JST14-15_buy禁止'
 
         # ── BB2σ タッチ後押し目待ちフィルタ ─────────────────────
         limit_prices = []
