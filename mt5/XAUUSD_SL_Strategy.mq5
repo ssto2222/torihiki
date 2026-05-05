@@ -71,14 +71,14 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-   string action, sig_ts, strength;
+   string action, sig_ts, strength, limit_prices_str = "";
    double sl_price, tp_price, atr_v, sl_multi, rsi_exit, trail_m, lot_sig;
    int    max_slip, score, tp_hold_min, max_pos;
 
    // シグナルファイルの読み込み
    bool read_ok = ReadSignal(action, sl_price, tp_price, atr_v, sl_multi,
                             max_slip, rsi_exit, trail_m, lot_sig, score, strength,
-                            tp_hold_min, sig_ts, max_pos);
+                            tp_hold_min, sig_ts, max_pos, limit_prices_str);
 
    // --- 【新規】UI表示の更新 ---
    UpdateSignalUI(read_ok, action, score, strength);
@@ -133,6 +133,7 @@ void OnTimer()
    {
       if(action == "buy")  OpenBuy(sl_price,  tp_price, score);  // scoreを追加
       if(action == "sell") OpenSell(sl_price, tp_price, score); // scoreを追加
+      if(action == "limit_buy") OpenLimitBuy(limit_prices_str, sl_price, tp_price, score);
    }
 
    WriteState(consec);
@@ -146,7 +147,7 @@ void UpdateSignalUI(bool success, string action, int score, string strength)
    string text;
    color  col = clrDarkGray;
 
-   if(!success || (action != "buy" && action != "sell"))
+   if(!success || (action != "buy" && action != "sell" && action != "limit_buy"))
    {
       text = "Signal: Scanning... (Wait)";
    }
@@ -155,7 +156,7 @@ void UpdateSignalUI(bool success, string action, int score, string strength)
       string act_upper = action; 
       StringToUpper(act_upper);
       text = StringFormat("Signal: %s | Score: %d | Power: %s", act_upper, score, strength);
-      col  = (action == "buy") ? clrDeepSkyBlue : clrTomato;
+      col  = (action == "buy" || action == "limit_buy") ? clrDeepSkyBlue : clrTomato;
     
    }
 
@@ -197,6 +198,39 @@ void OpenBuy(double sl, double tp, int score) // scoreを引数に追加
    }
    else
       Print("[EA] Buy 失敗: ", g_trade.ResultComment());
+}
+
+void OpenLimitBuy(string limit_prices_str, double sl, double tp, int score)
+{
+   // limit_prices_str: "[100.0, 101.0, 102.0]"
+   if(StringLen(limit_prices_str) < 5) return;
+   
+   // [ と ] を除去
+   string clean = StringSubstr(limit_prices_str, 1, StringLen(limit_prices_str) - 2);
+   string parts[];
+   int count = StringSplit(clean, ',', parts);
+   if(count != 3) return;
+   
+   double prices[3];
+   for(int i = 0; i < 3; i++)
+   {
+      prices[i] = StringToDouble(parts[i]);
+   }
+   
+   // 3つのリミット買い注文を入れる
+   for(int i = 0; i < 3; i++)
+   {
+      if(g_trade.BuyLimit(g_lot_size, prices[i], _Symbol, sl, tp, ORDER_TIME_GTC, 0, "LIMIT_BUY"))
+      {
+         string msg = StringFormat("[EA] %s LIMIT_BUY発火! Price:%.2f, Score:%d, Lot:%.2f", _Symbol, prices[i], score, g_lot_size);
+         SendNotification(msg);
+         if(InpDebugLog) Print(msg);
+      }
+      else
+      {
+         Print("[EA] LimitBuy 失敗: ", g_trade.ResultComment());
+      }
+   }
 }
 
 void OpenSell(double sl, double tp, int score) // scoreを引数に追加
@@ -312,7 +346,7 @@ int GetConsecLosses()
    return consec;
 }
 
-bool ReadSignal(string &action, double &sl, double &tp, double &atr, double &sl_multi, int &max_slip, double &rsi_exit, double &trail_m, double &lot_size, int &score, string &strength, int &tp_hold_min, string &ts, int &max_pos)
+bool ReadSignal(string &action, double &sl, double &tp, double &atr, double &sl_multi, int &max_slip, double &rsi_exit, double &trail_m, double &lot_size, int &score, string &strength, int &tp_hold_min, string &ts, int &max_pos, string &limit_prices_str)
 {
    int fh = FileOpen(g_signal_file, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(fh == INVALID_HANDLE) return false;
@@ -335,6 +369,7 @@ bool ReadSignal(string &action, double &sl, double &tp, double &atr, double &sl_
    tp_hold_min = (int)JDbl(raw, "tp_hold_minutes");
    ts          = JStr(raw, "timestamp");
    max_pos     = (int)JDbl(raw, "max_positions");
+   limit_prices_str = JStr(raw, "limit_prices");
    if(max_pos <= 0) max_pos = 1;
    return StringLen(action) > 0;
 }

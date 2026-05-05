@@ -50,6 +50,7 @@ SIGNAL = dict(
     sell_rsi_thr       = 62.0,    # (旧: 上抜け売り禁止) 現在未使用
     momentum_thrs      = [55.0, 60.0, 65.0, 70.0, 75.0],  # RSI 上抜け → モメンタム買い
     momentum_sell_thrs = [55.0, 50.0, 45.0, 40.0, 35.0],  # RSI 下抜け → 下落トレンド売り
+    momentum_buy_max_rsi = 70.0,  # モメンタムBUY時、H1 RSIがこの値以上なら高値掴み防止で禁止
     downtrend_d1_rsi   = 45.0,    # D1 RSI < この値 かつ close < SMA20 → 下落トレンド判定
 )
 

@@ -113,6 +113,12 @@ _sma20_touch_margins: dict = {}   # {'BTCUSD': 10.5, 'XAUUSD': 2.3, ...}
 _jpy_per_usd_cache: float          = 150.0
 _jpy_per_usd_at:    datetime | None = None
 
+# ── BB2σ タッチ状態（押し目買い用）────────────────────────────
+_bb2_touched_buy = False
+_bb2_touched_sell = False
+_bb2_touched_at_buy = None
+_bb2_touched_at_sell = None
+
 
 def _get_jpy_per_usd(fallback: float = 150.0) -> float:
     """USDJPY レートを MT5 から取得し 1 時間キャッシュする。"""
@@ -557,6 +563,24 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         d1_above_sma200 = (False if np.isnan(d1_sma200)
                            else float(df_d1['Close'].iloc[-1]) > d1_sma200)
 
+        # ── BB2σ タッチ検出（押し目買い用）────────────────────────────
+        if not np.isnan(h1_bb_upper2) and close_v >= h1_bb_upper2:
+            if not _bb2_touched_buy:
+                _bb2_touched_buy = True
+                _bb2_touched_at_buy = now
+        if not np.isnan(h1_bb_lower2) and close_v <= h1_bb_lower2:
+            if not _bb2_touched_sell:
+                _bb2_touched_sell = True
+                _bb2_touched_at_sell = now
+
+        # ── 慎重分散エントリー条件（2本連続陽線後3本目BB2σタッチ）──────
+        careful_entry = False
+        if len(df_h1) >= 3 and not np.isnan(h1_bb_upper2) and close_v >= h1_bb_upper2:
+            prev1 = df_h1.iloc[-2]
+            prev2 = df_h1.iloc[-3]
+            if prev2['Close'] > prev2['Open'] and prev1['Close'] > prev1['Open']:
+                careful_entry = True
+
         # H1 ADX（レジーム判定用）
         adx_h1_v  = float(last['ADX'])    if 'ADX'      in df_h1.columns else float('nan')
         dip_h1    = float(last['DI_plus']) if 'DI_plus'  in df_h1.columns else float('nan')
@@ -566,6 +590,8 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
 
 
         # M5 RSI（直近2本で rising 判定 + 急騰急落検出）
+        # 5M SMA20 計算（押し目買い用）
+        df_m5_raw['SMA20'] = df_m5_raw['Close'].rolling(20).mean()
         rsi_m5_cur  = float('nan')
         rsi_m5_prev = float('nan')
         m5_ok       = False
@@ -596,10 +622,24 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 rsi_m1_bar_prev  = float(df_m1['RSI'].iloc[-2])
                 rsi_m1_bar_prev2 = float(df_m1['RSI'].iloc[-3])
 
+        # 5M SMA20 押し目判定用
+        sma20_m5_current = float('nan')
+        sma20_m5_prev    = float('nan')
+        close_m5_current = float('nan')
+        close_m5_prev    = float('nan')
+        if df_m5_raw is not None and len(df_m5_raw) >= 21:
+            last_m5 = df_m5_raw.iloc[-1]
+            prev_m5 = df_m5_raw.iloc[-2]
+            sma20_m5_current = float(last_m5['SMA20'])
+            sma20_m5_prev    = float(prev_m5['SMA20'])
+            close_m5_current = float(last_m5['Close'])
+            close_m5_prev    = float(prev_m5['Close'])
+
         sl_multi       = cfg['SL']['sl_multi']
         sig_p          = cfg['SIGNAL']
         buy_thr        = sig_p.get('buy_rsi_thr', 40.0)
         mom_thrs       = sorted(sig_p.get('momentum_thrs', [55.0, 60.0, 65.0, 70.0, 75.0]))
+        momentum_buy_max_rsi = sig_p.get('momentum_buy_max_rsi', 70.0)
         sell_mom_thrs  = sorted(sig_p.get('momentum_sell_thrs', [55.0, 50.0, 45.0, 40.0, 35.0]),
                                 reverse=True)  # 大→小 順にチェック
         downtrend_thr  = sig_p.get('downtrend_d1_rsi', 45.0)
@@ -621,7 +661,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 new_buy_type = 'dip'
             else:
                 for thr in mom_thrs:
-                    if rsi_h1_v > thr and _prev_rsi_h1 <= thr:
+                    if rsi_h1_v > thr and _prev_rsi_h1 <= thr and rsi_h1_v <= momentum_buy_max_rsi:
                         new_buy_type = f'momentum_{int(thr)}'
                         break
             # SELL: 下落トレンドフォロー（D1 RSI < 45 かつ close < SMA20 のときのみ）
@@ -803,6 +843,24 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 skip_reason = (f'M1執行待機: RSI_M1={rsi_m1_cur:.1f}'
                                f'(要{thr_str} 2本以上)')
 
+        # ── BB2σ タッチ後押し目待ちフィルタ ─────────────────────
+        limit_prices = []
+        if action == 'buy' and _bb2_touched_buy and not np.isnan(sma20_m5_current):
+            # BUY: BB2σ タッチ後、M5 SMA20 付近に3本のリミット注文を分散
+            spacing = atr_v * 0.1  # 0.1 ATR 間隔
+            limit_prices = [
+                round(sma20_m5_current - spacing, 2),
+                round(sma20_m5_current, 2),
+                round(sma20_m5_current + spacing, 2)
+            ]
+            action = 'limit_buy'
+            skip_reason = ''  # リミット注文なのでスキップではない
+        elif action == 'sell' and _bb2_touched_sell and not np.isnan(sma20_m5_current):
+            # SELL: 5M 価格が SMA20 を上回っていたのが、下回った瞬間（戻り売り）
+            if not (close_m5_prev > sma20_m5_prev and close_m5_current < sma20_m5_current):
+                action = 'none'
+                skip_reason = 'BB2σタッチ後SMA20戻り待ち'
+
         # ── SL/TP（方向・種別に応じて切り替え）──────────────────
         if scalp_type == 'surge_scalp':
             sl_price = close_v - atr_v * 0.5
@@ -883,6 +941,10 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         max_ep          = regime_cfg.get('max_entry_per_signal', 3)
         spacing         = regime_cfg.get('entry_spacing_atr',    0.5)
         scalp_reserve   = regime_cfg.get('scalp_reserve_slots',  1)
+        # 2本連続陽線後3本目BB2σタッチの場合: 慎重分散エントリー
+        if careful_entry:
+            max_ep = 1    # エントリー回数を1回に制限
+            spacing = 1.0 # エントリー間隔を1ATRに広げる
         # H1・M5 両方トレンドなら侵入時に一括エントリー（押し目待ちなし）
         is_full_trend   = regime_h1 in ('trend_up', 'trend_down') and \
                           regime_m5 in ('trend_up', 'trend_down')
@@ -987,6 +1049,8 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
             'entry_in_window':    _entry_in_window,
             'is_full_trend':      is_full_trend,
             'scalp_reserve':      scalp_reserve,
+            'careful_entry':      careful_entry,
+            'limit_prices':       limit_prices,
         }
     except Exception as e:
         print(f"[ブリッジ] 計算エラー: {e}")
@@ -1790,7 +1854,12 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
                           f"score={data['score']}({data['strength']})  "
                           f"lot={data['lot_size']}{ep_tag}")
+                    if data.get('limit_prices'):
+                        prices_str = ', '.join(f'${p:,.2f}' for p in data['limit_prices'])
+                        print(f"  リミット注文: {prices_str}")
                     print(f"  {rg_tag}")
+                    if data.get('careful_entry', False):
+                        print(f"  [慎重分散エントリー: 2本連続陽線後3本目BB2σタッチ]")
                     if data['signal_valid_until']:
                         print(f"  buy_window_until={data['signal_valid_until']}")
                     if data['sell_signal_type'] != 'none':
@@ -1868,6 +1937,12 @@ if __name__ == '__main__':
                 json.dumps(reset_body, indent=2, ensure_ascii=False), encoding='ascii')
             print(f"[リセット] {state_path.name}  consecutive_losses: {prev} → 0")
             print(f"[リセット] EAリセットファイル作成: {reset_path.name}")
+            # BB2σ タッチ状態もリセット
+            _bb2_touched_buy = False
+            _bb2_touched_sell = False
+            _bb2_touched_at_buy = None
+            _bb2_touched_at_sell = None
+            print(f"[リセット] BB2σ タッチ状態をリセット")
         except Exception as e:
             print(f"[リセット] 書き込み失敗: {e}")
         sys.exit(0)
