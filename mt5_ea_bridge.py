@@ -833,7 +833,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 sl_price = close_v - atr_v * sl_multi
                 tp_price = close_v + atr_v * tp_multi
 
-            # 1H BB2σ 近傍なら TP を一旦 BB2σまでに抑える
+            # 1H BB2σ 近傍なら TP を一旦 BB2σまでに抑える（ただし価格が BB2σ を超えている場合は従来通り）
             bb_near_pct = cfg['INDICATOR'].get('bb_tp_near_pct', 0.85)
             if action == 'buy' and not np.isnan(h1_bb_upper2) and h1_bb_upper2 > close_v:
                 if h1_bb2_pct >= bb_near_pct or (h1_bb_upper2 - close_v) <= atr_v * 0.5:
