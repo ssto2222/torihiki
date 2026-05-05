@@ -850,8 +850,8 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
                 action = 'none'
                 skip_reason = 'M5_SMA20_down_buy禁止'
 
-        # JST 14時台は BUY 禁止
-        if action == 'buy' and hour_jst == 14:
+        # JST 14時台は BUY 禁止（RulesEngine の時間フィルタと整合）
+        if action == 'buy' and _engine is None and hour_jst == 14:
             action = 'none'
             skip_reason = 'JST14-15_buy禁止'
 
