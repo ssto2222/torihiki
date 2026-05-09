@@ -89,8 +89,13 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
 
 
 def fetch_ohlcv_range(symbol: str, tf_str: str,
-                      date_from: 'datetime', date_to: 'datetime') -> pd.DataFrame | None:
-    """期間指定で OHLCV を取得する (copy_rates_range)"""
+                      date_from: 'datetime', date_to: 'datetime',
+                      fallback_bars: int = 100_000) -> pd.DataFrame | None:
+    """
+    期間指定で OHLCV を取得する (copy_rates_range)。
+    M1 など保持期間が短い足で範囲リクエストが失敗した場合は
+    copy_rates_from_pos（直近 fallback_bars 本）にフォールバックする。
+    """
     try:
         import MetaTrader5 as mt5
         tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,'M15':mt5.TIMEFRAME_M15,
@@ -99,15 +104,24 @@ def fetch_ohlcv_range(symbol: str, tf_str: str,
         rates = mt5.copy_rates_range(symbol, tf_map[tf_str], date_from, date_to)
         if rates is None or len(rates) == 0:
             err = mt5.last_error()
-            print(f"[MT5] {symbol} {tf_str} 期間データなし: last_error={err}  "
-                  f"(from={date_from.strftime('%Y-%m-%d')} to={date_to.strftime('%Y-%m-%d')})")
-            return None
+            print(f"[MT5] {symbol} {tf_str} 期間指定失敗: {err}  "
+                  f"→ 直近 {fallback_bars:,} 本で再試行")
+            rates = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, fallback_bars)
+            if rates is None or len(rates) == 0:
+                err2 = mt5.last_error()
+                print(f"[MT5] {symbol} {tf_str} フォールバックも失敗: {err2}")
+                return None
+            print(f"[MT5] {symbol} {tf_str}: フォールバック取得")
         df = pd.DataFrame(rates)
         df['time'] = pd.to_datetime(df['time'], unit='s')
         df.set_index('time', inplace=True)
         df.rename(columns={'open':'Open','high':'High','low':'Low',
                            'close':'Close','tick_volume':'Volume'}, inplace=True)
         df = df[['Open','High','Low','Close','Volume']].copy()
+        # 期間指定モードでも date_from 以前は不要
+        df = df[df.index >= pd.Timestamp(date_from, tz='UTC').tz_convert(None)
+                         if df.index.tz is None else
+                         df.index >= pd.Timestamp(date_from)]
         print(f"[MT5] {symbol} {tf_str}: {len(df)}本  "
               f"{df.index[0].strftime('%Y-%m-%d')}〜{df.index[-1].strftime('%Y-%m-%d')}")
         return df

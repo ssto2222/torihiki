@@ -60,17 +60,24 @@ def load_scalp_data(symbol: str, mt5_cfg: dict,
                     mt5.shutdown()
 
                 if df_m5_raw is None:
-                    print(f"[警告] M5 データ取得失敗 (last_error は fetch 内で表示済み)")
+                    print("[警告] M5 データ取得失敗")
                 elif df_m1_raw is None:
-                    print(f"[警告] M1 データ取得失敗 (last_error は fetch 内で表示済み)")
+                    print("[警告] M1 データ取得失敗")
                 else:
-                    # M5 と M1 の期間を揃える（M1 が短い場合は M5 側を切り詰め）
-                    m1_start = df_m1_raw.index[0]
-                    m5_start = df_m5_raw.index[0]
-                    common_start = max(m1_start, m5_start)
-                    df_m5_raw = df_m5_raw[df_m5_raw.index >= common_start]
-                    df_m1_raw = df_m1_raw[df_m1_raw.index >= common_start]
-                    return df_m5_raw, df_m1_raw, True
+                    # M5 と M1 の共通期間に揃える
+                    common_start = max(df_m5_raw.index[0], df_m1_raw.index[0])
+                    common_end   = min(df_m5_raw.index[-1], df_m1_raw.index[-1])
+                    df_m5_raw = df_m5_raw[
+                        (df_m5_raw.index >= common_start) & (df_m5_raw.index <= common_end)]
+                    df_m1_raw = df_m1_raw[
+                        (df_m1_raw.index >= common_start) & (df_m1_raw.index <= common_end)]
+                    m5_days = (df_m5_raw.index[-1] - df_m5_raw.index[0]).days
+                    print(f"  共通期間: {common_start.date()} 〜 {common_end.date()} "
+                          f"({m5_days}日)")
+                    if df_m5_raw.empty or df_m1_raw.empty:
+                        print("[警告] 共通期間が空です")
+                    else:
+                        return df_m5_raw, df_m1_raw, True
         except ImportError:
             print("[警告] MetaTrader5 未インストール → 合成データを使用")
         except Exception as e:
