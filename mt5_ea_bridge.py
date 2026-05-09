@@ -26,11 +26,23 @@ import time
 import os
 import requests
 from secret import DISCORD_WEBHOOK_URL
+
+import sys, json, time, argparse, shutil
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+import numpy as np
+
+
+sys.path.insert(0, str(Path(__file__).parent))
+import config as C
+from core.data       import connect_mt5, fetch_ohlcv
+from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicators, calc_adx, calc_price_acceleration, detect_volume_surge
+from core.strategy   import check_m5_entry_filter, check_m5_surge, detect_big_move
  # 環境に合わせて修正
 # --- 設定 ---
 SYMBOL = "BTCUSD"
 # ログの保存先をGoogleドライブの同期フォルダに変更
-LOG_DIR = r"G:\マイドライブ\mt5_log" # 環境に合わせて修正
+LOG_DIR = C.BRIDGE.get('log_dir', r"G:\マイドライブ\mt5_log")
 FLAG_FILE = os.path.join(LOG_DIR, "paused.flag")
 LAST_NOTIFY_TIME = 0
 NOTIFY_INTERVAL = 3600  # 1時間(秒)
@@ -124,17 +136,7 @@ def check_pause_signal():
             send_discord(f"▶️ **【再開】** {SYMBOL} 指値が削除されました。自動売買を再開します。")
         return False
 
-import sys, json, time, argparse, shutil
-from pathlib import Path
-from datetime import datetime, timezone, timedelta
-import numpy as np
 
-
-sys.path.insert(0, str(Path(__file__).parent))
-import config as C
-from core.data       import connect_mt5, fetch_ohlcv
-from core.indicators import add_h1_indicators, add_d1_indicators, add_m5_indicators, calc_adx, calc_price_acceleration, detect_volume_surge
-from core.strategy   import check_m5_entry_filter, check_m5_surge, detect_big_move
 
 CFG = {k: getattr(C, k) for k in
        ['MT5','INDICATOR','SIGNAL','EXECUTION','SL','RULES','LOCAL','PLOT',
@@ -1994,7 +1996,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"expected_profit=+${data.get('expected_profit_usd',0):.2f}"
                           f"(¥{int(data.get('expected_profit_jpy',0))}) "
                           f"target=¥{data.get('target_profit_jpy',0)}  "
-                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}{status_tag}")
+                          )
                 else:
                     # 通常モードログ
                     surge_tag = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
