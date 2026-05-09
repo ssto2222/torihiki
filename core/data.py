@@ -60,16 +60,16 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
         if rates is None or len(rates) == 0:
             err = mt5.last_error()
             print(f"[MT5] {symbol} {tf_str} copy_rates_from_pos 失敗: {err}  → 期間指定で再試行")
-            # キャッシュなし対策: copy_rates_range でサーバーから直接取得
+            # キャッシュなし対策: copy_rates_from でサーバーから直接取得
+            # MT5 は tz-naive UTC を要求するため tzinfo を除去
             min_per_bar = tf_minutes.get(tf_str, 5)
-            # 週末・祝日を考慮して 1.5 倍のマージンを確保
             margin_min  = int(bars * min_per_bar * 1.5)
-            date_from   = datetime.now(timezone.utc) - timedelta(minutes=margin_min)
-            date_to     = datetime.now(timezone.utc)
-            rates = mt5.copy_rates_range(symbol, tf_map[tf_str], date_from, date_to)
+            date_from   = (datetime.now(timezone.utc) - timedelta(minutes=margin_min)
+                           ).replace(tzinfo=None)
+            rates = mt5.copy_rates_from(symbol, tf_map[tf_str], date_from, bars)
             if rates is None or len(rates) == 0:
                 err2 = mt5.last_error()
-                print(f"[MT5] {symbol} {tf_str} copy_rates_range も失敗: {err2}")
+                print(f"[MT5] {symbol} {tf_str} copy_rates_from も失敗: {err2}")
                 return None
 
         df = pd.DataFrame(rates)
@@ -88,40 +88,57 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
         print(f"[MT5] fetch失敗 {tf_str}: {e}"); return None
 
 
+def _strip_tz(dt: 'datetime') -> 'datetime':
+    """MT5 API は tz-naive UTC を要求するため tzinfo を除去する。"""
+    return dt.replace(tzinfo=None) if (dt is not None and dt.tzinfo is not None) else dt
+
+
 def fetch_ohlcv_range(symbol: str, tf_str: str,
-                      date_from: 'datetime', date_to: 'datetime',
-                      fallback_bars: int = 100_000) -> pd.DataFrame | None:
+                      date_from: 'datetime', date_to: 'datetime') -> pd.DataFrame | None:
     """
     期間指定で OHLCV を取得する (copy_rates_range)。
-    M1 など保持期間が短い足で範囲リクエストが失敗した場合は
-    copy_rates_from_pos（直近 fallback_bars 本）にフォールバックする。
+    失敗した場合は copy_rates_from（開始日指定 + 最大本数）でフォールバックする。
     """
     try:
         import MetaTrader5 as mt5
+        from datetime import timedelta
         tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,'M15':mt5.TIMEFRAME_M15,
                   'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
                   'D1':mt5.TIMEFRAME_D1}
-        rates = mt5.copy_rates_range(symbol, tf_map[tf_str], date_from, date_to)
+        tf_minutes = {'M1':1,'M5':5,'M15':15,'H1':60,'H4':240,'D1':1440}
+
+        # MT5 は tz-naive UTC datetime を要求する
+        dt_from = _strip_tz(date_from)
+        dt_to   = _strip_tz(date_to)
+
+        rates = mt5.copy_rates_range(symbol, tf_map[tf_str], dt_from, dt_to)
         if rates is None or len(rates) == 0:
             err = mt5.last_error()
+            # フォールバック: copy_rates_from（開始日指定）で取得
+            # 期間から本数を推定し、週末分として 1.5 倍のマージンを確保
+            span_min  = int((dt_to - dt_from).total_seconds() / 60)
+            min_per   = tf_minutes.get(tf_str, 5)
+            max_bars  = max(1, int(span_min / min_per * 1.5))
             print(f"[MT5] {symbol} {tf_str} 期間指定失敗: {err}  "
-                  f"→ 直近 {fallback_bars:,} 本で再試行")
-            rates = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, fallback_bars)
+                  f"→ copy_rates_from({dt_from.date()}, {max_bars:,}本) で再試行")
+            rates = mt5.copy_rates_from(symbol, tf_map[tf_str], dt_from, max_bars)
             if rates is None or len(rates) == 0:
                 err2 = mt5.last_error()
                 print(f"[MT5] {symbol} {tf_str} フォールバックも失敗: {err2}")
                 return None
-            print(f"[MT5] {symbol} {tf_str}: フォールバック取得")
+
         df = pd.DataFrame(rates)
         df['time'] = pd.to_datetime(df['time'], unit='s')
         df.set_index('time', inplace=True)
         df.rename(columns={'open':'Open','high':'High','low':'Low',
                            'close':'Close','tick_volume':'Volume'}, inplace=True)
         df = df[['Open','High','Low','Close','Volume']].copy()
-        # 期間指定モードでも date_from 以前は不要
-        df = df[df.index >= pd.Timestamp(date_from, tz='UTC').tz_convert(None)
-                         if df.index.tz is None else
-                         df.index >= pd.Timestamp(date_from)]
+        # date_from より前のバーを除去（フォールバック時に混入する場合）
+        cutoff = pd.Timestamp(dt_from)
+        df = df[df.index >= cutoff]
+        if df.empty:
+            print(f"[MT5] {symbol} {tf_str} date_from フィルタ後にデータなし")
+            return None
         print(f"[MT5] {symbol} {tf_str}: {len(df)}本  "
               f"{df.index[0].strftime('%Y-%m-%d')}〜{df.index[-1].strftime('%Y-%m-%d')}")
         return df
