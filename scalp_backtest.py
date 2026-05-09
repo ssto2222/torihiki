@@ -43,21 +43,38 @@ def load_scalp_data(symbol: str, mt5_cfg: dict,
     if not force_synthetic:
         try:
             import MetaTrader5 as mt5
-            if connect_mt5(symbol, mt5_cfg):
-                if date_from is not None:
-                    df_m5_raw = fetch_ohlcv_range(symbol, 'M5', date_from, date_to)
-                    df_m1_raw = fetch_ohlcv_range(symbol, 'M1', date_from, date_to)
+            if not connect_mt5(symbol, mt5_cfg):
+                print("[警告] MT5 接続失敗 → 合成データにフォールバック")
+            else:
+                df_m5_raw = df_m1_raw = None
+                try:
+                    if date_from is not None:
+                        df_m5_raw = fetch_ohlcv_range(symbol, 'M5', date_from, date_to)
+                        df_m1_raw = fetch_ohlcv_range(symbol, 'M1', date_from, date_to)
+                    else:
+                        df_m5_raw = fetch_ohlcv(symbol, 'M5', m5_bars)
+                        df_m1_raw = fetch_ohlcv(symbol, 'M1', m1_bars)
+                except Exception as fe:
+                    print(f"[警告] MT5 fetch 例外: {fe}")
+                finally:
+                    mt5.shutdown()
+
+                if df_m5_raw is None:
+                    print(f"[警告] M5 データ取得失敗 (last_error は fetch 内で表示済み)")
+                elif df_m1_raw is None:
+                    print(f"[警告] M1 データ取得失敗 (last_error は fetch 内で表示済み)")
                 else:
-                    df_m5_raw = fetch_ohlcv(symbol, 'M5', m5_bars)
-                    df_m1_raw = fetch_ohlcv(symbol, 'M1', m1_bars)
-                mt5.shutdown()
-                if df_m5_raw is not None and df_m1_raw is not None:
+                    # M5 と M1 の期間を揃える（M1 が短い場合は M5 側を切り詰め）
+                    m1_start = df_m1_raw.index[0]
+                    m5_start = df_m5_raw.index[0]
+                    common_start = max(m1_start, m5_start)
+                    df_m5_raw = df_m5_raw[df_m5_raw.index >= common_start]
+                    df_m1_raw = df_m1_raw[df_m1_raw.index >= common_start]
                     return df_m5_raw, df_m1_raw, True
-                print("[警告] MT5 データ取得失敗 → 合成データにフォールバック")
         except ImportError:
             print("[警告] MetaTrader5 未インストール → 合成データを使用")
         except Exception as e:
-            print(f"[警告] MT5エラー: {e} → 合成データにフォールバック")
+            print(f"[警告] MT5 予期しないエラー: {e} → 合成データにフォールバック")
 
     print("[フォールバック] 合成データを使用")
     loc = C.LOCAL
