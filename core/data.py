@@ -49,7 +49,10 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
                   'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
                   'D1':mt5.TIMEFRAME_D1}
         rates = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, bars)
-        if rates is None or len(rates) == 0: return None
+        if rates is None or len(rates) == 0:
+            err = mt5.last_error()
+            print(f"[MT5] {symbol} {tf_str} データなし: last_error={err}")
+            return None
         df = pd.DataFrame(rates)
         df['time'] = pd.to_datetime(df['time'], unit='s')
         df.set_index('time', inplace=True)
@@ -72,7 +75,10 @@ def fetch_ohlcv_range(symbol: str, tf_str: str,
                   'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
                   'D1':mt5.TIMEFRAME_D1}
         rates = mt5.copy_rates_range(symbol, tf_map[tf_str], date_from, date_to)
-        if rates is None or len(rates) == 0: return None
+        if rates is None or len(rates) == 0:
+            err = mt5.last_error()
+            print(f"[MT5] {symbol} {tf_str} 期間データなし: last_error={err}")
+            return None
         df = pd.DataFrame(rates)
         df['time'] = pd.to_datetime(df['time'], unit='s')
         df.set_index('time', inplace=True)
