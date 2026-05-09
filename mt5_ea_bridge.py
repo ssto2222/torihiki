@@ -1304,11 +1304,6 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                 dim_h1s = float(df_h1s['DI_minus'].iloc[-1]) if 'DI_minus' in df_h1s.columns else float('nan')
                 regime_h1s = _detect_regime(adx_h1s, dip_h1s, dim_h1s, regime_cfg)
 
-        # M5 SMA20 追加（MTF 傾き判定に使用）
-        if 'SMA20' not in df.columns:
-            df = df.copy()
-            df['SMA20'] = df['Close'].rolling(20).mean()
-
         # ── マルチタイムフレーム SMA20 傾き + H1 レジーム条件 ────────
         _slope_bars = scalp.get('sma20_slope_bars', 5)
         _slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
