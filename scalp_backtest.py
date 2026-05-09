@@ -316,31 +316,49 @@ def print_stats(trades: list[dict], target_jpy: int, sl_ratio: int,
 # エントリーポイント
 # ──────────────────────────────────────────────────────────────
 
+_FULL_M5  = 999_999   # MT5 が保持する最大本数をリクエスト
+_FULL_M1  = 999_999
+_FULL_H1  = 999_999
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--symbol',       default=C.MT5['symbol'])
-    ap.add_argument('--m5-bars',      type=int, default=C.MT5['m5_bars'])
-    ap.add_argument('--m1-bars',      type=int, default=C.MT5['m1_bars'])
-    ap.add_argument('--h1-bars',      type=int, default=C.MT5['h1_bars'])
+    ap.add_argument('--m5-bars',      type=int, default=None,
+                    help=f'M5取得本数 (デフォルト: config値={C.MT5["m5_bars"]})')
+    ap.add_argument('--m1-bars',      type=int, default=None,
+                    help=f'M1取得本数 (デフォルト: config値={C.MT5["m1_bars"]})')
+    ap.add_argument('--h1-bars',      type=int, default=None)
+    ap.add_argument('--full-data',    action='store_true',
+                    help='MT5 から取得できる全期間データを使用')
     ap.add_argument('--touch-margin', type=float, default=None,
                     help='SMA20 タッチマージン (例: 10.0). 省略時はキャッシュ→config順に読む')
     ap.add_argument('--synthetic',    action='store_true', help='強制的に合成データを使用')
     ap.add_argument('--output',       default='./output/scalp_bt.json')
     args = ap.parse_args()
 
+    if args.full_data:
+        m5_bars = _FULL_M5
+        m1_bars = _FULL_M1
+        h1_bars = _FULL_H1
+    else:
+        m5_bars = args.m5_bars or C.MT5['m5_bars']
+        m1_bars = args.m1_bars or C.MT5['m1_bars']
+        h1_bars = args.h1_bars or C.MT5['h1_bars']
+
     cfg = {k: getattr(C, k) for k in
            ['MT5', 'INDICATOR', 'SIGNAL', 'EXECUTION', 'SL', 'RULES',
             'OPTIMIZE', 'LOCAL', 'PLOT', 'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS']}
     cfg['MT5'] = {**cfg['MT5'], 'symbol': args.symbol,
-                  'h1_bars': args.h1_bars, 'm1_bars': args.m1_bars,
-                  'm5_bars': args.m5_bars}
+                  'h1_bars': h1_bars, 'm1_bars': m1_bars, 'm5_bars': m5_bars}
 
     scalp     = cfg['SCALP']
     target_jpy = scalp.get('target_profit_jpy', 1000)
     sl_ratio   = scalp.get('sl_ratio', 3)
 
+    period_tag = '全期間' if args.full_data else f'M5:{m5_bars}本 / M1:{m1_bars}本'
     print("=" * 52)
-    print(f"  スキャルプ バックテスト  [{args.symbol}]")
+    print(f"  スキャルプ バックテスト  [{args.symbol}]  ({period_tag})")
     print("=" * 52)
 
     # タッチマージン決定
