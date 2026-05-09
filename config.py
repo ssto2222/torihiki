@@ -40,6 +40,8 @@ INDICATOR = dict(
     early_surge_accel_threshold = 0.5,  # 急騰初期価格加速閾値
     surge_overbought_threshold = 70.0,  # 急騰中段階RSI閾値
     surge_avoid_accel_threshold = 1.5,  # 急騰回避価格加速閾値
+    bb_tp_sigma              = 2.0,    # H1 BB2σ を TP 初期位置に使う
+    bb_tp_near_pct           = 0.85,   # H1 BB2σ 近傍判定（%）
 )
 
 # ── H1 シグナル検出（SMA20 + RSI）────────────────────────────
@@ -48,6 +50,7 @@ SIGNAL = dict(
     sell_rsi_thr       = 62.0,    # (旧: 上抜け売り禁止) 現在未使用
     momentum_thrs      = [55.0, 60.0, 65.0, 70.0, 75.0],  # RSI 上抜け → モメンタム買い
     momentum_sell_thrs = [55.0, 50.0, 45.0, 40.0, 35.0],  # RSI 下抜け → 下落トレンド売り
+    momentum_buy_max_rsi = 70.0,  # モメンタムBUY時、H1 RSIがこの値以上なら高値掴み防止で禁止
     downtrend_d1_rsi   = 45.0,    # D1 RSI < この値 かつ close < SMA20 → 下落トレンド判定
 )
 
@@ -56,7 +59,7 @@ EXECUTION = dict(
     touch_margin             = 0.20,    # SMA20 タッチ判定マージン（フォールバック）
     m1_rsi_offset            = 20.0,
     signal_valid_m1          = 240,     # シグナルON有効期限（M1本数）
-    m1_exec_buy_thrs         = [57.0, 60.0, 65.0, 70.0, 75.0],   # BUY 執行: M1 RSI がいずれかを 2本以上上抜け
+    m1_exec_buy_thrs         = [57.0, 60.0, 65.0],   # BUY 執行: M1 RSI がいずれかを 2本以上上抜け
     m1_exec_sell_thrs        = [40.0, 35.0, 30.0, 25.0],   # SELL 執行: M1 RSI がいずれかを 2本以上下抜け
     sma20_touch_pct          = 70,      # 過去シグナルの何%をキャッチする touch_margin にするか
     sma20_touch_margin_file  = "./output/sma20_touch_margins.json",  # キャッシュファイル
@@ -87,7 +90,7 @@ RULES_ENTRY = dict(
 )
 
 RULES_RISK = dict(
-    max_consecutive_losses   = 3,     # 連続損失この回数でその日の取引停止
+    max_consecutive_losses   = 10,     # 連続損失この回数でその日の取引停止
     cooldown_large_loss_min  = 1440,  # 大損失後のクールダウン（分）= 翌日まで
     large_loss_threshold_usd = -10000,
 )

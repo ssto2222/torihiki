@@ -261,6 +261,7 @@ def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
     if len(slc) < 3:
         return None
 
+    sma   = slc['SMA20'].values
     rsi   = slc['RSI'].values
     close = slc['Close'].values
     idx   = slc.index
@@ -269,6 +270,8 @@ def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
         if np.isnan(rsi[i]) or np.isnan(rsi[i - 1]):
             continue
         if direction == 'buy' and rsi[i] > rsi[i - 1]:  # rising のみ（ゾーン制限なし）
+            if not np.isnan(sma[i]) and not np.isnan(sma[i-1]) and sma[i] < sma[i-1]:
+                continue
             ep = float(close[i]) + spread
             return {
                 'entry_time':      idx[i],

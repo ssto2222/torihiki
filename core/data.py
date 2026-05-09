@@ -45,7 +45,7 @@ def connect_mt5(symbol: str, mt5_cfg: dict | None = None) -> bool:
 def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
     try:
         import MetaTrader5 as mt5
-        tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,
+        tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,'M15':mt5.TIMEFRAME_M15,
                   'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
                   'D1':mt5.TIMEFRAME_D1}
         rates = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, bars)

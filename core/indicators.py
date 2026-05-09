@@ -102,10 +102,14 @@ def add_h1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
     bb_ma          = df['Close'].rolling(bp).mean()
     bb_std         = df['Close'].rolling(bp).std()
-    df['BB_upper'] = bb_ma + bs * bb_std
-    df['BB_lower'] = bb_ma - bs * bb_std
-    df['BB_mid']   = bb_ma
-    df['BB_pct']   = (df['Close'] - bb_ma) / (df['BB_upper'] - bb_ma).replace(0, np.nan)
+    bt             = ind.get('bb_tp_sigma', 2.0)
+    df['BB_upper']  = bb_ma + bs * bb_std
+    df['BB_lower']  = bb_ma - bs * bb_std
+    df['BB_upper2'] = bb_ma + bt * bb_std
+    df['BB_lower2'] = bb_ma - bt * bb_std
+    df['BB_mid']    = bb_ma
+    df['BB_pct']    = (df['Close'] - bb_ma) / (df['BB_upper'] - bb_ma).replace(0, np.nan)
+    df['BB2_pct']   = (df['Close'] - bb_ma) / (df['BB_upper2'] - bb_ma).replace(0, np.nan)
 
     df['SMA20']      = df['Close'].rolling(20).mean()
     df['EMA21']      = df['Close'].ewm(span=ef, adjust=False).mean()
