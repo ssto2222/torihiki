@@ -4,21 +4,67 @@ scalp_backtest.py — スキャルプモードのバックテスト
 MT5 接続あり / なし（合成データ）どちらでも動作。
 
 実行:
-    python scalp_backtest.py                         # 合成データ (MT5不要)
-    python scalp_backtest.py --symbol BTCUSD         # MT5実データ
-    python scalp_backtest.py --touch-margin 10.0     # タッチマージン指定
+    python scalp_backtest.py                              # 合成データ (MT5不要)
+    python scalp_backtest.py --symbol BTCUSD              # MT5実データ（全取得可能期間）
+    python scalp_backtest.py --full-data                  # MT5 最大履歴
+    python scalp_backtest.py --from 2024-01-01 --to 2024-06-30   # 期間指定
+    python scalp_backtest.py --touch-margin 10.0          # タッチマージン指定
 """
 import sys, argparse, json
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime, timezone
 import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 import config as C
-from core.data       import load_data, fetch_ohlcv, generate_m5_from_h1
+from core.data       import (connect_mt5, fetch_ohlcv, fetch_ohlcv_range,
+                              generate_m5_from_h1, generate_m1_from_h1, generate_h1)
 from core.indicators import add_m1_indicators, add_m5_indicators
 from mt5_ea_bridge   import _detect_regime
+
+
+# ──────────────────────────────────────────────────────────────
+# データ取得
+# ──────────────────────────────────────────────────────────────
+
+def load_scalp_data(symbol: str, mt5_cfg: dict,
+                    m5_bars: int, m1_bars: int,
+                    date_from: datetime | None = None,
+                    date_to:   datetime | None = None,
+                    force_synthetic: bool = False,
+                    ) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
+    """
+    MT5 から M5 + M1 を取得して返す。
+    connect → fetch M5 → fetch M1 → shutdown の順で実行するため
+    load_data (内部で shutdown) を経由しない。
+    失敗時は合成データにフォールバック。
+    """
+    if not force_synthetic:
+        try:
+            import MetaTrader5 as mt5
+            if connect_mt5(symbol, mt5_cfg):
+                if date_from is not None:
+                    df_m5_raw = fetch_ohlcv_range(symbol, 'M5', date_from, date_to)
+                    df_m1_raw = fetch_ohlcv_range(symbol, 'M1', date_from, date_to)
+                else:
+                    df_m5_raw = fetch_ohlcv(symbol, 'M5', m5_bars)
+                    df_m1_raw = fetch_ohlcv(symbol, 'M1', m1_bars)
+                mt5.shutdown()
+                if df_m5_raw is not None and df_m1_raw is not None:
+                    return df_m5_raw, df_m1_raw, True
+                print("[警告] MT5 データ取得失敗 → 合成データにフォールバック")
+        except ImportError:
+            print("[警告] MetaTrader5 未インストール → 合成データを使用")
+        except Exception as e:
+            print(f"[警告] MT5エラー: {e} → 合成データにフォールバック")
+
+    print("[フォールバック] 合成データを使用")
+    loc = C.LOCAL
+    h1_synth = generate_h1(n=loc.get('h1_bars_synth', 3600))
+    df_m5_raw = generate_m5_from_h1(h1_synth)
+    df_m1_raw = generate_m1_from_h1(h1_synth)
+    return df_m5_raw, df_m1_raw, False
 
 
 # ──────────────────────────────────────────────────────────────
@@ -333,11 +379,22 @@ def main():
                     help='MT5 から取得できる全期間データを使用')
     ap.add_argument('--touch-margin', type=float, default=None,
                     help='SMA20 タッチマージン (例: 10.0). 省略時はキャッシュ→config順に読む')
+    ap.add_argument('--from', dest='date_from', default=None, metavar='YYYY-MM-DD',
+                    help='バックテスト開始日 (例: 2024-01-01)')
+    ap.add_argument('--to',   dest='date_to',   default=None, metavar='YYYY-MM-DD',
+                    help='バックテスト終了日 (例: 2024-06-30)')
     ap.add_argument('--synthetic',    action='store_true', help='強制的に合成データを使用')
     ap.add_argument('--output',       default='./output/scalp_bt.json')
     args = ap.parse_args()
 
-    if args.full_data:
+    # 期間指定の解析
+    date_from = date_to = None
+    if args.date_from:
+        date_from = datetime.strptime(args.date_from, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+        date_to   = (datetime.strptime(args.date_to, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                     if args.date_to else datetime.now(timezone.utc))
+
+    if args.full_data or date_from is not None:
         m5_bars = _FULL_M5
         m1_bars = _FULL_M1
         h1_bars = _FULL_H1
@@ -352,11 +409,16 @@ def main():
     cfg['MT5'] = {**cfg['MT5'], 'symbol': args.symbol,
                   'h1_bars': h1_bars, 'm1_bars': m1_bars, 'm5_bars': m5_bars}
 
-    scalp     = cfg['SCALP']
+    scalp      = cfg['SCALP']
     target_jpy = scalp.get('target_profit_jpy', 1000)
     sl_ratio   = scalp.get('sl_ratio', 3)
 
-    period_tag = '全期間' if args.full_data else f'M5:{m5_bars}本 / M1:{m1_bars}本'
+    if date_from:
+        period_tag = f"{args.date_from} 〜 {args.date_to or '現在'}"
+    elif args.full_data:
+        period_tag = '全取得可能期間'
+    else:
+        period_tag = f'M5:{m5_bars}本 / M1:{m1_bars}本'
     print("=" * 52)
     print(f"  スキャルプ バックテスト  [{args.symbol}]  ({period_tag})")
     print("=" * 52)
@@ -371,31 +433,23 @@ def main():
                 cached = json.loads(Path(cache_path).read_text())
                 touch_margin = cached.get(args.symbol)
                 if touch_margin:
-                    print(f"  touch_margin: {touch_margin:.4f} (キャッシュ from {cache_path})")
+                    print(f"  touch_margin: {touch_margin:.4f} (キャッシュ)")
             except Exception:
                 pass
     if touch_margin is None:
         touch_margin = cfg['EXECUTION'].get('touch_margin', 0.20)
         print(f"  touch_margin: {touch_margin:.4f} (config fallback)")
-    else:
-        if args.touch_margin is None:
-            pass  # already printed cache
-        else:
-            print(f"  touch_margin: {touch_margin:.4f} (CLI指定)")
+    elif args.touch_margin is not None:
+        print(f"  touch_margin: {touch_margin:.4f} (CLI指定)")
 
-    # データ取得
+    # データ取得（MT5 接続 → M5+M1 取得 → shutdown を1回で完結）
     print("\n[1] データ取得")
-    df_h1_raw, df_m1_raw, is_real = load_data(cfg, force_synthetic=args.synthetic)
-    src = "MT5実データ" if is_real else "合成データ"
-    print(f"  ソース: {src}")
-
-    if is_real:
-        df_m5_raw = fetch_ohlcv(args.symbol, 'M5', args.m5_bars)
-        if df_m5_raw is None:
-            print("  M5取得失敗 → H1から合成")
-            df_m5_raw = generate_m5_from_h1(df_h1_raw)
-    else:
-        df_m5_raw = generate_m5_from_h1(df_h1_raw)
+    df_m5_raw, df_m1_raw, is_real = load_scalp_data(
+        args.symbol, cfg['MT5'], m5_bars, m1_bars,
+        date_from=date_from, date_to=date_to,
+        force_synthetic=args.synthetic,
+    )
+    print(f"  ソース: {'MT5実データ' if is_real else '合成データ'}")
 
     # 指標
     print("\n[2] 指標計算")

@@ -63,6 +63,29 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
         print(f"[MT5] fetch失敗 {tf_str}: {e}"); return None
 
 
+def fetch_ohlcv_range(symbol: str, tf_str: str,
+                      date_from: 'datetime', date_to: 'datetime') -> pd.DataFrame | None:
+    """期間指定で OHLCV を取得する (copy_rates_range)"""
+    try:
+        import MetaTrader5 as mt5
+        tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,'M15':mt5.TIMEFRAME_M15,
+                  'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
+                  'D1':mt5.TIMEFRAME_D1}
+        rates = mt5.copy_rates_range(symbol, tf_map[tf_str], date_from, date_to)
+        if rates is None or len(rates) == 0: return None
+        df = pd.DataFrame(rates)
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        df.set_index('time', inplace=True)
+        df.rename(columns={'open':'Open','high':'High','low':'Low',
+                           'close':'Close','tick_volume':'Volume'}, inplace=True)
+        df = df[['Open','High','Low','Close','Volume']].copy()
+        print(f"[MT5] {symbol} {tf_str}: {len(df)}本  "
+              f"{df.index[0].strftime('%Y-%m-%d')}〜{df.index[-1].strftime('%Y-%m-%d')}")
+        return df
+    except Exception as e:
+        print(f"[MT5] fetch_range失敗 {tf_str}: {e}"); return None
+
+
 def load_mt5(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame] | tuple[None, None]:
     sym = cfg['MT5']['symbol']
     if not connect_mt5(sym, cfg['MT5']): return None, None
