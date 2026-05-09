@@ -1996,7 +1996,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"expected_profit=+${data.get('expected_profit_usd',0):.2f}"
                           f"(¥{int(data.get('expected_profit_jpy',0))}) "
                           f"target=¥{data.get('target_profit_jpy',0)}  "
-                         
+                          )
                 else:
                     # 通常モードログ
                     surge_tag = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
