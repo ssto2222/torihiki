@@ -1254,8 +1254,8 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
 
         # ── 急騰初期検知と中段階回避 ─────────────────────────────
         from core.strategy import detect_early_surge, should_avoid_entry_during_surge
-        surge_info = detect_early_surge(df_m5, cfg)
-        avoid_surge = should_avoid_entry_during_surge(df_m5, cfg)
+        surge_info = detect_early_surge(df, cfg)
+        avoid_surge = should_avoid_entry_during_surge(df, cfg)
 
         # 急騰中段階の場合はエントリーを控える
         if avoid_surge and not surge_info['is_early_surge']:
@@ -1300,8 +1300,8 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                                 _scalp_sell_sma_pending = True
                                 _scalp_sell_sma_at      = now
                                 _scalp_sell_sma_level   = thr
-                                print(f"[急騰初期SELL] RVOL={df_m5['RVOL'].iloc[-1]:.2f} "
-                                      f"Accel={df_m5['Price_Accel'].iloc[-1]:.2f} "
+                                print(f"[急騰初期SELL] RVOL={df['RVOL'].iloc[-1]:.2f} "
+                                      f"Accel={df['Price_Accel'].iloc[-1]:.2f} "
                                       f"Confidence={surge_info['confidence']:.2f}")
                             break
 
