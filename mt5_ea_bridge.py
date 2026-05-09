@@ -1089,10 +1089,9 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
             _scalp_sell_confirm_at       = None
             _scalp_sell_confirm_count    = 0
             _scalp_sell_confirm_bar_time = None
-        elif regime_m5s == 'trend_down' and _scalp_buy_sma_pending:
-            _scalp_buy_sma_pending = False
-            _scalp_buy_sma_at      = None
-        elif regime_m5s == 'trend_down' and _scalp_buy_confirm_pending:
+        if regime_m5s == 'trend_down' and (_scalp_buy_sma_pending or _scalp_buy_confirm_pending):
+            _scalp_buy_sma_pending      = False
+            _scalp_buy_sma_at           = None
             _scalp_buy_confirm_pending  = False
             _scalp_buy_confirm_at       = None
             _scalp_buy_confirm_count    = 0
@@ -1173,7 +1172,6 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
 
         # ── M1 早期執行: M5 RSI が閾値に接近中かつ M1 がすでに先行クロス ──────
         # 待機状態がない場合のみ評価。df_m1 は上で取得済みのものを再利用。
-        is_m1_early    = False
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
         if (confirmed_signal is None
                 and df_m1 is not None and len(df_m1) >= 2 and m1_early_margin > 0):
@@ -1225,7 +1223,7 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                     touch_margin_cfg = _sma20_touch_margins.get(
                         symbol, cfg.get('EXECUTION', {}).get('touch_margin', 0.20))
                     close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
-                    if close_m1 >= sma20_m1 - touch_margin_cfg:
+                    if abs(close_m1 - sma20_m1) <= touch_margin_cfg:
                         # SMA20 傾き確認: 直近 N 本で ATR × 閾値 以上の下落が必要
                         slope_bars = scalp.get('sma20_slope_bars', 5)
                         slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
@@ -1290,7 +1288,7 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                     touch_margin_cfg = _sma20_touch_margins.get(
                         symbol, cfg.get('EXECUTION', {}).get('touch_margin', 0.20))
                     close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
-                    if close_m1 <= sma20_m1 + touch_margin_cfg:  # 買いなので下からタッチ
+                    if abs(close_m1 - sma20_m1) <= touch_margin_cfg:
                         # SMA20 傾き確認: 直近 N 本で ATR × 閾値 以上の上昇が必要
                         slope_bars = scalp.get('sma20_slope_bars', 5)
                         slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
@@ -1340,14 +1338,16 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                     _scalp_buy_confirm_count    = 0
                     _scalp_buy_confirm_bar_time = None
 
-        # M5 で新規クロス検出
+        # M5 で新規クロス検出（既存の待機状態がない場合のみ）
         if confirmed_signal is None and _scalp_prev_rsi is not None:
-            for thr in buy_thrs:
-                if rsi_cur > thr and rsi_prev_bar <= thr:
-                    candidate_signal = 'buy'
-                    crossed_level    = thr
-                    break
-            if candidate_signal is None and sell_enabled and not _scalp_sell_sma_pending:
+            if not (_scalp_buy_sma_pending or _scalp_buy_confirm_pending):
+                for thr in buy_thrs:
+                    if rsi_cur > thr and rsi_prev_bar <= thr:
+                        candidate_signal = 'buy'
+                        crossed_level    = thr
+                        break
+            if (candidate_signal is None and sell_enabled
+                    and not (_scalp_sell_sma_pending or _scalp_sell_confirm_pending)):
                 for thr in sell_thrs:
                     if rsi_cur < thr and rsi_prev_bar >= thr:
                         candidate_signal = 'sell'
@@ -1362,14 +1362,14 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
 
         if confirmed_signal is not None:
             new_cross = confirmed_signal
-        elif candidate_signal == 'buy' and not _scalp_buy_sma_pending:
+        elif candidate_signal == 'buy':
             # BUY: SMA20 タッチ待ち状態へ移行
             _scalp_buy_sma_pending = True
             _scalp_buy_sma_at      = now
             _scalp_buy_sma_level   = crossed_level
             skip = f'pending_scalp_buy_{int(crossed_level)}_wait_sma20'
             new_cross = None
-        elif candidate_signal == 'sell' and not _scalp_sell_sma_pending:
+        elif candidate_signal == 'sell':
             # SELL: SMA20 タッチ待ち状態へ移行
             _scalp_sell_sma_pending = True
             _scalp_sell_sma_at      = now
@@ -1443,9 +1443,8 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
             'signal_type':        (f'scalp_{action}_{int(crossed_level)}'
-                                   f'{"_m1early" if is_m1_early else ""}'
                                    if action != 'none' else 'none'),
-            'execution_tf':       'm1_early' if is_m1_early else 'm5',
+            'execution_tf':       'm5',
             'signal_valid_until': '',
             'downtrend_ok':       False,
             'sell_signal_type':   'none',
