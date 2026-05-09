@@ -69,7 +69,7 @@ def check_pause_signal():
             send_discord(f"▶️ **【再開】** {SYMBOL} 指値が削除されました。自動売買を再開します。")
         return False
 
-import sys, json, time, argparse
+import sys, json, time, argparse, shutil
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import numpy as np
@@ -1752,6 +1752,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
         return str(p.with_name(p.stem + f'_{symbol}' + p.suffix))
     sig_path   = _sym_path(cfg['BRIDGE']['signal_file'])
     state_path = _sym_path(cfg['BRIDGE']['status_file'])
+    log_dir    = cfg['BRIDGE'].get('log_dir', '')
+    log_sig    = str(Path(log_dir) / Path(sig_path).name) if log_dir else ''
     poll_sec   = cfg['BRIDGE']['poll_sec']
     lot_size   = cfg['BRIDGE']['lot_size']
     max_consec = cfg.get('RULES', {}).get('max_consecutive_losses', 3)
@@ -1784,6 +1786,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
     print("=" * 60)
     print(f"  MT5 EA ブリッジ  [{symbol}]  モード: {mode.upper()}")
     print(f"  signal.json  → {sig_path}")
+    if log_sig:
+        print(f"  signal copy  → {log_sig}")
     print(f"  ea_state.json← {state_path}")
     print(f"  ポーリング   : {poll_sec}秒  （Ctrl+C で終了）")
     if mode == 'scalp':
@@ -1886,6 +1890,9 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                         _danger_exit_until[0] = None  # 待機終了
 
                 write_signal(data, sig_path)
+                if log_sig:
+                    Path(log_sig).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(sig_path, log_sig)
 
                 # 定期再分析（rebias_interval_hours ごと）
                 if (tb_cfg.get('enabled', False) and rebias_interval > 0
