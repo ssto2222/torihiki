@@ -60,16 +60,19 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
         if rates is None or len(rates) == 0:
             err = mt5.last_error()
             print(f"[MT5] {symbol} {tf_str} copy_rates_from_pos 失敗: {err}  → 期間指定で再試行")
-            # キャッシュなし対策: copy_rates_from でサーバーから直接取得
-            # MT5 は tz-naive UTC を要求するため tzinfo を除去
-            min_per_bar = tf_minutes.get(tf_str, 5)
-            margin_min  = int(bars * min_per_bar * 1.5)
-            date_from   = (datetime.now(timezone.utc) - timedelta(minutes=margin_min)
-                           ).replace(tzinfo=None)
-            rates = mt5.copy_rates_from(symbol, tf_map[tf_str], date_from, bars)
-            if rates is None or len(rates) == 0:
-                err2 = mt5.last_error()
-                print(f"[MT5] {symbol} {tf_str} copy_rates_from も失敗: {err2}")
+            # キャッシュなし対策: 最新位置から段階的に本数を減らして試みる
+            print(f"[MT5] {symbol} {tf_str} → 最新位置から段階的に取得を試みます")
+            rates = None
+            for try_bars in [bars, bars // 2, 50_000, 20_000, 10_000]:
+                if try_bars <= 0:
+                    continue
+                r = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, try_bars)
+                if r is not None and len(r) > 0:
+                    print(f"[MT5] {symbol} {tf_str}: {try_bars:,}本で取得成功")
+                    rates = r
+                    break
+            if rates is None:
+                print(f"[MT5] {symbol} {tf_str} 全フォールバック失敗")
                 return None
 
         df = pd.DataFrame(rates)
@@ -114,17 +117,19 @@ def fetch_ohlcv_range(symbol: str, tf_str: str,
         rates = mt5.copy_rates_range(symbol, tf_map[tf_str], dt_from, dt_to)
         if rates is None or len(rates) == 0:
             err = mt5.last_error()
-            # フォールバック: copy_rates_from（開始日指定）で取得
-            # 期間から本数を推定し、週末分として 1.5 倍のマージンを確保
-            span_min  = int((dt_to - dt_from).total_seconds() / 60)
-            min_per   = tf_minutes.get(tf_str, 5)
-            max_bars  = max(1, int(span_min / min_per * 1.5))
+            # フォールバック: 最新位置から段階的に本数を減らして試みる
+            # （古い起点からのリクエストはブローカーの M1 保持期間を超えると拒否される）
             print(f"[MT5] {symbol} {tf_str} 期間指定失敗: {err}  "
-                  f"→ copy_rates_from({dt_from.date()}, {max_bars:,}本) で再試行")
-            rates = mt5.copy_rates_from(symbol, tf_map[tf_str], dt_from, max_bars)
-            if rates is None or len(rates) == 0:
-                err2 = mt5.last_error()
-                print(f"[MT5] {symbol} {tf_str} フォールバックも失敗: {err2}")
+                  f"→ 最新位置から段階的に取得を試みます")
+            rates = None
+            for try_bars in [100_000, 50_000, 20_000, 10_000]:
+                r = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, try_bars)
+                if r is not None and len(r) > 0:
+                    print(f"[MT5] {symbol} {tf_str}: {try_bars:,}本で取得成功")
+                    rates = r
+                    break
+            if rates is None:
+                print(f"[MT5] {symbol} {tf_str} フォールバックも失敗")
                 return None
 
         df = pd.DataFrame(rates)
