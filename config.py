@@ -128,6 +128,7 @@ BRIDGE = dict(
     risk_pct         = 0.03,         # 1トレードあたりリスク = 残高 × 3%  ★Quarter-Kelly(7.1%)の保守側上限
     fallback_balance = 15_000,    # MT5残高取得失敗時のデフォルト残高（円）
     scalp_lot_multi  = 1.0,          # スキャルプモードのロット倍率
+    log_dir          = "./output",   # signal_SYMBOL.json のコピー先ディレクトリ（空文字で無効）
 )
 
 # ── スキャルプモード（--mode scalp で有効）────────────────────
