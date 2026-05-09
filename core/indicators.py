@@ -156,6 +156,7 @@ def add_m5_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
     df['RSI'] = calc_rsi(df['Close'], ind.get('rsi_period', 14))
     df['ATR'] = calc_atr(df, ind.get('atr_period', 14))
+    df['SMA20'] = df['Close'].rolling(20).mean()
 
     adx_df     = calc_adx(df, ind.get('adx_period', 14))
     df['ADX']      = adx_df['ADX']
