@@ -1569,10 +1569,12 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
             'trades_today':       _scalp_count,
             'cooldown_min':       cooldown,
             'scalp_cooldown_rem': 0,
-            'scalp_sell_sma_pending': _scalp_sell_sma_pending,
-            'scalp_buy_sma_pending': _scalp_buy_sma_pending,
-            'scalp_buy_confirm_pending': _scalp_buy_confirm_pending,
-            'scalp_buy_confirm_count': _scalp_buy_confirm_count,
+            'scalp_sell_sma_pending':     _scalp_sell_sma_pending,
+            'scalp_sell_confirm_pending': _scalp_sell_confirm_pending,
+            'scalp_sell_confirm_count':   _scalp_sell_confirm_count,
+            'scalp_buy_sma_pending':      _scalp_buy_sma_pending,
+            'scalp_buy_confirm_pending':  _scalp_buy_confirm_pending,
+            'scalp_buy_confirm_count':    _scalp_buy_confirm_count,
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
@@ -1782,8 +1784,14 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"lot={data['lot_size']}(TP={scalp_cfg.get('tp_atr_fraction',0.5)}×ATR)  "
                           f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
                     pending_tag = ''
-                    if data['scalp_pending_action'] != 'none':
-                        pending_tag = f"  [待機中] {data['scalp_pending_action'].upper()} {data['scalp_pending_m1_confirm_count']}/2本"
+                    if data.get('scalp_buy_sma_pending'):
+                        pending_tag = '  [BUY] SMA20タッチ待ち'
+                    elif data.get('scalp_buy_confirm_pending'):
+                        pending_tag = f"  [BUY] 確認 {data.get('scalp_buy_confirm_count',0)}/2本"
+                    elif data.get('scalp_sell_sma_pending'):
+                        pending_tag = '  [SELL] SMA20タッチ待ち'
+                    elif data.get('scalp_sell_confirm_pending'):
+                        pending_tag = f"  [SELL] 確認 {data.get('scalp_sell_confirm_count',0)}/2本"
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}  "
                           f"expected_profit=+${data.get('expected_profit_usd',0):.2f}"
