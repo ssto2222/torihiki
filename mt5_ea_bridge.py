@@ -1175,8 +1175,63 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
         dip_m5_sv  = float(df['DI_plus'].iloc[-1]) if 'DI_plus'  in df.columns else float('nan')
         dim_m5_sv  = float(df['DI_minus'].iloc[-1])if 'DI_minus' in df.columns else float('nan')
         regime_m5s = _detect_regime(adx_m5_sv, dip_m5_sv, dim_m5_sv, regime_cfg)
-        # スキャルプはH1不使用のためM5のみで判定（H1は 'weak_trend' 相当として扱う）
+        # ロット計算はH1をweak_trend相当として扱う（MTFフィルタは別途計算）
         r_multi_s  = _regime_lot_multi('weak_trend', regime_m5s, regime_cfg)
+
+        # ── M15 SMA20 傾き用データ取得 ─────────────────────────────
+        df_m15 = None
+        df_m15_raw = fetch_ohlcv(symbol, 'M15', 30)
+        if df_m15_raw is not None:
+            from core.indicators import add_m1_indicators as _add_ind
+            _df_m15_ind = _add_ind(df_m15_raw, cfg)
+            if not _df_m15_ind.empty:
+                df_m15 = _df_m15_ind
+
+        # ── H1 レジーム取得（MTF フィルタ用）──────────────────────
+        regime_h1s = 'weak_trend'
+        df_h1_raw = fetch_ohlcv(symbol, 'H1', 50)
+        if df_h1_raw is not None:
+            from core.indicators import add_h1_indicators
+            df_h1s = add_h1_indicators(df_h1_raw, cfg)
+            if not df_h1s.empty:
+                adx_h1s = float(df_h1s['ADX'].iloc[-1])     if 'ADX'      in df_h1s.columns else float('nan')
+                dip_h1s = float(df_h1s['DI_plus'].iloc[-1])  if 'DI_plus'  in df_h1s.columns else float('nan')
+                dim_h1s = float(df_h1s['DI_minus'].iloc[-1]) if 'DI_minus' in df_h1s.columns else float('nan')
+                regime_h1s = _detect_regime(adx_h1s, dip_h1s, dim_h1s, regime_cfg)
+
+        # M5 SMA20 追加（MTF 傾き判定に使用）
+        if 'SMA20' not in df.columns:
+            df = df.copy()
+            df['SMA20'] = df['Close'].rolling(20).mean()
+
+        # ── マルチタイムフレーム SMA20 傾き + H1 レジーム条件 ────────
+        _slope_bars = scalp.get('sma20_slope_bars', 5)
+        _slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
+
+        def _sma20_ok(tfdf, direction: str) -> bool:
+            if tfdf is None or tfdf.empty or 'SMA20' not in tfdf.columns:
+                return True  # データなし→条件スルー
+            if len(tfdf) <= _slope_bars:
+                return True
+            atr_v_tf = float(tfdf['ATR'].iloc[-1]) if 'ATR' in tfdf.columns else float('nan')
+            sma_now  = float(tfdf['SMA20'].iloc[-1])
+            sma_prev = float(tfdf['SMA20'].iloc[-(_slope_bars + 1)])
+            if np.isnan(sma_now) or np.isnan(sma_prev):
+                return True
+            slope = sma_now - sma_prev
+            thr_v = (atr_v_tf * _slope_thr) if not np.isnan(atr_v_tf) else 0.0
+            return slope > thr_v if direction == 'buy' else slope < -thr_v
+
+        # BUY: M1/M5/M15 SMA20 すべて上昇傾向 かつ H1 trend_up
+        mtf_buy_ok  = (regime_h1s == 'trend_up'   and
+                       _sma20_ok(df_m1,  'buy') and
+                       _sma20_ok(df,     'buy') and
+                       _sma20_ok(df_m15, 'buy'))
+        # SELL: M1/M5/M15 SMA20 すべて下降傾向 かつ H1 trend_down
+        mtf_sell_ok = (regime_h1s == 'trend_down' and
+                       _sma20_ok(df_m1,  'sell') and
+                       _sma20_ok(df,     'sell') and
+                       _sma20_ok(df_m15, 'sell'))
 
         # トレンド転換時に逆方向の待機状態をキャンセル
         if regime_m5s == 'trend_up' and (_scalp_sell_sma_pending or _scalp_sell_confirm_pending):
@@ -1278,7 +1333,8 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                     if thr - m1_early_margin <= rsi_cur <= thr:     # M5 が閾値の手前
                         if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:  # M1 が先行クロス
                             # 急騰の兆候検知時はBUYも強制許可
-                            if not surge_info['is_early_surge'] or surge_info['confidence'] >= 0.3:
+                            if ((not surge_info['is_early_surge'] or surge_info['confidence'] >= 0.3)
+                                    and mtf_buy_ok):
                                 # BUY: SMA20 タッチ待ち状態へ移行（即時執行しない）
                                 _scalp_buy_sma_pending = True
                                 _scalp_buy_sma_at      = now
@@ -1295,7 +1351,8 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                     if thr <= rsi_cur <= thr + m1_early_margin:  # M5 が閾値の手前
                         if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
                             # 急騰初期でのみSELLエントリーを許可
-                            if surge_info['is_early_surge'] and surge_info['confidence'] > 0.6:
+                            if (surge_info['is_early_surge'] and surge_info['confidence'] > 0.6
+                                    and mtf_sell_ok):
                                 # SELL: SMA20 タッチ待ち状態へ移行（即時執行しない）
                                 _scalp_sell_sma_pending = True
                                 _scalp_sell_sma_at      = now
@@ -1331,14 +1388,18 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                             (sma20_m1 - sma20_prev) < -(atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok:
-                            # SMA20タッチ確認 → 折り返し下落2本待ちへ移行
-                            _scalp_sell_sma_pending      = False
-                            _scalp_sell_sma_at           = None
-                            _scalp_sell_confirm_pending  = True
-                            _scalp_sell_confirm_at       = now
-                            _scalp_sell_confirm_count    = 0
-                            _scalp_sell_confirm_bar_time = None
-                            _scalp_sell_confirm_level    = _scalp_sell_sma_level
+                            if mtf_sell_ok:
+                                # SMA20タッチ確認 → 折り返し下落2本待ちへ移行
+                                _scalp_sell_sma_pending      = False
+                                _scalp_sell_sma_at           = None
+                                _scalp_sell_confirm_pending  = True
+                                _scalp_sell_confirm_at       = now
+                                _scalp_sell_confirm_count    = 0
+                                _scalp_sell_confirm_bar_time = None
+                                _scalp_sell_confirm_level    = _scalp_sell_sma_level
+                            else:
+                                _scalp_sell_sma_pending = False
+                                _scalp_sell_sma_at      = None
 
         # SELL 下落確認チェック: SMA20タッチ後にM1下落バー2本確定で執行
         if confirmed_signal is None and _scalp_sell_confirm_pending:
@@ -1396,14 +1457,18 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
                             (sma20_m1 - sma20_prev) > (atr_m1_v * slope_thr)  # 上昇確認
                         )
                         if sma20_slope_ok:
-                            # SMA20タッチ確認 → 折り返し上昇2本待ちへ移行
-                            _scalp_buy_sma_pending      = False
-                            _scalp_buy_sma_at           = None
-                            _scalp_buy_confirm_pending  = True
-                            _scalp_buy_confirm_at       = now
-                            _scalp_buy_confirm_count    = 0
-                            _scalp_buy_confirm_bar_time = None
-                            _scalp_buy_confirm_level    = _scalp_buy_sma_level
+                            if mtf_buy_ok:
+                                # SMA20タッチ確認 → 折り返し上昇2本待ちへ移行
+                                _scalp_buy_sma_pending      = False
+                                _scalp_buy_sma_at           = None
+                                _scalp_buy_confirm_pending  = True
+                                _scalp_buy_confirm_at       = now
+                                _scalp_buy_confirm_count    = 0
+                                _scalp_buy_confirm_bar_time = None
+                                _scalp_buy_confirm_level    = _scalp_buy_sma_level
+                            else:
+                                _scalp_buy_sma_pending = False
+                                _scalp_buy_sma_at      = None
 
         # BUY 上昇確認チェック: SMA20タッチ後にM1上昇バー2本確定で執行
         if confirmed_signal is None and _scalp_buy_confirm_pending:
@@ -1460,18 +1525,24 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
         if confirmed_signal is not None:
             new_cross = confirmed_signal
         elif candidate_signal == 'buy':
-            # BUY: SMA20 タッチ待ち状態へ移行
-            _scalp_buy_sma_pending = True
-            _scalp_buy_sma_at      = now
-            _scalp_buy_sma_level   = crossed_level
-            skip = f'pending_scalp_buy_{int(crossed_level)}_wait_sma20'
+            if mtf_buy_ok:
+                # BUY: SMA20 タッチ待ち状態へ移行
+                _scalp_buy_sma_pending = True
+                _scalp_buy_sma_at      = now
+                _scalp_buy_sma_level   = crossed_level
+                skip = f'pending_scalp_buy_{int(crossed_level)}_wait_sma20'
+            else:
+                skip = f'MTF条件NG(buy): H1={regime_h1s}'
             new_cross = None
         elif candidate_signal == 'sell':
-            # SELL: SMA20 タッチ待ち状態へ移行
-            _scalp_sell_sma_pending = True
-            _scalp_sell_sma_at      = now
-            _scalp_sell_sma_level   = crossed_level
-            skip = f'pending_scalp_sell_{int(crossed_level)}_wait_sma20'
+            if mtf_sell_ok:
+                # SELL: SMA20 タッチ待ち状態へ移行
+                _scalp_sell_sma_pending = True
+                _scalp_sell_sma_at      = now
+                _scalp_sell_sma_level   = crossed_level
+                skip = f'pending_scalp_sell_{int(crossed_level)}_wait_sma20'
+            else:
+                skip = f'MTF条件NG(sell): H1={regime_h1s}'
             new_cross = None
         else:
             new_cross = None
@@ -1580,7 +1651,7 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
             'available_slots':    pos_st['available_slots'],
             'adx_h1':             0.0,
             'adx_m5':             round(adx_m5_sv, 1) if not np.isnan(adx_m5_sv) else 0.0,
-            'regime_h1':          'n/a',
+            'regime_h1':          regime_h1s,
             'regime_m5':          regime_m5s,
             'regime_lot_multi':   round(r_multi_s, 2),
             'entry_in_window':    0,
