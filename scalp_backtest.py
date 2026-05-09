@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import config as C
 from core.data       import (connect_mt5, fetch_ohlcv, fetch_ohlcv_range,
                               generate_m5_from_h1, generate_m1_from_h1, generate_h1)
-from core.indicators import add_m1_indicators, add_m5_indicators
+from core.indicators import add_m1_indicators, add_m5_indicators, add_h1_indicators
 from mt5_ea_bridge   import _detect_regime
 
 
@@ -33,12 +33,13 @@ def load_scalp_data(symbol: str, mt5_cfg: dict,
                     date_from: datetime | None = None,
                     date_to:   datetime | None = None,
                     force_synthetic: bool = False,
-                    ) -> tuple[pd.DataFrame, pd.DataFrame, bool]:
+                    ) -> tuple[pd.DataFrame, pd.DataFrame,
+                               pd.DataFrame | None, pd.DataFrame | None, bool]:
     """
-    MT5 から M5 + M1 を取得して返す。
-    connect → fetch M5 → fetch M1 → shutdown の順で実行するため
-    load_data (内部で shutdown) を経由しない。
-    失敗時は合成データにフォールバック。
+    MT5 から M5 + M1 + M15 + H1 を取得して返す。
+    connect → fetch all TF → shutdown の順で実行するため shutdown は 1 回のみ。
+    M15/H1 取得失敗時は None を返す（MTF フィルタが無効化される）。
+    失敗時は合成データにフォールバック（M15/H1 は None）。
     """
     if not force_synthetic:
         try:
@@ -46,14 +47,18 @@ def load_scalp_data(symbol: str, mt5_cfg: dict,
             if not connect_mt5(symbol, mt5_cfg):
                 print("[警告] MT5 接続失敗 → 合成データにフォールバック")
             else:
-                df_m5_raw = df_m1_raw = None
+                df_m5_raw = df_m1_raw = df_m15_raw = df_h1_raw = None
                 try:
                     if date_from is not None:
-                        df_m5_raw = fetch_ohlcv_range(symbol, 'M5', date_from, date_to)
-                        df_m1_raw = fetch_ohlcv_range(symbol, 'M1', date_from, date_to)
+                        df_m5_raw  = fetch_ohlcv_range(symbol, 'M5',  date_from, date_to)
+                        df_m1_raw  = fetch_ohlcv_range(symbol, 'M1',  date_from, date_to)
+                        df_m15_raw = fetch_ohlcv_range(symbol, 'M15', date_from, date_to)
+                        df_h1_raw  = fetch_ohlcv_range(symbol, 'H1',  date_from, date_to)
                     else:
-                        df_m5_raw = fetch_ohlcv(symbol, 'M5', m5_bars)
-                        df_m1_raw = fetch_ohlcv(symbol, 'M1', m1_bars)
+                        df_m5_raw  = fetch_ohlcv(symbol, 'M5',  m5_bars)
+                        df_m1_raw  = fetch_ohlcv(symbol, 'M1',  m1_bars)
+                        df_m15_raw = fetch_ohlcv(symbol, 'M15', min(m5_bars // 3 + 50, 5000))
+                        df_h1_raw  = fetch_ohlcv(symbol, 'H1',  min(m5_bars // 12 + 50, 2000))
                 except Exception as fe:
                     print(f"[警告] MT5 fetch 例外: {fe}")
                 finally:
@@ -71,13 +76,22 @@ def load_scalp_data(symbol: str, mt5_cfg: dict,
                         (df_m5_raw.index >= common_start) & (df_m5_raw.index <= common_end)]
                     df_m1_raw = df_m1_raw[
                         (df_m1_raw.index >= common_start) & (df_m1_raw.index <= common_end)]
+                    # M15/H1 も共通期間に絞る（なければ None のまま）
+                    if df_m15_raw is not None and not df_m15_raw.empty:
+                        df_m15_raw = df_m15_raw[
+                            (df_m15_raw.index >= common_start) &
+                            (df_m15_raw.index <= common_end)]
+                    if df_h1_raw is not None and not df_h1_raw.empty:
+                        df_h1_raw = df_h1_raw[
+                            (df_h1_raw.index >= common_start) &
+                            (df_h1_raw.index <= common_end)]
                     m5_days = (df_m5_raw.index[-1] - df_m5_raw.index[0]).days
                     print(f"  共通期間: {common_start.date()} 〜 {common_end.date()} "
                           f"({m5_days}日)")
                     if df_m5_raw.empty or df_m1_raw.empty:
                         print("[警告] 共通期間が空です")
                     else:
-                        return df_m5_raw, df_m1_raw, True
+                        return df_m5_raw, df_m1_raw, df_m15_raw, df_h1_raw, True
         except ImportError:
             print("[警告] MetaTrader5 未インストール → 合成データを使用")
         except Exception as e:
@@ -88,7 +102,7 @@ def load_scalp_data(symbol: str, mt5_cfg: dict,
     h1_synth = generate_h1(n=loc.get('h1_bars_synth', 3600))
     df_m5_raw = generate_m5_from_h1(h1_synth)
     df_m1_raw = generate_m1_from_h1(h1_synth)
-    return df_m5_raw, df_m1_raw, False
+    return df_m5_raw, df_m1_raw, None, None, False
 
 
 # ──────────────────────────────────────────────────────────────
@@ -103,7 +117,9 @@ def _regime(df_m5: pd.DataFrame, i: int, regime_cfg: dict) -> str:
 
 
 def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
-                 cfg: dict, touch_margin: float) -> list[dict]:
+                 cfg: dict, touch_margin: float,
+                 df_m15: pd.DataFrame | None = None,
+                 df_h1:  pd.DataFrame | None = None) -> list[dict]:
     scalp       = cfg['SCALP']
     regime_cfg  = cfg.get('REGIME', {})
     buy_thrs    = scalp.get('rsi_buy_thrs',  [55.0, 60.0, 65.0])
@@ -132,6 +148,64 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
     m5_t   = df_m5.index.to_numpy()
     m5_rsi = df_m5['RSI'].to_numpy(dtype=float)
     m5_atr = df_m5['ATR'].to_numpy(dtype=float)
+
+    # MTF フィルタ用配列
+    m5_s20 = pd.Series(df_m5['Close'].values).rolling(20).mean().to_numpy(dtype=float)
+
+    m15_t = m15_s20 = m15_atr_arr = None
+    if df_m15 is not None and not df_m15.empty and 'SMA20' in df_m15.columns:
+        m15_t       = df_m15.index.to_numpy()
+        m15_s20     = df_m15['SMA20'].to_numpy(dtype=float)
+        m15_atr_arr = df_m15['ATR'].to_numpy(dtype=float) if 'ATR' in df_m15.columns else None
+
+    h1_t = h1_adx = h1_dip = h1_dim = None
+    if df_h1 is not None and not df_h1.empty:
+        h1_t   = df_h1.index.to_numpy()
+        h1_adx = df_h1['ADX'].to_numpy(dtype=float)      if 'ADX'      in df_h1.columns else None
+        h1_dip = df_h1['DI_plus'].to_numpy(dtype=float)  if 'DI_plus'  in df_h1.columns else None
+        h1_dim = df_h1['DI_minus'].to_numpy(dtype=float) if 'DI_minus' in df_h1.columns else None
+
+    def _slope_ok(s20_arr, atr_arr, idx: int, direction: str) -> bool:
+        if s20_arr is None or idx < slope_bars:
+            return True
+        sma_now  = s20_arr[idx]
+        sma_prev = s20_arr[idx - slope_bars]
+        if np.isnan(sma_now) or np.isnan(sma_prev):
+            return True
+        slope = sma_now - sma_prev
+        thr_v = (float(atr_arr[idx]) * slope_thr
+                 if atr_arr is not None and not np.isnan(atr_arr[idx]) else 0.0)
+        return slope > thr_v if direction == 'buy' else slope < -thr_v
+
+    def _h1_regime_at(ts) -> str:
+        if h1_t is None or h1_adx is None:
+            return 'weak_trend'
+        idx = int(np.searchsorted(h1_t, ts, side='right')) - 1
+        if idx < 0:
+            return 'weak_trend'
+        adx = float(h1_adx[idx])
+        dip = float(h1_dip[idx]) if h1_dip is not None else float('nan')
+        dim = float(h1_dim[idx]) if h1_dim is not None else float('nan')
+        return _detect_regime(adx, dip, dim, regime_cfg)
+
+    def _mtf_ok(ts, m5_i: int, direction: str) -> bool:
+        # H1 レジームチェック
+        h1_reg = _h1_regime_at(ts)
+        if direction == 'buy'  and h1_reg != 'trend_up':   return False
+        if direction == 'sell' and h1_reg != 'trend_down':  return False
+        # M5 SMA20 傾き
+        if not _slope_ok(m5_s20, m5_atr, m5_i, direction):
+            return False
+        # M15 SMA20 傾き
+        if m15_t is not None and m15_s20 is not None:
+            m15_i = int(np.searchsorted(m15_t, ts, side='right')) - 1
+            if m15_i >= 0 and not _slope_ok(m15_s20, m15_atr_arr, m15_i, direction):
+                return False
+        # M1 SMA20 傾き（M5 クロス時点）
+        m1_i = int(np.searchsorted(m1_t, ts, side='right')) - 1
+        if m1_i >= 0 and not _slope_ok(m1_s20, m1_atr, m1_i, direction):
+            return False
+        return True
 
     def m1_idx_at(ts):
         return int(np.searchsorted(m1_t, ts, side='left'))
@@ -251,6 +325,10 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
                 if rsi_cur < thr and rsi_prev >= thr:
                     signal = 'sell'; crossed = thr; break
         if signal is None:
+            continue
+
+        # MTF フィルタ: M1/M5/M15 SMA20 傾き + H1 レジーム
+        if not _mtf_ok(m5_t[i], i, signal):
             continue
 
         info = find_entry(signal, i)
@@ -466,9 +544,9 @@ def main():
     elif args.touch_margin is not None:
         print(f"  touch_margin: {touch_margin:.4f} (CLI指定)")
 
-    # データ取得（MT5 接続 → M5+M1 取得 → shutdown を1回で完結）
+    # データ取得（MT5 接続 → M5+M1+M15+H1 取得 → shutdown を1回で完結）
     print("\n[1] データ取得")
-    df_m5_raw, df_m1_raw, is_real = load_scalp_data(
+    df_m5_raw, df_m1_raw, df_m15_raw, df_h1_raw, is_real = load_scalp_data(
         args.symbol, cfg['MT5'], m5_bars, m1_bars,
         date_from=date_from, date_to=date_to,
         force_synthetic=args.synthetic,
@@ -477,17 +555,20 @@ def main():
 
     # 指標
     print("\n[2] 指標計算")
-    df_m5 = add_m5_indicators(df_m5_raw, cfg)
-    df_m1 = add_m1_indicators(df_m1_raw, cfg)
+    df_m5  = add_m5_indicators(df_m5_raw, cfg)
+    df_m1  = add_m1_indicators(df_m1_raw, cfg)
+    df_m15 = add_m1_indicators(df_m15_raw, cfg) if df_m15_raw is not None else None
+    df_h1  = add_h1_indicators(df_h1_raw,  cfg) if df_h1_raw  is not None else None
 
     data_days = (df_m5.index[-1] - df_m5.index[0]).total_seconds() / 86400
-    print(f"  M5: {len(df_m5)}本  M1: {len(df_m1)}本  "
-          f"期間: {df_m5.index[0].date()} 〜 {df_m5.index[-1].date()} "
-          f"({data_days:.0f}日)")
+    mtf_status = (f"M15={len(df_m15)}本  H1={len(df_h1)}本"
+                  if df_m15 is not None and df_h1 is not None else "M15/H1=なし(MTFフィルタ無効)")
+    print(f"  M5: {len(df_m5)}本  M1: {len(df_m1)}本  {mtf_status}")
+    print(f"  期間: {df_m5.index[0].date()} 〜 {df_m5.index[-1].date()} ({data_days:.0f}日)")
 
     # バックテスト実行
     print("\n[3] バックテスト実行中...")
-    trades = run_scalp_bt(df_m5, df_m1, cfg, touch_margin)
+    trades = run_scalp_bt(df_m5, df_m1, cfg, touch_margin, df_m15=df_m15, df_h1=df_h1)
     print(f"  完了: {len(trades)} トレード")
 
     # 結果表示
