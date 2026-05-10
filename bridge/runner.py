@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import io
 import logging
-import shutil
 import sys
 import time
 from datetime import datetime, timezone, timedelta
@@ -237,7 +236,10 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                 write_signal(data, sig_path)
                 if log_sig:
                     Path(log_sig).parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(sig_path, log_sig)
+                    try:
+                        write_signal(data, log_sig)
+                    except PermissionError:
+                        _logger.warning("log_sig 書き込み失敗 (PermissionError) → スキップ")
 
                 # 定期再分析
                 if (tb_cfg.get('enabled', False) and rebias_interval > 0
