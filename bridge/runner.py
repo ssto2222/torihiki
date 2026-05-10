@@ -1,12 +1,51 @@
 """bridge/runner.py — MT5 EA ブリッジ ポーリングループ"""
 from __future__ import annotations
 import argparse
+import io
 import logging
 import shutil
 import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+
+class _TeeWriter(io.TextIOBase):
+    """sys.stdout をラップして、コンソールとバッファの両方に書き込む。
+    log_dir が設定されている場合に使用し、ポーリング反復ごとに
+    バッファをリセット → 反復末にファイルへ上書き保存する。
+    """
+
+    def __init__(self, original: io.TextIOBase) -> None:
+        self._orig = original
+        self._buf: list[str] = []
+
+    def write(self, text: str) -> int:
+        self._orig.write(text)
+        self._buf.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        self._orig.flush()
+
+    def fileno(self):
+        return self._orig.fileno()
+
+    @property
+    def encoding(self):
+        return getattr(self._orig, 'encoding', 'utf-8')
+
+    def reset(self) -> None:
+        """反復開始時にバッファをクリアする"""
+        self._buf.clear()
+
+    def dump(self, path: Path) -> None:
+        """バッファ内容をファイルに上書き保存する"""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(''.join(self._buf), encoding='utf-8')
+        except OSError:
+            pass
 
 import MetaTrader5 as mt5
 
@@ -47,6 +86,13 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     flag_file  = str(Path(log_dir) / 'paused.flag') if log_dir else 'paused.flag'
 
     _setup_file_logging(log_dir, symbol)
+
+    # コンソール出力をファイルにも上書き保存する（log_dir が設定されている場合）
+    console_log_path = Path(log_dir) / f'console_{symbol}.log' if log_dir else None
+    _tee = _TeeWriter(sys.stdout)
+    _orig_stdout = sys.stdout
+    if console_log_path:
+        sys.stdout = _tee
 
     poll_sec   = cfg['BRIDGE']['poll_sec']
     lot_size   = cfg['BRIDGE']['lot_size']
@@ -123,6 +169,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
 
             itr += 1
             t_s  = time.time()
+            if console_log_path:
+                _tee.reset()
 
             if mode == 'scalp':
                 data = compute_scalp_signal(symbol, cfg, sc_state, sig_state,
@@ -286,6 +334,9 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                 print(msg)
                 _logger.error(msg)
 
+            if console_log_path:
+                _tee.dump(console_log_path)
+
             if once:
                 break
             time.sleep(max(0, poll_sec - (time.time() - t_s)))
@@ -296,6 +347,9 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
         _logger.exception("[ブリッジ] run_bridge メインループ 予期せぬ例外")
         raise
     finally:
+        sys.stdout = _orig_stdout
+        if console_log_path:
+            _tee.dump(console_log_path)
         try:
             mt5.shutdown()
         except Exception:
