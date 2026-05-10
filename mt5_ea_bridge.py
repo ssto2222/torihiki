@@ -1409,6 +1409,13 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
             # 通常モードのロジックで再計算
             normal_data = compute_signal(symbol, cfg)
             if normal_data is not None:
+                # スキャルプ pending 状態をクリア（通常モード中に状態が残らないよう）
+                _scalp_buy_sma_pending = _scalp_sell_sma_pending = False
+                _scalp_buy_sma_at      = _scalp_sell_sma_at      = None
+                _scalp_buy_confirm_pending = _scalp_sell_confirm_pending = False
+                _scalp_buy_confirm_at      = _scalp_sell_confirm_at      = None
+                _scalp_buy_confirm_count   = _scalp_sell_confirm_count   = 0
+                _scalp_buy_confirm_bar_time = _scalp_sell_confirm_bar_time = None
                 # ポジション方向と大変動方向が一致するならトレーリングを有効化
                 position_aligns = (
                     (big_move == 'up'   and _scalp_last_action == 'buy') or
@@ -2024,7 +2031,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                           f"expected_profit=+${data.get('expected_profit_usd',0):.2f}"
                           f"(¥{int(data.get('expected_profit_jpy',0))}) "
                           f"target=¥{data.get('target_profit_jpy',0)}  "
-                          )
+                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}"
+                          f"{status_tag}")
                 else:
                     # 通常モードログ
                     surge_tag = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
