@@ -216,6 +216,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                       f"last_pos={state.last_action}  "
                       f"trail={'ON' if position_aligns else 'scalp_trail=0'}")
                 return normal_data
+            _logger.warning("大変動検知中に compute_signal 失敗 → スキャルプスキップ")
+            return None
 
         # ── クールダウン中は通常モードに切換え ─────────────────────
         in_cooldown = (
@@ -229,6 +231,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 normal_data['scalp_cooldown_rem'] = rem
                 normal_data['scalp_mode']         = False
                 return normal_data
+            _logger.warning("クールダウン中に compute_signal 失敗 → スキャルプスキップ")
+            return None
 
         # ── 急騰初期検知と中段階回避 ─────────────────────────────
         surge_info  = detect_early_surge(df, cfg)

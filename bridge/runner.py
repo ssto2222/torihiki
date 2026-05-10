@@ -46,6 +46,48 @@ class _TeeWriter(io.TextIOBase):
         except OSError:
             pass
 
+
+class _ErrTeeWriter(io.TextIOBase):
+    """sys.stderr をラップしてエラーログに追記する（上書きなし）。
+    Python のトレースバックや予期せぬ例外を永続的に残すために使用する。
+    """
+
+    def __init__(self, original: io.TextIOBase, log_path: Path) -> None:
+        self._orig = original
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(log_path, 'a', encoding='utf-8', errors='replace')
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        try:
+            self._fh.write(f'\n=== ブリッジ起動 {ts} ===\n')
+            self._fh.flush()
+        except OSError:
+            pass
+
+    def write(self, text: str) -> int:
+        self._orig.write(text)
+        try:
+            self._fh.write(text)
+            self._fh.flush()
+        except OSError:
+            pass
+        return len(text)
+
+    def flush(self) -> None:
+        self._orig.flush()
+
+    def fileno(self):
+        return self._orig.fileno()
+
+    @property
+    def encoding(self):
+        return getattr(self._orig, 'encoding', 'utf-8')
+
+    def close(self) -> None:
+        try:
+            self._fh.close()
+        except OSError:
+            pass
+
 import MetaTrader5 as mt5
 
 import config as C
@@ -88,10 +130,16 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
 
     # コンソール出力をファイルにも上書き保存する（log_dir が設定されている場合）
     console_log_path = Path(log_dir) / f'console_{symbol}.log' if log_dir else None
+    error_log_path   = Path(log_dir) / f'error_{symbol}.log'   if log_dir else None
     _tee = _TeeWriter(sys.stdout)
     _orig_stdout = sys.stdout
+    _orig_stderr = sys.stderr
+    _err_tee: _ErrTeeWriter | None = None
     if console_log_path:
         sys.stdout = _tee
+    if error_log_path:
+        _err_tee = _ErrTeeWriter(sys.stderr, error_log_path)
+        sys.stderr = _err_tee
 
     poll_sec   = cfg['BRIDGE']['poll_sec']
     lot_size   = cfg['BRIDGE']['lot_size']
@@ -363,6 +411,9 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
         raise
     finally:
         sys.stdout = _orig_stdout
+        sys.stderr = _orig_stderr
+        if _err_tee is not None:
+            _err_tee.close()
         if console_log_path:
             _tee.dump(console_log_path)
         try:
