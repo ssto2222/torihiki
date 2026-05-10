@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import os
 import shutil
 import sys
 import time
@@ -160,6 +161,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
         if m is not None:
             print(f"  SMA20タッチマージン: {symbol} = {m:.2f} USD")
 
+    _fail_count = 0
+    _restart    = False
     try:
         itr = 0
         while True:
@@ -179,6 +182,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                 data = compute_signal(symbol, cfg, sig_state, jpy_cache, mt5=mt5)
 
             if data:
+                _fail_count = 0
                 ea            = read_ea_state(state_path)
                 consec_losses = ea.get('consecutive_losses', 0)
                 pos           = ea.get('positions', 0)
@@ -330,9 +334,19 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                         print(f"  [Discord] 通知失敗: {_de}")
                     last_discord_action[0] = curr_action
             else:
-                msg = f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}  データ取得失敗"
+                _fail_count += 1
+                msg = (f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}"
+                       f"  データ取得失敗 ({_fail_count}/10回目)")
                 print(msg)
                 _logger.error(msg)
+                if _fail_count >= 10:
+                    crit = "[ブリッジ] データ取得失敗 10回連続 → プロセス再起動"
+                    print(crit)
+                    _logger.critical(crit)
+                    if console_log_path:
+                        _tee.dump(console_log_path)
+                    _restart = True
+                    break
 
             if console_log_path:
                 _tee.dump(console_log_path)
@@ -354,6 +368,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
             mt5.shutdown()
         except Exception:
             pass
+        if _restart:
+            os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def main() -> None:
