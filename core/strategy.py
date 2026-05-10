@@ -1,9 +1,12 @@
 """core/strategy.py — シグナル検出・SL戦略・バックテストエンジン"""
 from __future__ import annotations
+import logging
 import numpy as np
 import pandas as pd
 import warnings
 warnings.filterwarnings('ignore')
+
+_logger = logging.getLogger('torihiki.strategy')
 
 
 # ── H1 シグナル検出（SMA20 + RSI）────────────────────────────

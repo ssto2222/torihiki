@@ -1,9 +1,12 @@
 """core/data.py — データ取得・合成データ生成"""
 from __future__ import annotations
+import logging
 import warnings
 import numpy as np
 import pandas as pd
 warnings.filterwarnings('ignore')
+
+_logger = logging.getLogger('torihiki.data')
 
 
 # ── MT5 ───────────────────────────────────────────────────
@@ -88,7 +91,9 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
               f"{df.index[0].strftime('%Y-%m-%d')}〜{df.index[-1].strftime('%Y-%m-%d')}")
         return df
     except Exception as e:
-        print(f"[MT5] fetch失敗 {tf_str}: {e}"); return None
+        print(f"[MT5] fetch失敗 {tf_str}: {e}")
+        _logger.exception(f"[MT5] fetch_ohlcv 例外 symbol={symbol} tf={tf_str}")
+        return None
 
 
 def _strip_tz(dt: 'datetime') -> 'datetime':
@@ -148,7 +153,9 @@ def fetch_ohlcv_range(symbol: str, tf_str: str,
               f"{df.index[0].strftime('%Y-%m-%d')}〜{df.index[-1].strftime('%Y-%m-%d')}")
         return df
     except Exception as e:
-        print(f"[MT5] fetch_range失敗 {tf_str}: {e}"); return None
+        print(f"[MT5] fetch_range失敗 {tf_str}: {e}")
+        _logger.exception(f"[MT5] fetch_ohlcv_range 例外 symbol={symbol} tf={tf_str}")
+        return None
 
 
 def load_mt5(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame] | tuple[None, None]:

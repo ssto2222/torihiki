@@ -28,6 +28,8 @@ import requests
 from secret import DISCORD_WEBHOOK_URL
 
 import sys, json, time, argparse, shutil
+import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 import numpy as np
@@ -48,6 +50,34 @@ LAST_NOTIFY_TIME = 0
 NOTIFY_INTERVAL = 3600  # 1時間(秒)
 
 if not os.path.exists(LOG_DIR): os.makedirs(LOG_DIR)
+
+# ── ロガー設定 ─────────────────────────────────────────────
+_logger = logging.getLogger('torihiki')
+_logger.setLevel(logging.DEBUG)
+if not _logger.handlers:
+    _logger.addHandler(logging.NullHandler())
+
+
+def _setup_file_logging(log_dir: str, symbol: str) -> None:
+    """run_bridge 起動時に呼び出し、log_dir にログファイルを作成する"""
+    if not log_dir:
+        return
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    log_path = Path(log_dir) / f'bridge_{symbol}.log'
+    handler = RotatingFileHandler(
+        log_path, maxBytes=5 * 1024 * 1024, backupCount=5, encoding='utf-8'
+    )
+    handler.setLevel(logging.WARNING)
+    handler.setFormatter(logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+    # 同じハンドラを二重登録しない
+    if not any(isinstance(h, RotatingFileHandler) and
+               getattr(h, 'baseFilename', '') == str(log_path.resolve())
+               for h in _logger.handlers):
+        _logger.addHandler(handler)
+    _logger.warning(f'ログ開始: {log_path}')
+
 
 def send_discord(message):
     """Discordへ通知を送る"""
@@ -1166,6 +1196,7 @@ def compute_signal(symbol: str, cfg: dict) -> dict | None:
         }
     except Exception as e:
         print(f"[ブリッジ] 計算エラー: {e}")
+        _logger.exception("[ブリッジ] compute_signal 例外")
         return None
 
 
@@ -1761,6 +1792,7 @@ _scalp_sell_sma_pending, _scalp_sell_sma_at, _scalp_sell_sma_level, \
 
     except Exception as e:
         print(f"[スキャルプ] 計算エラー: {e}")
+        _logger.exception("[スキャルプ] compute_scalp_signal 例外")
         return None
 
 
@@ -1808,6 +1840,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
     state_path = _sym_path(cfg['BRIDGE']['status_file'])
     log_dir    = cfg['BRIDGE'].get('log_dir', '')
     log_sig    = str(Path(log_dir) / Path(sig_path).name) if log_dir else ''
+    _setup_file_logging(log_dir, symbol)
     poll_sec   = cfg['BRIDGE']['poll_sec']
     _last_discord_action = ['none']  # アクション変化検知用（リスト＝可変コンテナ）
     lot_size   = cfg['BRIDGE']['lot_size']
@@ -2045,13 +2078,18 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal'):
                         print(f"  [Discord] 通知失敗: {_de}")
                     _last_discord_action[0] = curr_action
             else:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}  データ取得失敗")
+                msg = f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}  データ取得失敗"
+                print(msg)
+                _logger.error(msg)
 
             if once: break
             time.sleep(max(0, poll_sec - (time.time() - t_s)))
 
     except KeyboardInterrupt:
         print("\n[ブリッジ] 終了")
+    except Exception:
+        _logger.exception("[ブリッジ] run_bridge メインループ 予期せぬ例外")
+        raise
     finally:
         try:
             import MetaTrader5 as mt5; mt5.shutdown()
