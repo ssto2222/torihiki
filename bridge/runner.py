@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import io
 import logging
-import os
 import shutil
 import sys
 import time
@@ -369,7 +368,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
         except Exception:
             pass
         if _restart:
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            sys.exit(1)  # mt5_monitor.py が検知して再起動する
 
 
 def main() -> None:
