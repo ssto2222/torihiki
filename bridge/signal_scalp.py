@@ -231,14 +231,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 normal_data['scalp_cooldown_rem'] = rem
                 normal_data['scalp_mode']         = False
                 return normal_data
-            _logger.warning("クールダウン中に compute_signal 失敗 → スキャルプスキップ")
-            return None
+            # compute_signal 失敗時はスキャルプロジックにフォールバックし
+            # line 488 のクールダウンガードが action='none' を保証する
+            _logger.warning("クールダウン中に compute_signal 失敗 → スキャルプロジックにフォールバック")
 
         # ── 急騰初期検知と中段階回避 ─────────────────────────────
         surge_info  = detect_early_surge(df, cfg)
         avoid_surge = should_avoid_entry_during_surge(df, cfg)
 
-        if avoid_surge and not surge_info['is_early_surge']:
+        if avoid_surge and not surge_info['is_early_surge'] and not in_cooldown:
             print(f"[急騰回避] RSI={rsi_cur:.1f} が高すぎるためエントリー見送り")
             return None
 
