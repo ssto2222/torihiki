@@ -528,7 +528,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sma20':              0.0,
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
-            'signal_type':        (f'scalp_{action}_{int(crossed_level)}'
+            'signal_type':        (f'scalp_{action}_{int(crossed_level or (state.buy_sma_level if action == "buy" else state.sell_sma_level))}'
                                    if action != 'none' else 'none'),
             'execution_tf':       'm5',
             'signal_valid_until': '',
