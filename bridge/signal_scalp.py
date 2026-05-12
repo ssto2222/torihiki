@@ -81,6 +81,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         rsi_cur = float(df['RSI'].iloc[-1])
         close_v = float(df['Close'].iloc[-1])
         atr_v   = float(df['ATR'].iloc[-1])
+        if atr_v <= 0 or np.isnan(atr_v):
+            return None  # ATR 計算不能 → SL/TP が計算できないためスキップ
 
         # M1 データ取得
         df_m1_raw = fetch_ohlcv(symbol, 'M1', 50)
@@ -307,7 +309,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
                         sma20_slope_ok = (
-                            np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
+                            not np.isnan(atr_m1_v) and not np.isnan(sma20_prev) and
                             (sma20_m1 - sma20_prev) < -(atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok:
@@ -377,7 +379,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
                         sma20_slope_ok = (
-                            np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
+                            not np.isnan(atr_m1_v) and not np.isnan(sma20_prev) and
                             (sma20_m1 - sma20_prev) > (atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok:
@@ -493,7 +495,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif pos_st['available_slots'] <= 0:
                 opp_dir = 'sell' if new_cross == 'buy' else 'buy'
                 magic_n = cfg['MT5'].get('magic', 20240101)
-                if not _has_positions_in_direction(symbol, magic_n, opp_dir, mt5=mt5):
+                if _has_positions_in_direction(symbol, magic_n, opp_dir, mt5=mt5):
+                    # 逆方向にポジションあり → ヘッジ許可
+                    action            = new_cross
+                    state.last_action = new_cross
+                    state.count      += 1
+                    state.last_at     = now
+                else:
                     skip = (f"max_positions={pos_st['max_positions']}に到達"
                             f"（全{pos_st['total_positions']}本）")
             else:
