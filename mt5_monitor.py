@@ -17,6 +17,7 @@ mt5_monitor.py — MT5 EA ブリッジ 監視・ウォッチドッグ
 """
 
 import logging
+import logging.handlers
 import os
 import subprocess
 import sys
@@ -44,21 +45,32 @@ _DEFAULT_BRIDGE_ARGS = [
 ]
 
 # ─── ロギング設定 ───────────────────────────────────────────────────
-os.makedirs(LOG_DIR, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    filename=LOG_FILE,
-    filemode='a',
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    encoding='utf-8',
-)
+# root ロガーへの伝播を無効化し、Google Drive ファイルハンドラーの影響を受けない
 _logger = logging.getLogger('mt5_monitor')
+_logger.setLevel(logging.INFO)
+_logger.propagate = False  # root の FileHandler (Google Drive) に伝播させない
 
-# コンソールにも出力
-_ch = logging.StreamHandler()
+# コンソール出力（常に有効）
+_ch = logging.StreamHandler(sys.stdout)
 _ch.setLevel(logging.INFO)
 _ch.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', '%H:%M:%S'))
 _logger.addHandler(_ch)
+
+# ローカルファイルへの追記ログ（スクリプトと同じ場所に置くことで Google Drive 問題を回避）
+_local_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+try:
+    os.makedirs(_local_log_dir, exist_ok=True)
+    _fh = logging.handlers.RotatingFileHandler(
+        os.path.join(_local_log_dir, 'mt5_monitor.log'),
+        maxBytes=2 * 1024 * 1024,  # 2 MB
+        backupCount=5,
+        encoding='utf-8',
+    )
+    _fh.setLevel(logging.INFO)
+    _fh.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s'))
+    _logger.addHandler(_fh)
+except OSError:
+    pass  # ローカルログが書けない場合はコンソールのみ
 
 
 def _ts() -> str:
