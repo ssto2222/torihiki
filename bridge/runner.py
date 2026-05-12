@@ -283,11 +283,11 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
 
                 write_signal(data, sig_path)
                 if log_sig:
-                    Path(log_sig).parent.mkdir(parents=True, exist_ok=True)
                     try:
+                        Path(log_sig).parent.mkdir(parents=True, exist_ok=True)
                         write_signal(data, log_sig)
-                    except PermissionError:
-                        _logger.warning("log_sig 書き込み失敗 (PermissionError) → スキップ")
+                    except OSError as _e:
+                        _logger.warning(f"log_sig 書き込み失敗 ({_e}) → スキップ")
 
                 # 定期再分析
                 if (tb_cfg.get('enabled', False) and rebias_interval > 0
