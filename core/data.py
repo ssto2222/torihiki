@@ -48,11 +48,12 @@ def connect_mt5(symbol: str, mt5_cfg: dict | None = None) -> bool:
 def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
     """
     直近 bars 本の OHLCV を取得する。
-    copy_rates_from_pos が Invalid params で失敗した場合（ターミナルキャッシュなし）は
-    copy_rates_range（期間指定）にフォールバックしてサーバーから取得する。
+    IPC エラー (-10001 等): mt5.initialize() で再接続後にリトライする。
+    その他のエラー (キャッシュなし等): バー数を段階的に減らして再試行する。
     """
     try:
         import MetaTrader5 as mt5
+        import time as _time
         from datetime import datetime, timezone, timedelta
         tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,'M15':mt5.TIMEFRAME_M15,
                   'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
@@ -61,20 +62,33 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
 
         rates = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, bars)
         if rates is None or len(rates) == 0:
-            err = mt5.last_error()
-            print(f"[MT5] {symbol} {tf_str} copy_rates_from_pos 失敗: {err}  → 期間指定で再試行")
-            # キャッシュなし対策: 最新位置から段階的に本数を減らして試みる
-            print(f"[MT5] {symbol} {tf_str} → 最新位置から段階的に取得を試みます")
-            rates = None
-            for try_bars in [bars, bars // 2, 50_000, 20_000, 10_000]:
-                if try_bars <= 0:
-                    continue
-                r = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, try_bars)
-                if r is not None and len(r) > 0:
-                    print(f"[MT5] {symbol} {tf_str}: {try_bars:,}本で取得成功")
-                    rates = r
-                    break
-            if rates is None:
+            err      = mt5.last_error()
+            err_code = err[0] if isinstance(err, tuple) else err
+            print(f"[MT5] {symbol} {tf_str} copy_rates_from_pos 失敗: {err}")
+
+            if err_code in (-10001, -10003, -10004, -10006):
+                # IPC 系エラー: 再接続してからリトライ（バー数変更では解決しない）
+                for wait_sec in [2, 4]:
+                    print(f"[MT5] IPC エラー → {wait_sec}秒待機後に再接続を試みます")
+                    _time.sleep(wait_sec)
+                    mt5.initialize()
+                    rates = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, bars)
+                    if rates is not None and len(rates) > 0:
+                        print(f"[MT5] {symbol} {tf_str}: IPC 再接続後に取得成功")
+                        break
+            else:
+                # 非 IPC エラー (キャッシュなし等): バー数を段階的に減らして再試行
+                print(f"[MT5] {symbol} {tf_str} → 最新位置から段階的に取得を試みます")
+                for try_bars in [bars, bars // 2, 50_000, 20_000, 10_000]:
+                    if try_bars <= 0:
+                        continue
+                    r = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, try_bars)
+                    if r is not None and len(r) > 0:
+                        print(f"[MT5] {symbol} {tf_str}: {try_bars:,}本で取得成功")
+                        rates = r
+                        break
+
+            if rates is None or len(rates) == 0:
                 print(f"[MT5] {symbol} {tf_str} 全フォールバック失敗")
                 return None
 
