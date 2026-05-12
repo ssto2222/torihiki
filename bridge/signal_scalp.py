@@ -261,9 +261,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:
                             if ((not surge_info['is_early_surge'] or surge_info['confidence'] >= 0.3)
                                     and mtf_buy_ok):
-                                state.buy_sma_pending = True
-                                state.buy_sma_at      = now
-                                state.buy_sma_level   = thr
+                                state.buy_sma_pending  = True
+                                state.buy_sma_at       = now
+                                state.buy_sma_level    = thr
+                                # 逆方向ペンディングをキャンセル
+                                state.sell_sma_pending     = False
+                                state.sell_confirm_pending = False
                                 if surge_info['is_early_surge']:
                                     print(f"[急騰兆候BUY] 急騰初期でもBUY許可 "
                                           f"Confidence={surge_info['confidence']:.2f}")
@@ -277,9 +280,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
                             if (surge_info['is_early_surge'] and surge_info['confidence'] > 0.6
                                     and mtf_sell_ok):
-                                state.sell_sma_pending = True
-                                state.sell_sma_at      = now
-                                state.sell_sma_level   = thr
+                                state.sell_sma_pending  = True
+                                state.sell_sma_at       = now
+                                state.sell_sma_level    = thr
+                                # 逆方向ペンディングをキャンセル
+                                state.buy_sma_pending     = False
+                                state.buy_confirm_pending = False
                                 print(f"[急騰初期SELL] RVOL={df['RVOL'].iloc[-1]:.2f} "
                                       f"Accel={df['Price_Accel'].iloc[-1]:.2f} "
                                       f"Confidence={surge_info['confidence']:.2f}")
@@ -473,7 +479,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # ポジション数チェック
         risk_pct       = cfg['BRIDGE'].get('risk_pct', 0.01)
         total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
-        pos_st         = _position_status(risk_pct, total_risk_pct, mt5=mt5)
+        magic_id       = cfg['MT5'].get('magic', 20240101)
+        pos_st         = _position_status(risk_pct, total_risk_pct, symbol, magic_id, mt5=mt5)
 
         if new_cross:
             hour_utc = now.hour
@@ -494,8 +501,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = f'cooldown残{rem}分'
             elif pos_st['available_slots'] <= 0:
                 opp_dir = 'sell' if new_cross == 'buy' else 'buy'
-                magic_n = cfg['MT5'].get('magic', 20240101)
-                if _has_positions_in_direction(symbol, magic_n, opp_dir, mt5=mt5):
+                if _has_positions_in_direction(symbol, magic_id, opp_dir, mt5=mt5):
                     # 逆方向にポジションあり → ヘッジ許可
                     action            = new_cross
                     state.last_action = new_cross

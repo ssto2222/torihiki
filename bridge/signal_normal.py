@@ -183,18 +183,20 @@ def compute_signal(symbol: str, cfg: dict,
                         break
         state.prev_rsi_h1 = rsi_h1_v
 
-        # BUY ウィンドウ
+        # BUY ウィンドウ（新規クロスで逆方向ウィンドウをキャンセル）
         if new_buy_type:
-            state.signal_active_type  = new_buy_type
-            state.signal_active_until = now + timedelta(minutes=valid_min)
+            state.signal_active_type       = new_buy_type
+            state.signal_active_until      = now + timedelta(minutes=valid_min)
+            state.signal_sell_active_until = None  # SELL ウィンドウを無効化
         in_window = (state.signal_active_until is not None and
                      now <= state.signal_active_until)
         sig_type = state.signal_active_type if in_window else 'none'
 
-        # SELL ウィンドウ
+        # SELL ウィンドウ（新規クロスで逆方向ウィンドウをキャンセル）
         if new_sell_type:
             state.signal_sell_active_type  = new_sell_type
             state.signal_sell_active_until = now + timedelta(minutes=valid_min)
+            state.signal_active_until      = None  # BUY ウィンドウを無効化
         in_sell_window = (state.signal_sell_active_until is not None and
                           now <= state.signal_sell_active_until and
                           downtrend_ok)
@@ -418,7 +420,8 @@ def compute_signal(symbol: str, cfg: dict,
         lot_size = max(l_min, min(l_max, round(lot_base * r_multi / l_step) * l_step))
 
         total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
-        pos_st = _position_status(risk_pct, total_risk_pct, mt5=mt5)
+        magic_id       = cfg['MT5'].get('magic', 20240101)
+        pos_st = _position_status(risk_pct, total_risk_pct, symbol, magic_id, mt5=mt5)
         if pos_st['available_slots'] <= 0 and action in ('buy', 'sell', 'limit_buy'):
             action      = 'none'
             skip_reason = (f"max_positions={pos_st['max_positions']}に到達"

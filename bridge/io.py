@@ -1,6 +1,7 @@
 """bridge/io.py — signal.json ファイル I/O"""
 from __future__ import annotations
 import json
+import os
 import time
 from pathlib import Path
 
@@ -10,6 +11,11 @@ def write_signal(data: dict, path: str) -> None:
     tmp = path + '.tmp'
     with open(tmp, 'w', encoding='ascii') as f:
         json.dump(data, f, ensure_ascii=True, indent=2)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except OSError:
+            pass  # ネットワークドライブなど fsync 非対応の場合はスキップ
 
     retries = 5
     for attempt in range(retries):
