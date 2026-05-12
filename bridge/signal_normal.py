@@ -126,7 +126,7 @@ def compute_signal(symbol: str, cfg: dict,
         sig_p         = cfg['SIGNAL']
         buy_thr       = sig_p.get('buy_rsi_thr', 40.0)
         mom_thrs      = sorted(sig_p.get('momentum_thrs', [55.0, 60.0, 65.0, 70.0, 75.0]))
-        momentum_buy_max_rsi = sig_p.get('momentum_buy_max_rsi', 70.0)
+        momentum_buy_max_rsi = sig_p.get('momentum_buy_max_rsi', 80.0)
         sell_mom_thrs = sorted(sig_p.get('momentum_sell_thrs', [55.0, 50.0, 45.0, 40.0, 35.0]),
                                reverse=True)
         downtrend_thr = sig_p.get('downtrend_d1_rsi', 45.0)
@@ -148,6 +148,14 @@ def compute_signal(symbol: str, cfg: dict,
             if not state.bb2_touched_sell:
                 state.bb2_touched_sell    = True
                 state.bb2_touched_at_sell = now
+
+        # BB2σタッチ状態を valid_min 経過後にリセット
+        if state.bb2_touched_buy and state.bb2_touched_at_buy:
+            if now > state.bb2_touched_at_buy + timedelta(minutes=valid_min):
+                state.bb2_touched_buy = False
+        if state.bb2_touched_sell and state.bb2_touched_at_sell:
+            if now > state.bb2_touched_at_sell + timedelta(minutes=valid_min):
+                state.bb2_touched_sell = False
 
         # 慎重分散エントリー条件（2本連続陽線後3本目BB2σタッチ）
         careful_entry = False
@@ -300,11 +308,11 @@ def compute_signal(symbol: str, cfg: dict,
         # ── M1 執行フィルタ ───────────────────────────────────────
         exec_cfg = cfg.get('EXECUTION', {})
         m1_buy_thrs  = exec_cfg.get('m1_exec_buy_thrs',  [65.0, 70.0, 75.0])
-        m1_sell_thrs = exec_cfg.get('m1_exec_sell_thrs', [35.0, 30.0, 25.0])
-        if (action in ('buy', 'sell') and scalp_type == 'none'
+        m1_sell_thrs = exec_cfg.get('m1_exec_sell_thrs', [40.0, 35.0, 30.0])
+        if (action in ('buy', 'sell', 'limit_buy') and scalp_type == 'none'
                 and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)):
             orig_action = action
-            if orig_action == 'buy':
+            if orig_action in ('buy', 'limit_buy'):
                 m1_exec_ok = any(
                     rsi_m1_bar_prev >= thr and rsi_m1_bar_prev2 >= thr
                     for thr in m1_buy_thrs
@@ -411,7 +419,7 @@ def compute_signal(symbol: str, cfg: dict,
 
         total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
         pos_st = _position_status(risk_pct, total_risk_pct, mt5=mt5)
-        if pos_st['available_slots'] <= 0 and action in ('buy', 'sell'):
+        if pos_st['available_slots'] <= 0 and action in ('buy', 'sell', 'limit_buy'):
             action      = 'none'
             skip_reason = (f"max_positions={pos_st['max_positions']}に到達"
                            f"（全{pos_st['total_positions']}本）")
