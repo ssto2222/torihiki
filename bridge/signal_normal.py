@@ -65,6 +65,19 @@ def compute_signal(symbol: str, cfg: dict,
         atr_v      = float(last['ATR'])
         rsi_h1_v   = float(last['RSI'])
         sma20      = float(last['SMA20'])
+        h1_sma20_prev = (float(df_h1['SMA20'].iloc[-2])
+                         if len(df_h1) >= 2 and 'SMA20' in df_h1.columns
+                         else float('nan'))
+
+        # H1 SELL トリガー: SMA20 下向き + 直近2本の確定陰線
+        h1_sma20_declining = (not np.isnan(sma20) and not np.isnan(h1_sma20_prev)
+                               and sma20 < h1_sma20_prev)
+        h1_two_bear = (
+            len(df_h1) >= 3 and
+            float(df_h1['Close'].iloc[-2]) < float(df_h1['Open'].iloc[-2]) and
+            float(df_h1['Close'].iloc[-3]) < float(df_h1['Open'].iloc[-3])
+        )
+
         h1_bb_mid    = float(last['BB_mid'])    if 'BB_mid'    in df_h1.columns else float('nan')
         h1_bb_upper2 = float(last['BB_upper2']) if 'BB_upper2' in df_h1.columns else float('nan')
         h1_bb_lower2 = float(last['BB_lower2']) if 'BB_lower2' in df_h1.columns else float('nan')
@@ -165,7 +178,7 @@ def compute_signal(symbol: str, cfg: dict,
             if prev2['Close'] > prev2['Open'] and prev1['Close'] > prev1['Open']:
                 careful_entry = True
 
-        # ── クロス検出（BUY + SELL）────────────────────────────────
+        # ── クロス検出 BUY ────────────────────────────────────────
         new_buy_type  = None
         new_sell_type = None
         if state.prev_rsi_h1 is not None:
@@ -176,12 +189,11 @@ def compute_signal(symbol: str, cfg: dict,
                     if rsi_h1_v > thr and state.prev_rsi_h1 <= thr and rsi_h1_v <= momentum_buy_max_rsi:
                         new_buy_type = f'momentum_{int(thr)}'
                         break
-            if downtrend_ok:
-                for thr in sell_mom_thrs:
-                    if rsi_h1_v < thr and state.prev_rsi_h1 >= thr:
-                        new_sell_type = f'sell_{int(thr)}'
-                        break
         state.prev_rsi_h1 = rsi_h1_v
+
+        # ── SELL 検出: H1 SMA20 下向き + 直近2本確定陰線 ─────────
+        if h1_sma20_declining and h1_two_bear:
+            new_sell_type = 'sma20_2bear'
 
         # BUY ウィンドウ（新規クロスで逆方向ウィンドウをキャンセル）
         if new_buy_type:
@@ -199,7 +211,7 @@ def compute_signal(symbol: str, cfg: dict,
             state.signal_active_until      = None  # BUY ウィンドウを無効化
         in_sell_window = (state.signal_sell_active_until is not None and
                           now <= state.signal_sell_active_until and
-                          downtrend_ok)
+                          h1_sma20_declining)  # SMA20が上向きに転じたら即キャンセル
         sell_sig_type = state.signal_sell_active_type if in_sell_window else 'none'
 
         # ── RulesEngine フィルタ ─────────────────────────────────
@@ -331,11 +343,15 @@ def compute_signal(symbol: str, cfg: dict,
                 skip_reason = (f'M1執行待機: RSI_M1={rsi_m1_cur:.1f}'
                                f'(要{thr_str} 2本以上)')
 
-        # M5 SMA20 下向きは BUY 禁止
+        # M5 SMA20 下向きは BUY 禁止、上向きは SELL 禁止
         if action == 'buy' and not np.isnan(sma20_m5_current) and not np.isnan(sma20_m5_prev):
             if sma20_m5_current < sma20_m5_prev:
                 action      = 'none'
                 skip_reason = 'M5_SMA20_down_buy禁止'
+        if action == 'sell' and not np.isnan(sma20_m5_current) and not np.isnan(sma20_m5_prev):
+            if sma20_m5_current > sma20_m5_prev:
+                action      = 'none'
+                skip_reason = 'M5_SMA20_up_sell禁止'
 
         if action == 'buy' and _engine is None and hour_jst == 14:
             action      = 'none'
