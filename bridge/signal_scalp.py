@@ -93,12 +93,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             if not df_m1.empty:
                 rsi_m1_cur = float(df_m1['RSI'].iloc[-1])
 
-        # M1 RSI 65超え追跡
+        # M1 RSI 追跡（BUY過熱: >65 / SELL過熱: <35）
         if not np.isnan(rsi_m1_cur):
-            if rsi_m1_cur > 65:
-                state.m1_rsi_above_65 = True
-            elif rsi_m1_cur < 65:
-                state.m1_rsi_above_65 = False
+            state.m1_rsi_above_65 = rsi_m1_cur > 65
+            state.m1_rsi_below_35 = rsi_m1_cur < 35
 
         info          = mt5.symbol_info(symbol)
         contract_size = float(info.trade_contract_size) if info else 1.0
@@ -238,12 +236,20 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             _logger.warning("クールダウン中に compute_signal 失敗 → スキャルプロジックにフォールバック")
 
         # ── 急騰初期検知と中段階回避 ─────────────────────────────
-        surge_info  = detect_early_surge(df, cfg)
-        avoid_surge = should_avoid_entry_during_surge(df, cfg)
+        surge_info = detect_early_surge(df, cfg)
 
-        if avoid_surge and not surge_info['is_early_surge'] and not in_cooldown:
-            print(f"[急騰回避] RSI={rsi_cur:.1f} が高すぎるためエントリー見送り")
-            return None
+        # BUY 専用: RSI が高すぎる（急騰中段階）はエントリー見送り
+        avoid_buy_surge = (should_avoid_entry_during_surge(df, cfg)
+                           and not surge_info['is_early_surge']
+                           and not in_cooldown)
+        if avoid_buy_surge:
+            print(f"[急騰回避] RSI={rsi_cur:.1f} が高すぎる → BUY見送り")
+
+        # SELL 専用: RSI が低すぎる（売られすぎ）はエントリー見送り
+        sell_oversold_thr = cfg.get('INDICATOR', {}).get('surge_oversold_threshold', 30.0)
+        avoid_sell_surge  = rsi_cur < sell_oversold_thr and not in_cooldown
+        if avoid_sell_surge:
+            print(f"[売られすぎ回避] RSI={rsi_cur:.1f} が低すぎる → SELL見送り")
 
         # ── M1 待機ロジック ────────────────────────────────────────
         confirmed_signal = None
@@ -255,7 +261,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         if (confirmed_signal is None
                 and df_m1 is not None and len(df_m1) >= 2 and m1_early_margin > 0):
             rsi_m1_prev2 = float(df_m1['RSI'].iloc[-2])
-            if buy_enabled and not state.buy_sma_pending:
+            if buy_enabled and not state.buy_sma_pending and not avoid_buy_surge:
                 for thr in buy_thrs:
                     if thr - m1_early_margin <= rsi_cur <= thr:
                         if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:
@@ -264,31 +270,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 state.buy_sma_pending  = True
                                 state.buy_sma_at       = now
                                 state.buy_sma_level    = thr
-                                # 逆方向ペンディングをキャンセル
                                 state.sell_sma_pending     = False
                                 state.sell_confirm_pending = False
-                                if surge_info['is_early_surge']:
-                                    print(f"[急騰兆候BUY] 急騰初期でもBUY許可 "
-                                          f"Confidence={surge_info['confidence']:.2f}")
-                                else:
-                                    print(f"[押し目BUY] 通常の押し目エントリー "
-                                          f"Confidence={surge_info['confidence']:.2f}")
+                                label = '急騰兆候BUY' if surge_info['is_early_surge'] else '押し目BUY'
+                                print(f"[{label}] Confidence={surge_info['confidence']:.2f}")
                             break
-            if confirmed_signal is None and sell_enabled and not state.sell_sma_pending:
+            if confirmed_signal is None and sell_enabled and not state.sell_sma_pending and not avoid_sell_surge:
                 for thr in sell_thrs:
                     if thr <= rsi_cur <= thr + m1_early_margin:
                         if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
-                            if (surge_info['is_early_surge'] and surge_info['confidence'] > 0.6
-                                    and mtf_sell_ok):
+                            if mtf_sell_ok:
                                 state.sell_sma_pending  = True
                                 state.sell_sma_at       = now
                                 state.sell_sma_level    = thr
-                                # 逆方向ペンディングをキャンセル
                                 state.buy_sma_pending     = False
                                 state.buy_confirm_pending = False
-                                print(f"[急騰初期SELL] RVOL={df['RVOL'].iloc[-1]:.2f} "
-                                      f"Accel={df['Price_Accel'].iloc[-1]:.2f} "
-                                      f"Confidence={surge_info['confidence']:.2f}")
+                                print(f"[押し戻りSELL] M1 RSI={rsi_m1_cur:.1f} thr={int(thr)}")
                             break
 
         # SELL SMA20 タッチ待ち
@@ -433,14 +430,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # M5 新規クロス検出（既存の待機状態がない場合のみ）
         if confirmed_signal is None and state.prev_rsi is not None:
-            if not (state.buy_sma_pending or state.buy_confirm_pending):
+            if not (state.buy_sma_pending or state.buy_confirm_pending) and not avoid_buy_surge:
                 for thr in buy_thrs:
                     if rsi_cur > thr and rsi_prev_bar <= thr:
                         candidate_signal = 'buy'
                         crossed_level    = thr
                         break
             if (candidate_signal is None and sell_enabled
-                    and not (state.sell_sma_pending or state.sell_confirm_pending)):
+                    and not (state.sell_sma_pending or state.sell_confirm_pending)
+                    and not avoid_sell_surge):
                 for thr in sell_thrs:
                     if rsi_cur < thr and rsi_prev_bar >= thr:
                         candidate_signal = 'sell'
@@ -486,8 +484,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             hour_utc = now.hour
             eff_hour = (hour_utc + 1) % 24 if now.minute >= 45 else hour_utc
 
-            if state.m1_rsi_above_65 and pos_st['total_positions'] > 0:
-                skip = 'M1 RSI >65 追加注文控え'
+            if state.m1_rsi_above_65 and new_cross == 'buy' and pos_st['total_positions'] > 0:
+                skip = 'M1 RSI >65 追加BUY控え'
+            elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
+                skip = 'M1 RSI <35 追加SELL控え'
             elif (regime_m5s == 'trend_up'   and new_cross == 'sell') or \
                  (regime_m5s == 'trend_down' and new_cross == 'buy'):
                 skip = f'逆トレンドエントリー禁止(regime={regime_m5s})'
