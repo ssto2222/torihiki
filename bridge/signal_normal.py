@@ -378,6 +378,16 @@ def compute_signal(symbol: str, cfg: dict,
                 action      = 'none'
                 skip_reason = 'M5_SMA20_up_sell禁止'
 
+        # H1 SMA20 下向きは BUY 禁止、上向きは SELL 禁止
+        if action in ('buy', 'limit_buy') and h1_sma20_declining:
+            action      = 'none'
+            skip_reason = 'H1_SMA20_down_buy禁止'
+        h1_sma20_rising = (not np.isnan(sma20) and not np.isnan(h1_sma20_prev)
+                           and sma20 > h1_sma20_prev)
+        if action == 'sell' and h1_sma20_rising:
+            action      = 'none'
+            skip_reason = 'H1_SMA20_up_sell禁止'
+
         if action == 'buy' and _engine is None and hour_jst == 14:
             action      = 'none'
             skip_reason = 'JST14-15_buy禁止'
