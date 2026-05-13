@@ -332,12 +332,10 @@ def compute_signal(symbol: str, cfg: dict,
         exec_cfg = cfg.get('EXECUTION', {})
         m1_buy_thrs  = exec_cfg.get('m1_exec_buy_thrs',  [65.0, 70.0, 75.0])
         m1_sell_thrs = exec_cfg.get('m1_exec_sell_thrs', [40.0, 35.0, 30.0])
-        _is_gold     = symbol.upper().rstrip('.') in {'XAUUSD', 'GOLD'}
-        # XAUUSD/GOLD の SELL は M15 タッチで執行するため M1 RSI フィルタをスキップ
-        _skip_m1_for_sell = _is_gold and action == 'sell'
-        if (action in ('buy', 'sell', 'limit_buy') and scalp_type == 'none'
-                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)
-                and not _skip_m1_for_sell):
+        _is_gold = symbol.upper().rstrip('.') in {'XAUUSD', 'GOLD'}
+        # SELL は M1 RSI フィルタを適用しない（短期執行はシグナル条件で担保）
+        if (action in ('buy', 'limit_buy') and scalp_type == 'none'
+                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)):
             orig_action = action
             if orig_action in ('buy', 'limit_buy'):
                 m1_exec_ok = any(
