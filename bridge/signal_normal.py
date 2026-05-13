@@ -43,14 +43,23 @@ def compute_signal(symbol: str, cfg: dict,
         df_m1_raw  = fetch_ohlcv(symbol, 'M1',   30)
         df_m15_raw = fetch_ohlcv(symbol, 'M15',  40)
 
-        # M15 SMA20 傾き判定
+        # M15 SMA20 傾き判定 + XAUUSD/GOLD 用タッチ値
         sma20_m15_is_down = False
+        m15_sma20_cur     = float('nan')
+        m15_bb_upper2     = float('nan')
+        m15_close         = float('nan')
         if df_m15_raw is not None and len(df_m15_raw) >= 21:
             df_m15_raw['SMA20'] = df_m15_raw['Close'].rolling(window=20).mean()
-            if (not np.isnan(df_m15_raw['SMA20'].iloc[-1]) and
-                    not np.isnan(df_m15_raw['SMA20'].iloc[-2])):
-                if df_m15_raw['SMA20'].iloc[-1] < df_m15_raw['SMA20'].iloc[-2]:
+            sma20_m15_last = df_m15_raw['SMA20'].iloc[-1]
+            sma20_m15_prev = df_m15_raw['SMA20'].iloc[-2]
+            if not np.isnan(sma20_m15_last) and not np.isnan(sma20_m15_prev):
+                if sma20_m15_last < sma20_m15_prev:
                     sma20_m15_is_down = True
+            m15_sma20_cur = float(sma20_m15_last)
+            m15_close     = float(df_m15_raw['Close'].iloc[-1])
+            _m15_std = df_m15_raw['Close'].rolling(20).std().iloc[-1]
+            if not np.isnan(_m15_std) and not np.isnan(m15_sma20_cur):
+                m15_bb_upper2 = m15_sma20_cur + 2.0 * float(_m15_std)
 
         if df_h1_raw is None or df_d1_raw is None:
             return None
@@ -323,8 +332,12 @@ def compute_signal(symbol: str, cfg: dict,
         exec_cfg = cfg.get('EXECUTION', {})
         m1_buy_thrs  = exec_cfg.get('m1_exec_buy_thrs',  [65.0, 70.0, 75.0])
         m1_sell_thrs = exec_cfg.get('m1_exec_sell_thrs', [40.0, 35.0, 30.0])
+        _is_gold     = symbol.upper().rstrip('.') in {'XAUUSD', 'GOLD'}
+        # XAUUSD/GOLD の SELL は M15 タッチで執行するため M1 RSI フィルタをスキップ
+        _skip_m1_for_sell = _is_gold and action == 'sell'
         if (action in ('buy', 'sell', 'limit_buy') and scalp_type == 'none'
-                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)):
+                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)
+                and not _skip_m1_for_sell):
             orig_action = action
             if orig_action in ('buy', 'limit_buy'):
                 m1_exec_ok = any(
@@ -342,6 +355,20 @@ def compute_signal(symbol: str, cfg: dict,
                 action      = 'none'
                 skip_reason = (f'M1執行待機: RSI_M1={rsi_m1_cur:.1f}'
                                f'(要{thr_str} 2本以上)')
+
+        # ── XAUUSD/GOLD SELL 専用: M15 SMA20 OR BB2σ タッチで執行 ─
+        if action == 'sell' and _is_gold:
+            touch_frac    = exec_cfg.get('m15_touch_atr_frac', 0.15)
+            touch_margin  = atr_v * touch_frac
+            m15_sma_touch = (not np.isnan(m15_sma20_cur) and not np.isnan(m15_close)
+                             and abs(m15_close - m15_sma20_cur) <= touch_margin)
+            m15_bb2_touch = (not np.isnan(m15_bb_upper2) and not np.isnan(m15_close)
+                             and m15_close >= m15_bb_upper2 - touch_margin)
+            if not (m15_sma_touch or m15_bb2_touch):
+                action      = 'none'
+                skip_reason = (f'GOLD M15待機: SMA20={m15_sma20_cur:.1f}'
+                               f' BB2σ={m15_bb_upper2:.1f}'
+                               f' 現値={m15_close:.1f}')
 
         # M5 SMA20 下向きは BUY 禁止、上向きは SELL 禁止
         if action == 'buy' and not np.isnan(sma20_m5_current) and not np.isnan(sma20_m5_prev):
