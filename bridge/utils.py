@@ -65,11 +65,14 @@ def _calc_lot(balance: float, risk_pct: float, sl_dist: float,
     return max(lot_min, min(lot_max, lot))
 
 
-def _position_status(risk_pct: float, total_risk_pct: float, *, mt5) -> dict:
-    """全ポジション数と空きスロット数を返す"""
+def _position_status(risk_pct: float, total_risk_pct: float,
+                     symbol: str = '', magic: int = 0, *, mt5) -> dict:
+    """指定シンボル・magic に絞ったポジション数と空きスロット数を返す"""
     max_positions = max(1, int(total_risk_pct / risk_pct))
     try:
-        positions = mt5.positions_get()
+        positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+        if positions is not None and magic:
+            positions = [p for p in positions if p.magic == magic]
         total = len(positions) if positions is not None else 0
     except Exception:
         total = 0

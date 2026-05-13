@@ -81,6 +81,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         rsi_cur = float(df['RSI'].iloc[-1])
         close_v = float(df['Close'].iloc[-1])
         atr_v   = float(df['ATR'].iloc[-1])
+        if atr_v <= 0 or np.isnan(atr_v):
+            return None  # ATR 計算不能 → SL/TP が計算できないためスキップ
 
         # M1 データ取得
         df_m1_raw = fetch_ohlcv(symbol, 'M1', 50)
@@ -259,9 +261,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:
                             if ((not surge_info['is_early_surge'] or surge_info['confidence'] >= 0.3)
                                     and mtf_buy_ok):
-                                state.buy_sma_pending = True
-                                state.buy_sma_at      = now
-                                state.buy_sma_level   = thr
+                                state.buy_sma_pending  = True
+                                state.buy_sma_at       = now
+                                state.buy_sma_level    = thr
+                                # 逆方向ペンディングをキャンセル
+                                state.sell_sma_pending     = False
+                                state.sell_confirm_pending = False
                                 if surge_info['is_early_surge']:
                                     print(f"[急騰兆候BUY] 急騰初期でもBUY許可 "
                                           f"Confidence={surge_info['confidence']:.2f}")
@@ -275,9 +280,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
                             if (surge_info['is_early_surge'] and surge_info['confidence'] > 0.6
                                     and mtf_sell_ok):
-                                state.sell_sma_pending = True
-                                state.sell_sma_at      = now
-                                state.sell_sma_level   = thr
+                                state.sell_sma_pending  = True
+                                state.sell_sma_at       = now
+                                state.sell_sma_level    = thr
+                                # 逆方向ペンディングをキャンセル
+                                state.buy_sma_pending     = False
+                                state.buy_confirm_pending = False
                                 print(f"[急騰初期SELL] RVOL={df['RVOL'].iloc[-1]:.2f} "
                                       f"Accel={df['Price_Accel'].iloc[-1]:.2f} "
                                       f"Confidence={surge_info['confidence']:.2f}")
@@ -307,7 +315,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
                         sma20_slope_ok = (
-                            np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
+                            not np.isnan(atr_m1_v) and not np.isnan(sma20_prev) and
                             (sma20_m1 - sma20_prev) < -(atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok:
@@ -377,7 +385,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
                         sma20_slope_ok = (
-                            np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
+                            not np.isnan(atr_m1_v) and not np.isnan(sma20_prev) and
                             (sma20_m1 - sma20_prev) > (atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok:
@@ -471,7 +479,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # ポジション数チェック
         risk_pct       = cfg['BRIDGE'].get('risk_pct', 0.01)
         total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
-        pos_st         = _position_status(risk_pct, total_risk_pct, mt5=mt5)
+        magic_id       = cfg['MT5'].get('magic', 20240101)
+        pos_st         = _position_status(risk_pct, total_risk_pct, symbol, magic_id, mt5=mt5)
 
         if new_cross:
             hour_utc = now.hour
@@ -492,8 +501,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = f'cooldown残{rem}分'
             elif pos_st['available_slots'] <= 0:
                 opp_dir = 'sell' if new_cross == 'buy' else 'buy'
-                magic_n = cfg['MT5'].get('magic', 20240101)
-                if not _has_positions_in_direction(symbol, magic_n, opp_dir, mt5=mt5):
+                if _has_positions_in_direction(symbol, magic_id, opp_dir, mt5=mt5):
+                    # 逆方向にポジションあり → ヘッジ許可
+                    action            = new_cross
+                    state.last_action = new_cross
+                    state.count      += 1
+                    state.last_at     = now
+                else:
                     skip = (f"max_positions={pos_st['max_positions']}に到達"
                             f"（全{pos_st['total_positions']}本）")
             else:
@@ -528,7 +542,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sma20':              0.0,
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
-            'signal_type':        (f'scalp_{action}_{int(crossed_level)}'
+            'signal_type':        (f'scalp_{action}_{int(crossed_level or (state.buy_sma_level if action == "buy" else state.sell_sma_level))}'
                                    if action != 'none' else 'none'),
             'execution_tf':       'm5',
             'signal_valid_until': '',

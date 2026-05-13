@@ -39,9 +39,11 @@ def _build_time_bias(cfg: dict) -> set:
                                direction=direction, df_m5=df_m5)
             all_trades.extend(res.get('trades', []))
 
+        time_ref  = tb_cfg.get('time_ref', 'exit')
         hour_pnls: dict = defaultdict(list)
         for t in all_trades:
-            hour_pnls[int(t['entry_time'].hour)].append(t['pnl'])
+            key_time = t.get('exit_time', t['entry_time']) if time_ref == 'exit' else t['entry_time']
+            hour_pnls[int(key_time.hour)].append(t['pnl'])
 
         hour_stats   = {}
         danger_hours = []

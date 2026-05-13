@@ -178,6 +178,7 @@ TIME_BIAS = dict(
     skip_after_min       = 0,      # 危険時間帯終了後 N 分までスキップ継続
     rebias_interval_hours = 24,     # この間隔（時間）で自動再分析。0 = 起動時1回のみ
     bias_file             = "./output/time_bias.json",
+    time_ref              = 'exit', # 'exit': 決済時刻基準（ノーマル向き）/ 'entry': エントリー時刻基準
 )
 
 # ── 可視化 ────────────────────────────────────────────────
