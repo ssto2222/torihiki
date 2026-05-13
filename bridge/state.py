@@ -47,6 +47,7 @@ class ScalpState:
     date: object = None
     last_action: str = 'none'
     m1_rsi_above_65: bool = False
+    m1_rsi_below_35: bool = False
 
     # SELL SMA20 タッチ待ち
     sell_sma_pending: bool = False
