@@ -478,7 +478,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         risk_pct       = cfg['BRIDGE'].get('risk_pct', 0.01)
         total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
         magic_id       = cfg['MT5'].get('magic', 20240101)
-        pos_st         = _position_status(risk_pct, total_risk_pct, symbol, magic_id, mt5=mt5)
+        # scalp はカウントベース管理。r_multi_s で max_positions の有効リスクを補正
+        pos_st         = _position_status(risk_pct, total_risk_pct, symbol, magic_id,
+                                          r_multi=r_multi_s, mt5=mt5)
 
         if new_cross:
             hour_utc = now.hour

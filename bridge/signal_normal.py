@@ -472,11 +472,14 @@ def compute_signal(symbol: str, cfg: dict,
 
         total_risk_pct = cfg.get('RULES', {}).get('total_risk_pct', 0.20)
         magic_id       = cfg['MT5'].get('magic', 20240101)
-        pos_st = _position_status(risk_pct, total_risk_pct, symbol, magic_id, mt5=mt5)
+        pos_st = _position_status(risk_pct, total_risk_pct, symbol, magic_id,
+                                   balance_usd=balance_usd, contract_size=c_sz,
+                                   sl_dist=atr_v * sl_multi, r_multi=r_multi, mt5=mt5)
         if pos_st['available_slots'] <= 0 and action in ('buy', 'sell', 'limit_buy'):
             action      = 'none'
             skip_reason = (f"max_positions={pos_st['max_positions']}に到達"
-                           f"（全{pos_st['total_positions']}本）")
+                           f"（全{pos_st['total_positions']}本"
+                           f" open_risk={pos_st['open_risk_pct']:.1%}）")
 
         # H1 レンジ中は執行スキップ
         if action in ('buy', 'sell', 'limit_buy') and regime_h1 == 'range':
@@ -582,6 +585,7 @@ def compute_signal(symbol: str, cfg: dict,
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
+            'open_risk_pct':      round(pos_st['open_risk_pct'], 4),
             'adx_h1':             round(adx_h1_v, 1) if not np.isnan(adx_h1_v) else 0.0,
             'adx_m5':             round(adx_m5_v, 1) if not np.isnan(adx_m5_v) else 0.0,
             'regime_h1':          regime_h1,
