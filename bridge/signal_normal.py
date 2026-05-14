@@ -478,6 +478,11 @@ def compute_signal(symbol: str, cfg: dict,
             skip_reason = (f"max_positions={pos_st['max_positions']}に到達"
                            f"（全{pos_st['total_positions']}本）")
 
+        # H1 レンジ中は執行スキップ
+        if action in ('buy', 'sell', 'limit_buy') and regime_h1 == 'range':
+            action      = 'none'
+            skip_reason = f'H1レンジ({regime_h1})執行スキップ'
+
         # ── 分散エントリーゲート ─────────────────────────────────
         max_ep        = regime_cfg.get('max_entry_per_signal', 3)
         spacing       = regime_cfg.get('entry_spacing_atr',    0.5)
