@@ -66,20 +66,52 @@ def _calc_lot(balance: float, risk_pct: float, sl_dist: float,
 
 
 def _position_status(risk_pct: float, total_risk_pct: float,
-                     symbol: str = '', magic: int = 0, *, mt5) -> dict:
-    """指定シンボル・magic に絞ったポジション数と空きスロット数を返す"""
-    max_positions = max(1, int(total_risk_pct / risk_pct))
+                     symbol: str = '', magic: int = 0, *,
+                     balance_usd: float = 0.0,
+                     contract_size: float = 0.0,
+                     sl_dist: float = 0.0,
+                     r_multi: float = 1.0,
+                     mt5) -> dict:
+    """指定シンボル・magic に絞ったポジション数と空きスロット数を返す（実リスクベース）。
+
+    balance_usd / contract_size / sl_dist / r_multi を渡すと実ドルリスク合計で判定する。
+    省略時はポジション数カウントのみ（後方互換）。
+    """
+    effective_risk = max(risk_pct, risk_pct * r_multi)   # lot倍率込みの1トレードリスク
+    max_positions  = max(1, int(total_risk_pct / effective_risk))
     try:
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
         if positions is not None and magic:
             positions = [p for p in positions if p.magic == magic]
-        total = len(positions) if positions is not None else 0
+        positions = list(positions) if positions is not None else []
+        total = len(positions)
+
+        # 実リスク合計: 各ポジションの lot × SL距離 × contract_size / balance_usd
+        open_risk = 0.0
+        if balance_usd > 0 and contract_size > 0:
+            for p in positions:
+                pos_sl = getattr(p, 'sl', 0.0)
+                if pos_sl > 0:
+                    dist = abs(p.price_open - pos_sl)
+                else:
+                    dist = sl_dist          # ATR ベースフォールバック
+                open_risk += p.volume * dist * contract_size / balance_usd
+
+        remaining_risk  = max(0.0, total_risk_pct - open_risk)
+        slots_by_risk   = (int(remaining_risk / effective_risk)
+                           if effective_risk > 0 and balance_usd > 0 and contract_size > 0
+                           else max_positions - total)
+        slots_by_count  = max(0, max_positions - total)
+        available_slots = min(max(0, slots_by_risk), max(0, slots_by_count))
     except Exception:
-        total = 0
+        total           = 0
+        open_risk       = 0.0
+        available_slots = max_positions
     return {
         'max_positions':   max_positions,
         'total_positions': total,
-        'available_slots': max(0, max_positions - total),
+        'available_slots': available_slots,
+        'open_risk_pct':   open_risk,
     }
 
 
