@@ -9,3 +9,7 @@
 2026-05-13 04:44:03,127 [WARNING] ブリッジ異常終了 (code=1) → 10秒後に再起動 (#2回目)
 2026-05-13 04:44:14,435 [INFO] MT5 端末を強制終了しました
 2026-05-13 04:44:29,467 [INFO] [04:44:29] ブリッジ起動 (再起動 #2回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol BTCUSD
+2026-05-13 23:50:23,272 [INFO] [23:50:23] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol BTCUSD
+2026-05-13 23:50:28,562 [INFO] [23:50:28] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol XAUUSD
+2026-05-14 00:06:00,224 [INFO] [00:06:00] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol XAUUSD
+2026-05-14 00:08:34,145 [INFO] [00:08:34] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol BTCUSD
