@@ -63,6 +63,8 @@ EXECUTION = dict(
     m1_exec_sell_thrs        = [40.0, 35.0, 30.0, 25.0],   # SELL 執行: M1 RSI がいずれかを 2本以上下抜け
     sma20_touch_pct          = 70,      # 過去シグナルの何%をキャッチする touch_margin にするか
     sma20_touch_margin_file  = "./output/sma20_touch_margins.json",  # キャッシュファイル
+    split_entry_frac         = 0.5,    # 初回エントリーのロット比率（残りをリミット押し目に充当）
+    split_limit_pullback     = 0.4,    # 押し目リミット距離: close ± ATR × この値
 )
 
 # ── SL & イグジット ────────────────────────────────────────
