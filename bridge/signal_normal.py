@@ -354,6 +354,25 @@ def compute_signal(symbol: str, cfg: dict,
                 skip_reason = (f'M1執行待機: RSI_M1={rsi_m1_cur:.1f}'
                                f'(要{thr_str} 2本以上)')
 
+        # ── M1 初回エントリー オーバーシュートフェールセーフ ────────
+        # 1回目エントリー時にRSIがまだ進行方向へ動いていればピーク/底反転まで待機。
+        # bar_prev > bar_prev2 (BUY) = 直近完成バーでもRSI上昇中 = 高値オーバーシュート継続中
+        # bar_prev < bar_prev2 (SELL)= 直近完成バーでもRSI下落中 = 安値オーバーシュート継続中
+        if (action in ('buy', 'limit_buy') and state.entry_in_window == 0
+                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)
+                and rsi_m1_bar_prev > rsi_m1_bar_prev2):
+            action      = 'none'
+            skip_reason = (f'M1初回BUY: RSI上昇中'
+                           f'({rsi_m1_bar_prev2:.1f}→{rsi_m1_bar_prev:.1f})'
+                           f' ピーク反転後に執行')
+        if (action == 'sell' and state.sell_entry_in_window == 0
+                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)
+                and rsi_m1_bar_prev < rsi_m1_bar_prev2):
+            action      = 'none'
+            skip_reason = (f'M1初回SELL: RSI下落中'
+                           f'({rsi_m1_bar_prev2:.1f}→{rsi_m1_bar_prev:.1f})'
+                           f' 底反転後に執行')
+
         # ── XAUUSD/GOLD SELL 専用: M15 SMA20 OR BB2σ タッチで執行 ─
         if action == 'sell' and _is_gold:
             touch_frac    = exec_cfg.get('m15_touch_atr_frac', 0.15)
