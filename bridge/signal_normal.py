@@ -513,7 +513,10 @@ def compute_signal(symbol: str, cfg: dict,
             if action == 'buy' and state.entry_in_window == 0:
                 # 初回: ロットを split_frac に縮小し、残りを押し目リミット待機へ
                 lot_size = max(l_min, round(lot_size * split_frac / l_step) * l_step)
-                state.split_pending_buy = True
+                state.split_pending_buy  = True
+                # 同一呼び出し内で new_buy_type により signal_active_until が更新された場合、
+                # entry gate の window key チェックで split_pending_buy がリセットされないよう同期する
+                state.signal_window_key  = (state.signal_active_type, state.signal_active_until)
             elif action == 'buy' and state.split_pending_buy:
                 # 2回目: 残りロットを押し目リミット注文に変換
                 pullback_px             = round(close_v - atr_v * pullback_frac, 2)
