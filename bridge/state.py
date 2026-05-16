@@ -24,11 +24,13 @@ class SignalState:
     entry_in_window: int = 0
     last_entry_price: float = 0.0
     signal_window_key: tuple = field(default_factory=lambda: (None, None))
+    split_pending_buy: bool = False   # スプリット: 初回市場注文後リミット待機中
 
     # SELL 分散エントリー追跡
     sell_entry_in_window: int = 0
     sell_last_entry_price: float = 0.0
     sell_window_key: tuple = field(default_factory=lambda: (None, None))
+    split_pending_sell: bool = False  # スプリット: 初回市場注文後戻り待機中
 
     # BB2σ タッチ状態（globals() アクセスから移行）
     bb2_touched_buy: bool = False

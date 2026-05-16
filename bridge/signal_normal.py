@@ -354,6 +354,25 @@ def compute_signal(symbol: str, cfg: dict,
                 skip_reason = (f'M1執行待機: RSI_M1={rsi_m1_cur:.1f}'
                                f'(要{thr_str} 2本以上)')
 
+        # ── M1 初回エントリー オーバーシュートフェールセーフ ────────
+        # 1回目エントリー時にRSIがまだ進行方向へ動いていればピーク/底反転まで待機。
+        # bar_prev > bar_prev2 (BUY) = 直近完成バーでもRSI上昇中 = 高値オーバーシュート継続中
+        # bar_prev < bar_prev2 (SELL)= 直近完成バーでもRSI下落中 = 安値オーバーシュート継続中
+        if (action in ('buy', 'limit_buy') and state.entry_in_window == 0
+                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)
+                and rsi_m1_bar_prev > rsi_m1_bar_prev2):
+            action      = 'none'
+            skip_reason = (f'M1初回BUY: RSI上昇中'
+                           f'({rsi_m1_bar_prev2:.1f}→{rsi_m1_bar_prev:.1f})'
+                           f' ピーク反転後に執行')
+        if (action == 'sell' and state.sell_entry_in_window == 0
+                and not np.isnan(rsi_m1_bar_prev) and not np.isnan(rsi_m1_bar_prev2)
+                and rsi_m1_bar_prev < rsi_m1_bar_prev2):
+            action      = 'none'
+            skip_reason = (f'M1初回SELL: RSI下落中'
+                           f'({rsi_m1_bar_prev2:.1f}→{rsi_m1_bar_prev:.1f})'
+                           f' 底反転後に執行')
+
         # ── XAUUSD/GOLD SELL 専用: M15 SMA20 OR BB2σ タッチで執行 ─
         if action == 'sell' and _is_gold:
             touch_frac    = exec_cfg.get('m15_touch_atr_frac', 0.15)
@@ -486,6 +505,35 @@ def compute_signal(symbol: str, cfg: dict,
             action      = 'none'
             skip_reason = f'H1レンジ({regime_h1})執行スキップ'
 
+        # ── スプリットエントリー（初回半ロット + 2回目押し目リミット）────
+        # split_entry_frac < 1.0 の場合のみ有効
+        split_frac    = exec_cfg.get('split_entry_frac',     0.5)
+        pullback_frac = exec_cfg.get('split_limit_pullback', 0.4)
+        if 0.0 < split_frac < 1.0:
+            if action == 'buy' and state.entry_in_window == 0:
+                # 初回: ロットを split_frac に縮小し、残りを押し目リミット待機へ
+                lot_size = max(l_min, round(lot_size * split_frac / l_step) * l_step)
+                state.split_pending_buy  = True
+                # 同一呼び出し内で new_buy_type により signal_active_until が更新された場合、
+                # entry gate の window key チェックで split_pending_buy がリセットされないよう同期する
+                state.signal_window_key  = (state.signal_active_type, state.signal_active_until)
+            elif action == 'buy' and state.split_pending_buy:
+                # 2回目: 残りロットを押し目リミット注文に変換
+                pullback_px             = round(close_v - atr_v * pullback_frac, 2)
+                limit_prices            = [pullback_px]
+                lot_size                = max(l_min, round(lot_size * (1.0 - split_frac) / l_step) * l_step)
+                action                  = 'limit_buy'
+                state.split_pending_buy = False
+                state.entry_in_window  += 1   # リミット枠を消費してゲートをスキップ
+
+            if action == 'sell' and state.sell_entry_in_window == 0:
+                # SELL 初回: ロットを split_frac に縮小（limit_sell 未実装のため残りは spacing 機構に委ねる）
+                lot_size = max(l_min, round(lot_size * split_frac / l_step) * l_step)
+                state.split_pending_sell = True
+            elif action == 'sell' and state.split_pending_sell:
+                # SELL 2回目: フラグ解除 → 通常エントリーゲートへ（戻り目は spacing で管理）
+                state.split_pending_sell = False
+
         # ── 分散エントリーゲート ─────────────────────────────────
         max_ep        = regime_cfg.get('max_entry_per_signal', 3)
         spacing       = regime_cfg.get('entry_spacing_atr',    0.5)
@@ -501,9 +549,10 @@ def compute_signal(symbol: str, cfg: dict,
         if action == 'buy':
             cur_key = (state.signal_active_type, state.signal_active_until)
             if cur_key != state.signal_window_key:
-                state.signal_window_key = cur_key
-                state.entry_in_window   = 0
-                state.last_entry_price  = 0.0
+                state.signal_window_key  = cur_key
+                state.entry_in_window    = 0
+                state.last_entry_price   = 0.0
+                state.split_pending_buy  = False   # 旧ウィンドウのスプリット待機をキャンセル
             if is_full_trend:
                 if state.entry_in_window >= trend_max_ep:
                     action      = 'none'
@@ -530,6 +579,7 @@ def compute_signal(symbol: str, cfg: dict,
                 state.sell_window_key        = cur_key
                 state.sell_entry_in_window   = 0
                 state.sell_last_entry_price  = 0.0
+                state.split_pending_sell     = False  # 旧ウィンドウのスプリット待機をキャンセル
             if is_full_trend:
                 if state.sell_entry_in_window >= trend_max_ep:
                     action      = 'none'
