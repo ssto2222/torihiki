@@ -313,7 +313,9 @@ def compute_signal(symbol: str, cfg: dict,
                     sell_skip_reason = ' | '.join(result.reasons[:2])
             if active_sell:
                 active_buy  = False
-                skip_reason = 'sell_signal_active'
+                skip_reason = 'sell_signal_active'  # BUY 側ログ: SELL ウィンドウが BUY をブロック
+        elif scalp_type == 'none' and in_window:
+            sell_skip_reason = 'buy_signal_active'  # SELL 側ログ: BUY ウィンドウが SELL をブロック
 
         if active_sell:
             action   = 'sell'
