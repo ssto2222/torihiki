@@ -13,3 +13,7 @@
 2026-05-13 23:50:28,562 [INFO] [23:50:28] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol XAUUSD
 2026-05-14 00:06:00,224 [INFO] [00:06:00] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol XAUUSD
 2026-05-14 00:08:34,145 [INFO] [00:08:34] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol BTCUSD
+2026-05-15 04:18:45,352 [INFO] [04:18:45] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol BTCUSD
+2026-05-15 04:18:45,353 [INFO] [04:18:45] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol BTCUSD
+2026-05-15 04:18:52,887 [INFO] [04:18:52] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol BTCUSD
+2026-05-15 04:18:59,305 [INFO] [04:18:59] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode normal --symbol XAUUSD
