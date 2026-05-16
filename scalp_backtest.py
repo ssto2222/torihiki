@@ -99,10 +99,11 @@ def load_scalp_data(symbol: str, mt5_cfg: dict,
 
     print("[フォールバック] 合成データを使用")
     loc = C.LOCAL
-    h1_synth = generate_h1(n=loc.get('h1_bars_synth', 3600))
+    h1_synth  = generate_h1(n=loc.get('h1_bars_synth', 3600))
     df_m5_raw = generate_m5_from_h1(h1_synth)
     df_m1_raw = generate_m1_from_h1(h1_synth)
-    return df_m5_raw, df_m1_raw, None, None, False
+    # H1 も渡して MTF レジームフィルタを有効化（None だと全シグナルがブロックされる）
+    return df_m5_raw, df_m1_raw, None, h1_synth, False
 
 
 # ──────────────────────────────────────────────────────────────
