@@ -236,7 +236,7 @@ def predict_montecarlo(
 # ── 6. $88k 到達日レポート ─────────────────────────────────────────────────────
 
 TARGET_88K  = 88_000.0
-TARGET      = 120_000.0   # $88k はすでに突破済みのためより高い目標で予測
+TARGET      = 180_000.0
 
 def first_cross(series: pd.Series, target: float = TARGET) -> str:
     crossed = series[series >= target]
@@ -249,20 +249,23 @@ def report_montecarlo(mc: dict, target: float = TARGET) -> None:
     hit = mc['hit_days']
     n   = mc['n_sim']
     idx = mc['idx']
+    horizon_y = len(idx) / 365
+    prob = len(hit) / n * 100
     if not hit:
-        print(f"  到達確率: 0% (予測期間内なし)")
+        print(f"  到達確率 ({horizon_y:.0f}年以内): 0%  (n={n})")
         return
-    prob      = len(hit) / n * 100
-    p25_day   = int(np.percentile(hit, 25))
-    p50_day   = int(np.percentile(hit, 50))
-    p75_day   = int(np.percentile(hit, 75))
-    p25_date  = idx[p25_day].date() if p25_day < len(idx) else '期間外'
-    p50_date  = idx[p50_day].date() if p50_day < len(idx) else '期間外'
-    p75_date  = idx[p75_day].date() if p75_day < len(idx) else '期間外'
-    print(f"  到達確率 (1年以内): {prob:.1f}%  (n={n})")
-    print(f"  25パーセンタイル  : {p25_date}")
-    print(f"  中央値 (50%ile)   : {p50_date}")
-    print(f"  75パーセンタイル  : {p75_date}")
+    print(f"  到達確率 ({horizon_y:.0f}年以内): {prob:.1f}%  (n={n})")
+    if len(hit) < 30:
+        print(f"  ※ サンプル数が少ないため日付推定は信頼性が低い ({len(hit)}パスのみ到達)")
+        return
+    p25_day  = int(np.percentile(hit, 25))
+    p50_day  = int(np.percentile(hit, 50))
+    p75_day  = int(np.percentile(hit, 75))
+    def _d(day: int) -> str:
+        return str(idx[day].date()) if day < len(idx) else '期間外'
+    print(f"  25パーセンタイル  : {_d(p25_day)}")
+    print(f"  中央値 (50%ile)   : {_d(p50_day)}")
+    print(f"  75パーセンタイル  : {_d(p75_day)}")
 
 
 # ── 7. チャート描画 ────────────────────────────────────────────────────────────
@@ -333,7 +336,7 @@ def plot_all(df: pd.DataFrame, arima: pd.Series, prophet: tuple,
 # ── main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    HORIZON = 365   # 予測日数
+    HORIZON = 365 * 3   # 予測日数（3年）
     OUT     = './output/btc_predict.png'
 
     df = fetch_btc(years=4)
