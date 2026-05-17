@@ -9,7 +9,7 @@ import numpy as np
 from core.data       import fetch_ohlcv
 from core.indicators import add_m5_indicators, add_m1_indicators, add_h1_indicators
 from core.strategy   import detect_big_move, detect_early_surge, should_avoid_entry_during_surge
-from core.patterns   import detect_all_patterns
+from core.patterns   import detect_all_patterns, PatternResult
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _position_status, _get_jpy_per_usd,
@@ -118,6 +118,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         dip_h1s    = float('nan')
         dim_h1s    = float('nan')
         # H1 パターン検知用に多めに取得 (200本 ≈ 8日)
+        _h1_pats_raw: list[PatternResult] = []
         h1_pattern_bars: list = []
         df_h1_raw  = fetch_ohlcv(symbol, 'H1', 200)
         if df_h1_raw is not None:
@@ -129,13 +130,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 regime_h1s = _detect_regime(adx_h1s, dip_h1s, dim_h1s, regime_cfg)
             # パターン検知 (H1 OHLC, 上位2件のみ, 例外は無視)
             try:
-                _pats = detect_all_patterns(df_h1_raw, window=5, top_n=2)
+                _h1_pats_raw = detect_all_patterns(df_h1_raw, window=5, top_n=2)
                 h1_pattern_bars = [
                     {'name': p.name, 'label': p.label, 'direction': p.direction,
                      'confidence': round(p.confidence, 3), 'neckline': p.neckline,
                      'target': p.target, 'confirmed': p.confirmed,
                      'bars_ago': p.bars_ago}
-                    for p in _pats if p.confidence >= 0.40
+                    for p in _h1_pats_raw if p.confidence >= 0.40
                 ]
             except Exception:
                 pass
@@ -265,6 +266,37 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         confirmed_signal = None
         candidate_signal = None
         crossed_level    = 0.0
+
+        # ── H1 パターン ネックライン突破: スキャルプ直接エントリー ─────────────
+        if df_h1_raw is not None and len(df_h1_raw) >= 2 and _h1_pats_raw:
+            _prev_h1_close_s = float(df_h1_raw['Close'].iloc[-2])
+            _close_h1_cur_s  = float(df_h1_raw['Close'].iloc[-1])
+            if len(state.pattern_traded) > 120:
+                state.pattern_traded.clear()
+            for _pat_s in _h1_pats_raw:
+                if _pat_s.confidence < 0.45:
+                    continue
+                _fp_s = (_pat_s.name, round(_pat_s.neckline, 0))
+                if _fp_s in state.pattern_traded:
+                    continue
+                if _pat_s.direction == 'bullish' and buy_enabled and not avoid_buy_surge:
+                    if _prev_h1_close_s <= _pat_s.neckline < _close_h1_cur_s:
+                        confirmed_signal = 'buy'
+                        crossed_level    = _pat_s.neckline
+                        state.pattern_traded.add(_fp_s)
+                        state.pattern_tp_target = _pat_s.target
+                        _logger.info(f'[スキャルプパターンBUY] {_pat_s.label} '
+                                     f'NL={_pat_s.neckline:,.2f} 信頼度={_pat_s.confidence:.0%}')
+                        break
+                elif _pat_s.direction == 'bearish' and sell_enabled and not avoid_sell_surge:
+                    if _prev_h1_close_s >= _pat_s.neckline > _close_h1_cur_s:
+                        confirmed_signal = 'sell'
+                        crossed_level    = _pat_s.neckline
+                        state.pattern_traded.add(_fp_s)
+                        state.pattern_tp_target = _pat_s.target
+                        _logger.info(f'[スキャルプパターンSELL] {_pat_s.label} '
+                                     f'NL={_pat_s.neckline:,.2f} 信頼度={_pat_s.confidence:.0%}')
+                        break
 
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
@@ -535,6 +567,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             sl_price = close_v + sl_move
             tp_price = close_v - tp_move
 
+        # パターンTP目標で tp_price を上書き（最低 1ATR 確保）
+        if state.pattern_tp_target is not None and action in ('buy', 'sell'):
+            _pt_s = state.pattern_tp_target
+            if action == 'buy':
+                tp_price = max(close_v + tp_move, min(close_v + tp_move * 8, _pt_s))
+            else:
+                tp_price = min(close_v - tp_move, max(close_v - tp_move * 8, _pt_s))
+
         point  = float(info.point) if info else 0.01
         max_pt = max(1, int(tp_move * 0.5 / point))
 
@@ -601,6 +641,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'mtf_buy_ok':         mtf_buy_ok,
             'mtf_sell_ok':        mtf_sell_ok,
             'h1_patterns':        h1_pattern_bars,
+            'pattern_tp_target':  state.pattern_tp_target,
         }
 
     except Exception:
