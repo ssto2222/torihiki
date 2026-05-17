@@ -105,9 +105,26 @@ def restart_all(bridge_cmd: list[str]) -> None:
 
 # ─── ウォッチドッグモード ───────────────────────────────────────────
 
+# ブリッジの stdout/stderr を書き出すファイル（ローカルログディレクトリ）
+_BRIDGE_LOG_FILE = os.path.join(_local_log_dir, 'mt5_bridge_console.log')
+# RotatingFileHandler と同等の上限（超えたら切り詰めて再オープン）
+_BRIDGE_LOG_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _open_bridge_log():
+    """ブリッジ用ログファイルを追記モードで開く。10 MB 超なら切り詰める。"""
+    if os.path.exists(_BRIDGE_LOG_FILE) and os.path.getsize(_BRIDGE_LOG_FILE) > _BRIDGE_LOG_MAX_BYTES:
+        # 古いファイルをローテート
+        rotated = _BRIDGE_LOG_FILE + '.1'
+        if os.path.exists(rotated):
+            os.remove(rotated)
+        os.rename(_BRIDGE_LOG_FILE, rotated)
+    return open(_BRIDGE_LOG_FILE, 'a', encoding='utf-8', buffering=1)
+
+
 def _build_cmd(extra_args: list[str]) -> list[str]:
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), MAIN_SCRIPT)
-    return [sys.executable, script] + extra_args
+    return [sys.executable, '-u', script] + extra_args
 
 
 def watch(bridge_args: list[str]) -> None:
@@ -119,12 +136,14 @@ def watch(bridge_args: list[str]) -> None:
     cmd = _build_cmd(bridge_args)
     restart_count = 0
 
+    _logger.info(f"ブリッジコンソールログ → {_BRIDGE_LOG_FILE}")
     send_discord(f"【監視開始】ウォッチドッグを起動しました。 cmd={' '.join(cmd)}")
 
     while True:
         _logger.info(f"[{_ts()}] ブリッジ起動 (再起動 #{restart_count}回目): {' '.join(cmd)}")
         try:
-            ret = subprocess.call(cmd)
+            with _open_bridge_log() as bf:
+                ret = subprocess.call(cmd, stdout=bf, stderr=bf)
         except KeyboardInterrupt:
             _logger.info("Ctrl+C → ウォッチドッグ終了")
             send_discord("【監視終了】Ctrl+C によりウォッチドッグを停止しました。")
