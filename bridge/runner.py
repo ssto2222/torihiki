@@ -339,6 +339,13 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                           f"target=¥{data.get('target_profit_jpy',0)}  "
                           f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}"
                           f"{status_tag}")
+                    for pat in data.get('h1_patterns', []):
+                        ok = '✓' if pat['confirmed'] else '…'
+                        print(f"  [H1パターン] {pat['label']} {ok}"
+                              f"  信頼度={pat['confidence']:.0%}"
+                              f"  NL=${pat['neckline']:,.0f}"
+                              f"  TP=${pat['target']:,.0f}"
+                              f"  ({pat['bars_ago']}本前)")
                 else:
                     surge_tag = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
                     scalp_tag = f"[SCALP:{data['scalp_type']}]" if data['scalp_type'] != 'none' else ''
@@ -372,6 +379,13 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                               f"sell_window_until={data['sell_valid_until']}")
                     if data.get('scalp_cooldown_rem', 0) > 0:
                         print(f"  [SCALP cooldown残{data['scalp_cooldown_rem']}分 → 通常モード中]")
+                    for pat in data.get('h1_patterns', []):
+                        ok = '✓' if pat['confirmed'] else '…'
+                        print(f"  [H1パターン] {pat['label']} {ok}"
+                              f"  信頼度={pat['confidence']:.0%}"
+                              f"  NL=${pat['neckline']:,.0f}"
+                              f"  TP=${pat['target']:,.0f}"
+                              f"  ({pat['bars_ago']}本前)")
 
                 if data['skip_reason'] and not (mode == 'scalp' and data.get('scalp_mode', True)):
                     print(f"  skip: {data['skip_reason']}")
