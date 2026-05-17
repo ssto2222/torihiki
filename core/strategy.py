@@ -76,6 +76,61 @@ def detect_sma_rsi_signals(df: pd.DataFrame, p: dict, direction: str) -> list[di
     return out
 
 
+def detect_pattern_signals(df: pd.DataFrame,
+                           min_conf: float = 0.45,
+                           lookback: int = 150,
+                           step: int = 12) -> list[dict]:
+    """H1 ネックライン突破シグナル（ルックアヘッドなし）。
+    detect_sma_rsi_signals と同一フォーマットで返す。"""
+    try:
+        from core.patterns import detect_all_patterns
+    except ImportError:
+        return []
+
+    n      = len(df)
+    closes = df['Close'].values
+    atrs   = df['ATR'].values if 'ATR' in df.columns else np.ones(n)
+    times  = df.index
+    events:    list[dict] = []
+    traded_fp: set        = set()
+    active_pats: list     = []
+
+    for k in range(lookback, n):
+        if (k - lookback) % step == 0:
+            past = df.iloc[k - lookback: k]
+            try:
+                active_pats = [p for p in detect_all_patterns(past, window=5, top_n=3)
+                               if p.confidence >= min_conf]
+            except Exception:
+                active_pats = []
+
+        prev_c = closes[k - 1]
+        cur_c  = closes[k]
+        for pat in active_pats:
+            fp = (pat.name, round(pat.neckline, 0))
+            if fp in traded_fp:
+                continue
+            direction = None
+            if pat.direction == 'bullish' and prev_c <= pat.neckline < cur_c:
+                direction = 'buy'
+            elif pat.direction == 'bearish' and prev_c >= pat.neckline > cur_c:
+                direction = 'sell'
+            if direction is not None:
+                atr_val = float(atrs[k]) if not np.isnan(atrs[k]) else 1.0
+                events.append({
+                    'signal_bar':   k,
+                    'signal_time':  times[k],
+                    'signal_price': float(cur_c),
+                    'atr':          atr_val,
+                    'signal_type':  f'pattern_{pat.name}',
+                    'direction':    direction,
+                    'pat_target':   pat.target,
+                })
+                traded_fp.add(fp)
+
+    return events
+
+
 # ── M5 エントリーフィルタ ──────────────────────────────────
 
 def check_m5_entry_filter(rsi_m5: float, rsi_m5_prev: float,
@@ -503,6 +558,15 @@ def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
     except Exception:
         pass  # trading_rules 未インストール / 使用不可の場合はフィルタなし
 
+    # パターン ネックライン突破シグナルを追加（RulesEngine フィルタの外）
+    try:
+        _pat_sigs = [s for s in detect_pattern_signals(df_h1)
+                     if s.get('direction') == direction]
+        if _pat_sigs:
+            signals = sorted(signals + _pat_sigs, key=lambda s: s['signal_bar'])
+    except Exception:
+        pass
+
     m1_rsi_thr = (sig_p.get('buy_rsi_thr',  38.0) + rsi_off if direction == 'buy'
                   else sig_p.get('sell_rsi_thr', 62.0) - rsi_off)
 
@@ -548,6 +612,11 @@ def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
             continue
 
         tp         = ep + atr * tp_m if direction == 'buy' else ep - atr * tp_m
+        # パターンTP目標があれば上書き（1〜8×ATR 範囲に制限）
+        if sig.get('pat_target') is not None:
+            _pt_dist = abs(float(sig['pat_target']) - ep)
+            if atr * tp_m < _pt_dist < atr * tp_m * 8:
+                tp = ep + _pt_dist if direction == 'buy' else ep - _pt_dist
         trail_sl   = None
         rsi_trig   = False
         best_price = ep
