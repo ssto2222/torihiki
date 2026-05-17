@@ -10,6 +10,7 @@ from core.data       import fetch_ohlcv
 from core.indicators import (add_h1_indicators, add_d1_indicators,
                               add_m5_indicators)
 from core.strategy   import check_m5_entry_filter, check_m5_surge
+from core.patterns   import detect_all_patterns
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _calc_lot, _position_status, _get_jpy_per_usd)
@@ -63,6 +64,20 @@ def compute_signal(symbol: str, cfg: dict,
 
         if df_h1_raw is None or df_d1_raw is None:
             return None
+
+        # H1 パターン検知（OHLC 200本、上位2件）
+        h1_patterns: list[dict] = []
+        try:
+            _pats = detect_all_patterns(df_h1_raw, window=5, top_n=2)
+            h1_patterns = [
+                {'name': p.name, 'label': p.label, 'direction': p.direction,
+                 'confidence': round(p.confidence, 3), 'neckline': p.neckline,
+                 'target': p.target, 'confirmed': p.confirmed,
+                 'bars_ago': p.bars_ago}
+                for p in _pats if p.confidence >= 0.40
+            ]
+        except Exception:
+            pass
 
         df_h1 = add_h1_indicators(df_h1_raw, cfg)
         df_d1 = add_d1_indicators(df_d1_raw, cfg)
@@ -648,6 +663,7 @@ def compute_signal(symbol: str, cfg: dict,
             'scalp_reserve':      scalp_reserve,
             'careful_entry':      careful_entry,
             'limit_prices':       limit_prices,
+            'h1_patterns':        h1_patterns,
         }
     except Exception:
         _logger.exception("[ブリッジ] compute_signal 例外")
