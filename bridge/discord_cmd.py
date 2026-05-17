@@ -20,8 +20,6 @@ import logging
 import threading
 from typing import Any
 
-import discord
-
 from bridge.param_override import (
     PARAMS, parse_value, set_override, clear_overrides, current_values_text,
 )
@@ -59,84 +57,10 @@ def _build_help() -> str:
     return '\n'.join(lines)
 
 
-class _ParamBot(discord.Client):
-    def __init__(self, channel_id: int, cfg_ref: dict[str, Any]) -> None:
-        intents = discord.Intents.default()
-        intents.message_content = True
-        super().__init__(intents=intents)
-        self._channel_id = channel_id
-        self._cfg_ref    = cfg_ref  # runner.py の元 cfg への参照（表示用）
-
-    async def on_ready(self) -> None:
-        _logger.info(f'Discord ボット起動: {self.user}')
-        ch = self.get_channel(self._channel_id)
-        if ch:
-            await ch.send('【パラメータ制御ボット】起動しました。`!help` でコマンド一覧')
-
-    async def on_message(self, message: discord.Message) -> None:
-        if message.author == self.user:
-            return
-        if message.channel.id != self._channel_id:
-            return
-        content = message.content.strip()
-        if not content.startswith(_PREFIX):
-            return
-
-        parts = content[len(_PREFIX):].split()
-        if not parts:
-            return
-        cmd  = parts[0].lower()
-        args = parts[1:]
-
-        try:
-            reply = await self._dispatch(cmd, args)
-        except Exception as e:
-            reply = f'エラー: {e}'
-            _logger.exception(f'Discord コマンド処理エラー: {content}')
-
-        await message.channel.send(reply)
-
-    async def _dispatch(self, cmd: str, args: list[str]) -> str:
-        if cmd == 'help':
-            return _build_help()
-
-        if cmd in ('params', 'get') and not args:
-            return current_values_text(self._cfg_ref)
-
-        if cmd == 'get' and args:
-            name = args[0].lower()
-            spec = PARAMS.get(name)
-            if spec is None:
-                known = ', '.join(sorted(PARAMS))
-                return f'不明なパラメータ: `{name}`\n使用可能: {known}'
-            cur = self._cfg_ref.get(spec.section, {}).get(spec.key, '(未設定)')
-            return f'`{name}` = {cur}  ({spec.desc})'
-
-        if cmd == 'set':
-            if len(args) < 2:
-                return '使い方: `!set <param> <value>`'
-            name = args[0].lower()
-            raw  = args[1]
-            val, err = parse_value(name, raw)
-            if err:
-                return err
-            set_override(name, val)
-            spec = PARAMS[name]
-            _logger.info(f'Discord: {name} = {val}')
-            return f'`{name}` を **{val}** に設定しました（{spec.desc}）\n次のポーリングから反映されます'
-
-        if cmd == 'reset':
-            clear_overrides()
-            _logger.info('Discord: 全オーバーライドをリセット')
-            return '全パラメータのオーバーライドを削除しました'
-
-        return f'不明なコマンド: `!{cmd}`\n`!help` でコマンド一覧'
-
-
 def start_discord_bot(cfg: dict[str, Any]) -> threading.Thread | None:
     """
     バックグラウンドスレッドで Discord ボットを起動する。
-    secret.py に認証情報がなければ何もしない。
+    discord.py 未インストール / secret.py に認証情報がなければ何もしない。
     cfg は表示用参照として渡す（runner.py の元 cfg dict）。
     """
     token, chan_id = _get_credentials()
@@ -144,10 +68,87 @@ def start_discord_bot(cfg: dict[str, Any]) -> threading.Thread | None:
         _logger.info('Discord ボット: secret.py に認証情報なし → スキップ')
         return None
 
+    try:
+        import discord as _discord
+    except ModuleNotFoundError:
+        _logger.warning('Discord ボット: discord.py 未インストール → スキップ (pip install discord.py)')
+        return None
+
+    class _ParamBot(_discord.Client):
+        def __init__(self) -> None:
+            intents = _discord.Intents.default()
+            intents.message_content = True
+            super().__init__(intents=intents)
+
+        async def on_ready(self) -> None:
+            _logger.info(f'Discord ボット起動: {self.user}')
+            ch = self.get_channel(chan_id)
+            if ch:
+                await ch.send('【パラメータ制御ボット】起動しました。`!help` でコマンド一覧')
+
+        async def on_message(self, message: _discord.Message) -> None:
+            if message.author == self.user:
+                return
+            if message.channel.id != chan_id:
+                return
+            content = message.content.strip()
+            if not content.startswith(_PREFIX):
+                return
+
+            parts = content[len(_PREFIX):].split()
+            if not parts:
+                return
+            cmd  = parts[0].lower()
+            args = parts[1:]
+
+            try:
+                reply = await self._dispatch(cmd, args)
+            except Exception as e:
+                reply = f'エラー: {e}'
+                _logger.exception(f'Discord コマンド処理エラー: {content}')
+
+            await message.channel.send(reply)
+
+        async def _dispatch(self, cmd: str, args: list[str]) -> str:
+            if cmd == 'help':
+                return _build_help()
+
+            if cmd in ('params', 'get') and not args:
+                return current_values_text(cfg)
+
+            if cmd == 'get' and args:
+                name = args[0].lower()
+                spec = PARAMS.get(name)
+                if spec is None:
+                    known = ', '.join(sorted(PARAMS))
+                    return f'不明なパラメータ: `{name}`\n使用可能: {known}'
+                cur = cfg.get(spec.section, {}).get(spec.key, '(未設定)')
+                return f'`{name}` = {cur}  ({spec.desc})'
+
+            if cmd == 'set':
+                if len(args) < 2:
+                    return '使い方: `!set <param> <value>`'
+                name = args[0].lower()
+                raw  = args[1]
+                val, err = parse_value(name, raw)
+                if err:
+                    return err
+                set_override(name, val)
+                spec = PARAMS[name]
+                _logger.info(f'Discord: {name} = {val}')
+                return f'`{name}` を **{val}** に設定しました（{spec.desc}）\n次のポーリングから反映されます'
+
+            if cmd == 'reset':
+                clear_overrides()
+                _logger.info('Discord: 全オーバーライドをリセット')
+                return '全パラメータのオーバーライドを削除しました'
+
+            return f'不明なコマンド: `!{cmd}`\n`!help` でコマンド一覧'
+
     def _run() -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        client = _ParamBot(chan_id, cfg)
+        client = _ParamBot()
         try:
             loop.run_until_complete(client.start(token))
         except Exception:
