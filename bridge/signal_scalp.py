@@ -9,6 +9,7 @@ import numpy as np
 from core.data       import fetch_ohlcv
 from core.indicators import add_m5_indicators, add_m1_indicators, add_h1_indicators
 from core.strategy   import detect_big_move, detect_early_surge, should_avoid_entry_during_surge
+from core.patterns   import detect_all_patterns
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _position_status, _get_jpy_per_usd,
@@ -116,7 +117,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         regime_h1s = 'weak_trend'
         dip_h1s    = float('nan')
         dim_h1s    = float('nan')
-        df_h1_raw  = fetch_ohlcv(symbol, 'H1', 50)
+        # H1 パターン検知用に多めに取得 (200本 ≈ 8日)
+        h1_pattern_bars: list = []
+        df_h1_raw  = fetch_ohlcv(symbol, 'H1', 200)
         if df_h1_raw is not None:
             df_h1s = add_h1_indicators(df_h1_raw, cfg)
             if not df_h1s.empty:
@@ -124,6 +127,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 dip_h1s = float(df_h1s['DI_plus'].iloc[-1]) if 'DI_plus'  in df_h1s.columns else float('nan')
                 dim_h1s = float(df_h1s['DI_minus'].iloc[-1])if 'DI_minus' in df_h1s.columns else float('nan')
                 regime_h1s = _detect_regime(adx_h1s, dip_h1s, dim_h1s, regime_cfg)
+            # パターン検知 (H1 OHLC, 上位2件のみ, 例外は無視)
+            try:
+                _pats = detect_all_patterns(df_h1_raw, window=5, top_n=2)
+                h1_pattern_bars = [
+                    {'name': p.name, 'label': p.label, 'direction': p.direction,
+                     'confidence': round(p.confidence, 3), 'neckline': p.neckline,
+                     'target': p.target, 'confirmed': p.confirmed,
+                     'bars_ago': p.bars_ago}
+                    for p in _pats if p.confidence >= 0.40
+                ]
+            except Exception:
+                pass
 
         # MTF SMA20 傾き + H1 レジーム条件
         # 案A: weak_trend も許可し DI 方向で判断、SMA20 チェックは M5 のみ
@@ -585,6 +600,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'entry_in_window':    0,
             'mtf_buy_ok':         mtf_buy_ok,
             'mtf_sell_ok':        mtf_sell_ok,
+            'h1_patterns':        h1_pattern_bars,
         }
 
     except Exception:
