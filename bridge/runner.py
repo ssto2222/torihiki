@@ -100,8 +100,10 @@ from bridge.utils        import (_setup_file_logging, _is_in_danger_skip_window,
                                  _close_profitable_positions, _reset_entry_windows)
 from bridge.time_bias    import _build_time_bias, _load_time_bias
 from bridge.sma20        import _load_sma20_touch_margins
-from bridge.signal_normal import compute_signal
-from bridge.signal_scalp  import compute_scalp_signal
+from bridge.signal_normal  import compute_signal
+from bridge.signal_scalp   import compute_scalp_signal
+from bridge.param_override import apply_overrides
+from bridge.discord_cmd    import start_discord_bot
 
 _logger = logging.getLogger('torihiki')
 _logger.setLevel(logging.DEBUG)
@@ -197,6 +199,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
             print("  時間帯バイアス: bias_file 未生成 → analyze_time_bias.py を先に実行してください")
     print("=" * 60)
 
+    start_discord_bot(cfg)
+
     if not connect_mt5(symbol, cfg['MT5']):
         print("\n[エラー] MT5 接続失敗。ターミナルを起動して再実行してください。")
         return
@@ -221,11 +225,15 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
             if console_log_path:
                 _tee.reset()
 
+            effective_cfg = apply_overrides(cfg)
+            _eff_scalp    = effective_cfg.get('SCALP', {})
+            _eff_rules    = effective_cfg.get('RULES', {})
+
             if mode == 'scalp':
-                data = compute_scalp_signal(symbol, cfg, sc_state, sig_state,
+                data = compute_scalp_signal(symbol, effective_cfg, sc_state, sig_state,
                                             jpy_cache, sma20_cache, mt5=mt5)
             else:
-                data = compute_signal(symbol, cfg, sig_state, jpy_cache, mt5=mt5)
+                data = compute_signal(symbol, effective_cfg, sig_state, jpy_cache, mt5=mt5)
 
             if data:
                 _fail_count = 0
@@ -234,7 +242,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                 pos           = ea.get('positions', 0)
                 bal           = ea.get('balance', 'N/A')
 
-                if consec_losses >= max_consec and data['action'] in ('buy', 'sell'):
+                if consec_losses >= _eff_rules.get('max_consecutive_losses', max_consec) and data['action'] in ('buy', 'sell'):
                     data['action']      = 'none'
                     data['skip_reason'] = f'consecutive_losses={consec_losses}>={max_consec}'
 
@@ -305,8 +313,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                           f"RSI_M1={data['rsi_m1']:.1f}  "
                           f"ATR=${data['atr']:.2f}  "
                           f"残高=¥{bal}  "
-                          f"lot={data['lot_size']}(TP={scalp_cfg.get('tp_atr_fraction',0.5)}×ATR)  "
-                          f"今日={data['trades_today']}/{scalp_cfg.get('max_trades_day',20)}回")
+                          f"lot={data['lot_size']}(TP={_eff_scalp.get('tp_atr_fraction',0.5)}×ATR)  "
+                          f"今日={data['trades_today']}/{_eff_scalp.get('max_trades_day',20)}回")
                     if data.get('scalp_buy_sma_pending'):
                         status_tag = '  [BUY] SMA20タッチ待ち'
                     elif data.get('scalp_buy_confirm_pending'):
@@ -344,7 +352,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                     rg_tag = (f"[ADX_H1={data.get('adx_h1',0):.0f}/{data.get('regime_h1','?')}"
                               f" M5={data.get('adx_m5',0):.0f}/{data.get('regime_m5','?')}"
                               f" ×{data.get('regime_lot_multi',1.0)}]")
-                    ep_tag = (f" entry#{data.get('entry_in_window',0)}/{cfg.get('REGIME',{}).get('max_entry_per_signal',3)}"
+                    ep_tag = (f" entry#{data.get('entry_in_window',0)}/{effective_cfg.get('REGIME',{}).get('max_entry_per_signal',3)}"
                               if data.get('entry_in_window', 0) > 0 else '')
                     print(f"  action={data['action'].upper():4s}  "
                           f"signal={data['signal_type']}{scalp_tag}  "
