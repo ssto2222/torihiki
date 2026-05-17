@@ -112,16 +112,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         regime_m5s = _detect_regime(adx_m5_sv, dip_m5_sv, dim_m5_sv, regime_cfg)
         r_multi_s  = _regime_lot_multi('weak_trend', regime_m5s, regime_cfg)
 
-        # M15 SMA20 傾き用データ
-        df_m15 = None
-        df_m15_raw = fetch_ohlcv(symbol, 'M15', 30)
-        if df_m15_raw is not None:
-            _df_m15_ind = add_m1_indicators(df_m15_raw, cfg)
-            if not _df_m15_ind.empty:
-                df_m15 = _df_m15_ind
-
         # H1 レジーム取得
         regime_h1s = 'weak_trend'
+        dip_h1s    = float('nan')
+        dim_h1s    = float('nan')
         df_h1_raw  = fetch_ohlcv(symbol, 'H1', 50)
         if df_h1_raw is not None:
             df_h1s = add_h1_indicators(df_h1_raw, cfg)
@@ -132,6 +126,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 regime_h1s = _detect_regime(adx_h1s, dip_h1s, dim_h1s, regime_cfg)
 
         # MTF SMA20 傾き + H1 レジーム条件
+        # 案A: weak_trend も許可し DI 方向で判断、SMA20 チェックは M5 のみ
         _slope_bars = scalp.get('sma20_slope_bars', 5)
         _slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
 
@@ -149,14 +144,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             thr_v = (atr_v_tf * _slope_thr) if not np.isnan(atr_v_tf) else 0.0
             return slope > thr_v if direction == 'buy' else slope < -thr_v
 
-        mtf_buy_ok  = (regime_h1s == 'trend_up'   and
-                       _sma20_ok(df_m1,  'buy') and
-                       _sma20_ok(df,     'buy') and
-                       _sma20_ok(df_m15, 'buy'))
-        mtf_sell_ok = (regime_h1s == 'trend_down' and
-                       _sma20_ok(df_m1,  'sell') and
-                       _sma20_ok(df,     'sell') and
-                       _sma20_ok(df_m15, 'sell'))
+        _di_valid    = not np.isnan(dip_h1s) and not np.isnan(dim_h1s)
+        _h1_di_buy   = _di_valid and dip_h1s > dim_h1s   # DI+ > DI-
+        _h1_di_sell  = _di_valid and dim_h1s > dip_h1s   # DI- > DI+
+
+        mtf_buy_ok  = (regime_h1s in ('trend_up',   'weak_trend') and
+                       _h1_di_buy  and _sma20_ok(df, 'buy'))
+        mtf_sell_ok = (regime_h1s in ('trend_down', 'weak_trend') and
+                       _h1_di_sell and _sma20_ok(df, 'sell'))
 
         # トレンド転換時に逆方向の待機状態をキャンセル
         if regime_m5s == 'trend_up' and (state.sell_sma_pending or state.sell_confirm_pending):
