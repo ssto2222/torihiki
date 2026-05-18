@@ -301,6 +301,8 @@ def detect_big_move(df_m5: pd.DataFrame,
 
     return 'none'
 
+    return 'none'
+
 
 def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
                   direction: str, cfg: dict,
