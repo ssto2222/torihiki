@@ -35,7 +35,16 @@ LOG_FILE      = os.path.join(LOG_DIR, "mt5_monitor.log")
 FLAG_FILE     = os.path.join(LOG_DIR, "paused.flag")
 
 # MT5 ターミナル実行ファイルパス（空文字の場合は起動を試みない）
-MT5_TERMINAL_EXE = r"C:\Program Files\MetaTrader 5\terminal64.exe"  # 環境に合わせて修正
+MT5_TERMINAL_EXE  = r"C:\Program Files\MetaTrader 5\terminal64.exe"  # 環境に合わせて修正
+
+# MT5 プロファイル名（/profile: オプションで EA 入りプロファイルを自動ロード）
+# 空文字の場合はデフォルトプロファイル（前回終了時の状態）を使用
+# 例: MT5_PROFILE = "AutoTrade"  → MT5 の Profiles フォルダ内の "AutoTrade" を使用
+MT5_PROFILE       = ""  # 環境に合わせて修正
+
+# MT5 起動後に EA がロードされるまでの待機時間（秒）
+# ブローカー接続 + チャート復元 + EA 初期化を含む。環境によって 30〜60 秒が目安
+MT5_STARTUP_WAIT  = 40
 
 # ウォッチドッグ設定
 RESTART_DELAY_SEC = 10    # 再起動前の待機秒数
@@ -98,7 +107,11 @@ def _kill_mt5_terminal() -> None:
 
 
 def _start_mt5_terminal() -> None:
-    """MT5 端末が落ちている場合に起動する（Windows のみ・MT5_TERMINAL_EXE が設定されている場合）"""
+    """MT5 端末が落ちている場合に起動する（Windows のみ・MT5_TERMINAL_EXE が設定されている場合）
+
+    MT5_PROFILE が設定されている場合は /profile:名前 オプションを渡し、
+    EA 入りのプロファイルを自動ロードする。
+    """
     if not MT5_TERMINAL_EXE or not os.path.exists(MT5_TERMINAL_EXE):
         return
     # すでに起動中なら何もしない
@@ -106,12 +119,16 @@ def _start_mt5_terminal() -> None:
         if (p.info.get('name') or '').lower() == 'terminal64.exe':
             return
     try:
-        subprocess.Popen(
-            [MT5_TERMINAL_EXE],
-            creationflags=getattr(subprocess, 'CREATE_NEW_CONSOLE', 0),
+        cmd = [MT5_TERMINAL_EXE]
+        if MT5_PROFILE:
+            cmd.append(f'/profile:{MT5_PROFILE}')  # EA 入りプロファイルを指定
+        subprocess.Popen(cmd, creationflags=getattr(subprocess, 'CREATE_NEW_CONSOLE', 0))
+        _logger.info(
+            f"MT5 端末を起動しました: {MT5_TERMINAL_EXE}"
+            + (f"  profile={MT5_PROFILE}" if MT5_PROFILE else "")
         )
-        _logger.info(f"MT5 端末を起動しました: {MT5_TERMINAL_EXE}")
-        time.sleep(20)  # 端末の起動・ログインを待つ
+        _logger.info(f"EA ロード完了まで {MT5_STARTUP_WAIT} 秒待機中...")
+        time.sleep(MT5_STARTUP_WAIT)
     except OSError as e:
         _logger.warning(f"MT5 端末の起動に失敗: {e}")
 
