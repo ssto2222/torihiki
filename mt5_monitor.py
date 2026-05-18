@@ -146,7 +146,8 @@ def _open_bridge_log():
 
 def _build_cmd(extra_args: list[str]) -> list[str]:
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), MAIN_SCRIPT)
-    return [sys.executable, '-u', script] + extra_args
+    # -X utf8: Windows cp932 コンソールでも ¥ × などを正しく出力するため UTF-8 モード強制
+    return [sys.executable, '-X', 'utf8', '-u', script] + extra_args
 
 
 def watch(bridge_args: list[str]) -> None:
