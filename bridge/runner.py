@@ -201,9 +201,20 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
 
     start_discord_bot(cfg)
 
-    if not connect_mt5(symbol, cfg['MT5']):
-        print("\n[エラー] MT5 接続失敗。ターミナルを起動して再実行してください。")
-        return
+    # MT5 接続リトライ（ターミナル起動直後などに間に合わないケースに対応）
+    _MT5_CONNECT_RETRIES = 3
+    _MT5_CONNECT_WAIT    = 10  # 秒
+    _connected = False
+    for _attempt in range(1, _MT5_CONNECT_RETRIES + 1):
+        if connect_mt5(symbol, cfg['MT5']):
+            _connected = True
+            break
+        if _attempt < _MT5_CONNECT_RETRIES:
+            print(f"[MT5] 接続失敗 ({_attempt}/{_MT5_CONNECT_RETRIES}) → {_MT5_CONNECT_WAIT}秒後に再試行")
+            time.sleep(_MT5_CONNECT_WAIT)
+    if not _connected:
+        print(f"\n[エラー] MT5 接続失敗 ({_MT5_CONNECT_RETRIES}回試行) → ウォッチドッグが再起動します")
+        sys.exit(1)  # exit(0) だと watchdog が「正常終了」と判断して再起動しない
 
     if mode == 'scalp':
         _load_sma20_touch_margins([symbol], sma20_cache, cfg)
