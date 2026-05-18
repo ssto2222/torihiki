@@ -492,12 +492,13 @@ def main() -> None:
         try:
             ea   = read_ea_state(str(state_path))
             prev = ea.get('consecutive_losses', 0)
+            reset_ts = int(datetime.now(_tz.utc).timestamp())
             ea['consecutive_losses'] = 0
+            ea['reset_since']        = reset_ts  # EA 再起動後も復元できるよう永続化
             state_path.write_text(
                 json.dumps(ea, indent=2, ensure_ascii=False), encoding='ascii')
             reset_path.write_text(
-                json.dumps({'reset_since': int(datetime.now(_tz.utc).timestamp()),
-                            'symbol': sym},
+                json.dumps({'reset_since': reset_ts, 'symbol': sym},
                            indent=2, ensure_ascii=False), encoding='ascii')
             print(f"[リセット] {state_path.name}  consecutive_losses: {prev} → 0")
             print(f"[リセット] EAリセットファイル作成: {reset_path.name}")

@@ -56,9 +56,24 @@ int OnInit()
    else
       g_reset_file = InpResetFile;
 
+   // 前回の reset_since を ea_state.json から復元（EA 再起動後もリセット状態を維持）
+   int fh_s = FileOpen(g_state_file, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
+   if(fh_s != INVALID_HANDLE)
+   {
+      string raw_s = "";
+      while(!FileIsEnding(fh_s)) raw_s += FileReadString(fh_s);
+      FileClose(fh_s);
+      datetime saved_reset = (datetime)(long)JDbl(raw_s, "reset_since");
+      if(saved_reset > 0)
+      {
+         g_reset_since = saved_reset;
+         if(InpDebugLog) Print("[EA] reset_since 復元: ", TimeToString(g_reset_since));
+      }
+   }
+
    if(InpDebugLog)
       Print("[EA] 起動  Signal=", g_signal_file, " MinScore=", InpMinScore);
-      
+
    return INIT_SUCCEEDED;
 }
 
@@ -433,9 +448,10 @@ double JDbl(const string &j, const string &k) {
 void WriteState(int consec_losses)
 {
    string json = StringFormat(
-      "{\"balance\":%.2f,\"equity\":%.2f,\"positions\":%d,\"consecutive_losses\":%d,\"timestamp\":\"%s\",\"symbol\":\"%s\",\"magic\":%d}",
+      "{\"balance\":%.2f,\"equity\":%.2f,\"positions\":%d,\"consecutive_losses\":%d"
+      ",\"reset_since\":%d,\"timestamp\":\"%s\",\"symbol\":\"%s\",\"magic\":%d}",
       AccountInfoDouble(ACCOUNT_BALANCE), AccountInfoDouble(ACCOUNT_EQUITY), CountPos(), consec_losses,
-      TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), _Symbol, InpMagic);
+      (int)g_reset_since, TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS), _Symbol, InpMagic);
    int fh = FileOpen(g_state_file, FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(fh != INVALID_HANDLE) { FileWriteString(fh, json); FileClose(fh); }
 }
