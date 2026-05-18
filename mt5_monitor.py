@@ -191,8 +191,16 @@ def watch(bridge_args: list[str]) -> None:
             send_discord(f"🛑 **【停止】** 最大再起動回数 ({MAX_RESTARTS}回) に達しました。")
             break
 
-        _kill_mt5_terminal()
-        _start_mt5_terminal()  # 落ちていれば再起動
+        if ret == 2:
+            # exit(2) = MT5 接続失敗: MT5 は kill せずブリッジのみ再起動
+            # （kill すると「接続失敗→MT5再起動→接続失敗→…」のループを防ぐ）
+            _logger.info("MT5 接続失敗による終了 → MT5 は維持してブリッジのみ再起動")
+            _start_mt5_terminal()  # 落ちていれば起動（起動済みなら何もしない）
+        else:
+            # exit(1) = 稼働中の実行時エラー: MT5 を強制終了して再起動
+            _kill_mt5_terminal()
+            _start_mt5_terminal()
+
         time.sleep(RESTART_DELAY_SEC)
 
         if os.path.exists(FLAG_FILE):
