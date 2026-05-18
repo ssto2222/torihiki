@@ -10,6 +10,7 @@ from core.data       import fetch_ohlcv
 from core.indicators import (add_h1_indicators, add_d1_indicators,
                               add_m5_indicators)
 from core.strategy   import check_m5_entry_filter, check_m5_surge
+from core.patterns   import detect_all_patterns, PatternResult
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _calc_lot, _position_status, _get_jpy_per_usd)
@@ -63,6 +64,20 @@ def compute_signal(symbol: str, cfg: dict,
 
         if df_h1_raw is None or df_d1_raw is None:
             return None
+
+        # H1 パターン検知（OHLC 200本、生オブジェクトを保持してネックライン突破検知にも使う）
+        _h1_pats_raw: list[PatternResult] = []
+        h1_patterns:  list[dict]          = []
+        try:
+            _h1_pats_raw = detect_all_patterns(df_h1_raw, window=5, top_n=3)
+            h1_patterns  = [
+                {'name': p.name, 'label': p.label, 'direction': p.direction,
+                 'confidence': round(p.confidence, 3), 'neckline': p.neckline,
+                 'target': p.target, 'confirmed': p.confirmed, 'bars_ago': p.bars_ago}
+                for p in _h1_pats_raw if p.confidence >= 0.40
+            ]
+        except Exception:
+            pass
 
         df_h1 = add_h1_indicators(df_h1_raw, cfg)
         df_d1 = add_d1_indicators(df_d1_raw, cfg)
@@ -200,8 +215,40 @@ def compute_signal(symbol: str, cfg: dict,
                         break
         state.prev_rsi_h1 = rsi_h1_v
 
+        # ── H1 パターン ネックライン突破検知 ─────────────────────────
+        # 前足終値 vs 現在足終値 でネックラインを跨いだ場合にシグナル発生
+        _prev_h1_close = (float(df_h1['Close'].iloc[-2])
+                          if len(df_h1) >= 2 else close_v)
+        if len(state.pattern_traded) > 120:
+            state.pattern_traded.clear()
+        _pattern_triggered: PatternResult | None = None
+        for _pat in _h1_pats_raw:
+            if _pat.confidence < 0.45:
+                continue
+            _fp = (_pat.name, round(_pat.neckline, 0))
+            if _fp in state.pattern_traded:
+                continue
+            if _pat.direction == 'bullish' and new_buy_type is None:
+                if _prev_h1_close <= _pat.neckline < close_v:
+                    new_buy_type = f'pattern_{_pat.name}'
+                    state.pattern_traded.add(_fp)
+                    state.pattern_tp_target = _pat.target
+                    _pattern_triggered = _pat
+                    _logger.info(f'[パターンBUY] {_pat.label} NL={_pat.neckline:,.0f} '
+                                 f'信頼度={_pat.confidence:.0%}')
+                    break
+            elif _pat.direction == 'bearish' and new_sell_type is None:
+                if _prev_h1_close >= _pat.neckline > close_v:
+                    new_sell_type = f'pattern_{_pat.name}'
+                    state.pattern_traded.add(_fp)
+                    state.pattern_tp_target = _pat.target
+                    _pattern_triggered = _pat
+                    _logger.info(f'[パターンSELL] {_pat.label} NL={_pat.neckline:,.0f} '
+                                 f'信頼度={_pat.confidence:.0%}')
+                    break
+
         # ── SELL 検出: H1 SMA20 下向き + 直近2本確定陰線 ─────────
-        if h1_sma20_declining and h1_two_bear:
+        if h1_sma20_declining and h1_two_bear and new_sell_type is None:
             new_sell_type = 'sma20_2bear'
 
         # BUY ウィンドウ（新規クロスで逆方向ウィンドウをキャンセル）
@@ -466,6 +513,14 @@ def compute_signal(symbol: str, cfg: dict,
                 if sell_bb2_pct >= bb_near_pct or (close_v - h1_bb_lower2) <= atr_v * 0.5:
                     tp_price = max(tp_price, h1_bb_lower2)
 
+        # パターンTP目標で tp_price を上書き（最低 1ATR 確保、最大 8ATR）
+        if state.pattern_tp_target is not None and action in ('buy', 'sell', 'limit_buy'):
+            _pt = state.pattern_tp_target
+            if action in ('buy', 'limit_buy') and sig_type.startswith('pattern_'):
+                tp_price = max(close_v + atr_v, min(close_v + atr_v * 8.0, _pt))
+            elif action == 'sell' and sell_sig_type.startswith('pattern_'):
+                tp_price = min(close_v - atr_v, max(close_v - atr_v * 8.0, _pt))
+
         tick  = mt5.symbol_info(symbol)
         point = tick.point if tick else 0.01
         max_pt = max(1, int(atr_v * 0.5 / point))
@@ -648,6 +703,8 @@ def compute_signal(symbol: str, cfg: dict,
             'scalp_reserve':      scalp_reserve,
             'careful_entry':      careful_entry,
             'limit_prices':       limit_prices,
+            'h1_patterns':        h1_patterns,
+            'pattern_tp_target':  state.pattern_tp_target,
         }
     except Exception:
         _logger.exception("[ブリッジ] compute_signal 例外")

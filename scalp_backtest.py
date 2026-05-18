@@ -21,6 +21,7 @@ import config as C
 from core.data       import (connect_mt5, fetch_ohlcv, fetch_ohlcv_range,
                               generate_m5_from_h1, generate_m1_from_h1, generate_h1)
 from core.indicators import add_m1_indicators, add_m5_indicators, add_h1_indicators
+from core.patterns   import detect_all_patterns
 from mt5_ea_bridge   import _detect_regime
 
 
@@ -117,10 +118,48 @@ def _regime(df_m5: pd.DataFrame, i: int, regime_cfg: dict) -> str:
     return _detect_regime(adx, dip, dim, regime_cfg)
 
 
+def _precompute_h1_crossings(df_h1_raw: 'pd.DataFrame | None',
+                              min_conf: float = 0.45,
+                              lookback: int = 150,
+                              step: int = 12) -> list[tuple]:
+    """H1 ネックライン突破イベント先行計算（ルックアヘッドなし）。
+    各エントリ: (crossing_ts, direction, neckline, target)"""
+    if df_h1_raw is None or len(df_h1_raw) < lookback:
+        return []
+    closes     = df_h1_raw['Close'].to_numpy(dtype=float)
+    times      = df_h1_raw.index.to_numpy()
+    n          = len(df_h1_raw)
+    events:    list[tuple] = []
+    traded_fp: set         = set()
+    active_pats: list      = []
+    for k in range(lookback, n):
+        if (k - lookback) % step == 0:
+            past = df_h1_raw.iloc[k - lookback: k]
+            try:
+                active_pats = [p for p in detect_all_patterns(past, window=5, top_n=3)
+                               if p.confidence >= min_conf]
+            except Exception:
+                active_pats = []
+        prev_c = closes[k - 1]
+        cur_c  = closes[k]
+        for pat in active_pats:
+            fp = (pat.name, round(pat.neckline, 0))
+            if fp in traded_fp:
+                continue
+            if pat.direction == 'bullish' and prev_c <= pat.neckline < cur_c:
+                events.append((times[k], 'buy',  pat.neckline, pat.target))
+                traded_fp.add(fp)
+            elif pat.direction == 'bearish' and prev_c >= pat.neckline > cur_c:
+                events.append((times[k], 'sell', pat.neckline, pat.target))
+                traded_fp.add(fp)
+    return sorted(events, key=lambda e: e[0])
+
+
 def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
                  cfg: dict, touch_margin: float,
                  df_m15: pd.DataFrame | None = None,
-                 df_h1:  pd.DataFrame | None = None) -> list[dict]:
+                 df_h1:  pd.DataFrame | None = None,
+                 h1_crossings: list | None = None) -> list[dict]:
     scalp       = cfg['SCALP']
     regime_cfg  = cfg.get('REGIME', {})
     buy_thrs    = scalp.get('rsi_buy_thrs',  [55.0, 60.0, 65.0])
@@ -190,10 +229,29 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
         return _detect_regime(adx, dip, dim, regime_cfg)
 
     def _mtf_ok(ts, m5_i: int, direction: str) -> bool:
-        # H1 レジームチェック
+        # 案A: H1 weak_trend も許可し DI 方向で判断（production と同じ）
         h1_reg = _h1_regime_at(ts)
-        if direction == 'buy'  and h1_reg != 'trend_up':   return False
-        if direction == 'sell' and h1_reg != 'trend_down':  return False
+        if h1_t is not None and h1_dip is not None and h1_dim is not None:
+            h1_i = int(np.searchsorted(h1_t, ts, side='right')) - 1
+            if h1_i >= 0:
+                _dip = float(h1_dip[h1_i])
+                _dim = float(h1_dim[h1_i])
+                _di_valid = not np.isnan(_dip) and not np.isnan(_dim)
+                if direction == 'buy':
+                    if h1_reg not in ('trend_up', 'weak_trend'):
+                        return False
+                    if not _di_valid or _dip <= _dim:
+                        return False
+                else:
+                    if h1_reg not in ('trend_down', 'weak_trend'):
+                        return False
+                    if not _di_valid or _dim <= _dip:
+                        return False
+        else:
+            if direction == 'buy'  and h1_reg not in ('trend_up',   'weak_trend'):
+                return False
+            if direction == 'sell' and h1_reg not in ('trend_down', 'weak_trend'):
+                return False
         # M5 SMA20 傾き
         if not _slope_ok(m5_s20, m5_atr, m5_i, direction):
             return False
@@ -265,6 +323,31 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
                 count = 0
         return None
 
+    def find_pattern_entry(direction: str, m5_i: int, pat_target: float) -> dict | None:
+        """パターン ネックライン突破: SMA20 待機なしで直接エントリー。"""
+        atr_v = m5_atr[m5_i]
+        if np.isnan(atr_v) or atr_v <= 0:
+            return None
+        tp_move = atr_v * tp_frac
+        sl_move = tp_move * sl_ratio
+        j0 = m1_idx_at(m5_t[m5_i])
+        if j0 >= len(m1_cl):
+            return None
+        ep = float(m1_cl[j0])
+        # パターン TP: 測定値が 1〜8×tp_move の範囲なら上書き
+        pt_dist = abs(pat_target - ep)
+        if tp_move < pt_dist < tp_move * 8.0:
+            tp_move = pt_dist
+        return {
+            'direction':     direction,
+            'entry_time':    m5_t[m5_i],
+            'entry_price':   ep,
+            'confirm_bar':   j0,
+            'tp_move':       tp_move,
+            'sl_move':       sl_move,
+            'signal_source': 'pattern_nl',
+        }
+
     def simulate_exit(info: dict) -> tuple[float, str, object]:
         d  = info['direction']
         ep = info['entry_price']
@@ -292,6 +375,8 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
     last_entry_ts: pd.Timestamp | None = None
     day_counts: dict[date, int] = {}
     m5_rsi_prev: float = float('nan')
+    crossing_ptr: int  = 0
+    _crossings = list(h1_crossings or [])
 
     for i in range(15, len(m5_t)):
         rsi_cur  = m5_rsi[i]
@@ -315,24 +400,38 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
         # レジーム
         regime = _regime(df_m5, i, regime_cfg)
 
-        # RSI クロス検出
-        signal = None; crossed = 0.0
-        if buy_en and regime != 'trend_down':
-            for thr in buy_thrs:
-                if rsi_cur > thr and rsi_prev <= thr:
-                    signal = 'buy'; crossed = thr; break
-        if signal is None and sell_en and regime != 'trend_up':
-            for thr in sell_thrs:
-                if rsi_cur < thr and rsi_prev >= thr:
-                    signal = 'sell'; crossed = thr; break
-        if signal is None:
-            continue
+        # ── パターン ネックライン突破 (優先) ──────────────────────
+        info = None; signal = None; crossed = 0.0
+        if crossing_ptr < len(_crossings):
+            e_ts, e_dir, e_nl, e_tgt = _crossings[crossing_ptr]
+            e_ts_pd = pd.Timestamp(e_ts)
+            if e_ts_pd <= ts:
+                crossing_ptr += 1
+                stale = (ts - e_ts_pd).total_seconds() > 3600  # 1H 以上前は無視
+                if not stale:
+                    info    = find_pattern_entry(e_dir, i, e_tgt)
+                    signal  = e_dir
+                    crossed = e_nl
 
-        # MTF フィルタ: M1/M5/M15 SMA20 傾き + H1 レジーム
-        if not _mtf_ok(m5_t[i], i, signal):
-            continue
+        # ── RSI クロス検出 ─────────────────────────────────────────
+        if info is None:
+            if buy_en and regime != 'trend_down':
+                for thr in buy_thrs:
+                    if rsi_cur > thr and rsi_prev <= thr:
+                        signal = 'buy'; crossed = thr; break
+            if signal is None and sell_en and regime != 'trend_up':
+                for thr in sell_thrs:
+                    if rsi_cur < thr and rsi_prev >= thr:
+                        signal = 'sell'; crossed = thr; break
+            if signal is None:
+                continue
 
-        info = find_entry(signal, i)
+            # MTF フィルタ: M1/M5/M15 SMA20 傾き + H1 レジーム (DI 方向込み)
+            if not _mtf_ok(m5_t[i], i, signal):
+                continue
+
+            info = find_entry(signal, i)
+
         if info is None:
             continue
 
@@ -363,6 +462,7 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
             'pnl_jpy':       round(pnl_jpy, 0),
             'exit_reason':   reason,
             'duration_min':  round(dur_min, 1),
+            'signal_source': info.get('signal_source', 'rsi_cross'),
         })
 
         last_entry_ts = entry_ts
@@ -446,6 +546,20 @@ def print_stats(trades: list[dict], target_jpy: int, sl_ratio: int,
         s_pnl = np.array([t['pnl_jpy'] for t in sells])
         print(f"  SELL {len(sells):3d}件  WR={len(s_pnl[s_pnl>0])/len(sells)*100:.1f}%  "
               f"累計={s_pnl.sum():+,.0f} JPY")
+
+    # シグナル種別内訳
+    by_src: dict[str, list] = {}
+    for t in trades:
+        src = t.get('signal_source', 'rsi_cross')
+        by_src.setdefault(src, []).append(t)
+    if len(by_src) > 1:
+        print(f"\n  シグナル種別:")
+        for src, ts_list in sorted(by_src.items()):
+            sp  = np.array([t['pnl_jpy'] for t in ts_list])
+            sw  = (sp > 0).sum()
+            print(f"    {src:<15}  {len(ts_list):3d}件  "
+                  f"WR={sw/len(ts_list)*100:.0f}%  "
+                  f"累計={sp.sum():+,.0f} JPY")
 
     # 月次内訳
     if data_days > 30:
@@ -567,9 +681,19 @@ def main():
     print(f"  M5: {len(df_m5)}本  M1: {len(df_m1)}本  {mtf_status}")
     print(f"  期間: {df_m5.index[0].date()} 〜 {df_m5.index[-1].date()} ({data_days:.0f}日)")
 
+    # H1 パターン先行計算
+    print("\n[2.5] H1 パターン ネックライン突破 先行計算")
+    h1_crossings = _precompute_h1_crossings(df_h1_raw)
+    print(f"  ネックライン突破イベント: {len(h1_crossings)} 件")
+    for e_ts, e_dir, e_nl, _ in h1_crossings[:5]:
+        print(f"    {pd.Timestamp(e_ts).date()}  {e_dir:<4}  NL={e_nl:,.2f}")
+    if len(h1_crossings) > 5:
+        print(f"    ... 他 {len(h1_crossings) - 5} 件")
+
     # バックテスト実行
     print("\n[3] バックテスト実行中...")
-    trades = run_scalp_bt(df_m5, df_m1, cfg, touch_margin, df_m15=df_m15, df_h1=df_h1)
+    trades = run_scalp_bt(df_m5, df_m1, cfg, touch_margin, df_m15=df_m15, df_h1=df_h1,
+                          h1_crossings=h1_crossings)
     print(f"  完了: {len(trades)} トレード")
 
     # 結果表示

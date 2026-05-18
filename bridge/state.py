@@ -38,6 +38,10 @@ class SignalState:
     bb2_touched_at_buy: Optional[datetime] = None
     bb2_touched_at_sell: Optional[datetime] = None
 
+    # パターンネックライン執行管理
+    pattern_traded: set = field(default_factory=set)   # 執行済みパターン指紋
+    pattern_tp_target: Optional[float] = None          # パターンTP目標価格
+
 
 @dataclass
 class ScalpState:
@@ -74,6 +78,10 @@ class ScalpState:
     sell_confirm_count: int = 0
     sell_confirm_bar_time: object = None
     sell_confirm_level: float = 0.0
+
+    # パターンネックライン執行管理
+    pattern_traded: set = field(default_factory=set)
+    pattern_tp_target: Optional[float] = None
 
 
 @dataclass
