@@ -214,7 +214,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
             time.sleep(_MT5_CONNECT_WAIT)
     if not _connected:
         print(f"\n[エラー] MT5 接続失敗 ({_MT5_CONNECT_RETRIES}回試行) → ウォッチドッグが再起動します")
-        sys.exit(1)  # exit(0) だと watchdog が「正常終了」と判断して再起動しない
+        sys.exit(2)  # 2=接続失敗: watchdog は MT5 を kill せずブリッジのみ再起動
 
     if mode == 'scalp':
         _load_sma20_touch_margins([symbol], sma20_cache, cfg)
