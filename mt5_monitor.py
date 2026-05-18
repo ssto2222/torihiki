@@ -34,6 +34,9 @@ LOG_DIR       = r"G:\マイドライブ\mt5_log"   # 環境に合わせて修正
 LOG_FILE      = os.path.join(LOG_DIR, "mt5_monitor.log")
 FLAG_FILE     = os.path.join(LOG_DIR, "paused.flag")
 
+# MT5 ターミナル実行ファイルパス（空文字の場合は起動を試みない）
+MT5_TERMINAL_EXE = r"C:\Program Files\MetaTrader 5\terminal64.exe"  # 環境に合わせて修正
+
 # ウォッチドッグ設定
 RESTART_DELAY_SEC = 10    # 再起動前の待機秒数
 MAX_RESTARTS      = 0     # 最大再起動回数（0 = 無制限）
@@ -92,6 +95,25 @@ def _kill_mt5_terminal() -> None:
         time.sleep(5)
     except FileNotFoundError:
         pass  # Linux 環境では taskkill は存在しない
+
+
+def _start_mt5_terminal() -> None:
+    """MT5 端末が落ちている場合に起動する（Windows のみ・MT5_TERMINAL_EXE が設定されている場合）"""
+    if not MT5_TERMINAL_EXE or not os.path.exists(MT5_TERMINAL_EXE):
+        return
+    # すでに起動中なら何もしない
+    for p in psutil.process_iter(['name']):
+        if (p.info.get('name') or '').lower() == 'terminal64.exe':
+            return
+    try:
+        subprocess.Popen(
+            [MT5_TERMINAL_EXE],
+            creationflags=getattr(subprocess, 'CREATE_NEW_CONSOLE', 0),
+        )
+        _logger.info(f"MT5 端末を起動しました: {MT5_TERMINAL_EXE}")
+        time.sleep(20)  # 端末の起動・ログインを待つ
+    except OSError as e:
+        _logger.warning(f"MT5 端末の起動に失敗: {e}")
 
 
 def restart_all(bridge_cmd: list[str]) -> None:
@@ -170,6 +192,7 @@ def watch(bridge_args: list[str]) -> None:
             break
 
         _kill_mt5_terminal()
+        _start_mt5_terminal()  # 落ちていれば再起動
         time.sleep(RESTART_DELAY_SEC)
 
         if os.path.exists(FLAG_FILE):
