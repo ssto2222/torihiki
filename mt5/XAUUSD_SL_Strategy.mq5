@@ -26,12 +26,13 @@ input bool   InpDebugLog      = true;
 
 CTrade        g_trade;
 CPositionInfo g_pos;
-string        g_signal_file = "";
-string        g_state_file  = "";
-string        g_reset_file  = "";
-datetime      g_last_ts     = 0;
-datetime      g_reset_since = 0;
-double        g_lot_size    = 0.0;
+string        g_signal_file  = "";
+string        g_state_file   = "";
+string        g_reset_file   = "";
+datetime      g_last_ts      = 0;
+datetime      g_reset_since  = 0;
+double        g_lot_size     = 0.0;
+int           g_tp_hold_min  = 0;   // スキャルプ最大保有分数（0=無制限）
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -89,8 +90,13 @@ void OnTimer()
       return;
    }
 
-   // トレーリング SL + TP 動的延長
-   if(atr_v > 0.0)
+   g_tp_hold_min = tp_hold_min;
+
+   // スキャルプ最大保有時間チェック（trail_multi==0 のときだけ有効）
+   CheckScalpHold(trail_m);
+
+   // トレーリング SL + TP 動的延長（スキャルプモードは trail_multi==0 なのでスキップ）
+   if(atr_v > 0.0 && trail_m > 0.0)
    {
       UpdateTrailing(atr_v, trail_m);
       UpdateTP(atr_v);
@@ -248,6 +254,29 @@ void OpenSell(double sl, double tp, int score) // scoreを引数に追加
    }
    else
       Print("[EA] Sell 失敗: ", g_trade.ResultComment());
+}
+
+//+------------------------------------------------------------------+
+//| スキャルプ最大保有時間チェック: tp_hold_min 分超えたポジションを決済  |
+//+------------------------------------------------------------------+
+void CheckScalpHold(double trail_m)
+{
+   if(g_tp_hold_min <= 0 || trail_m > 0.0) return;  // scalp mode (trail_multi==0) のみ
+
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      if(!g_pos.SelectByIndex(i)) continue;
+      if(g_pos.Magic() != InpMagic || g_pos.Symbol() != _Symbol) continue;
+
+      int age_sec = (int)(TimeCurrent() - g_pos.Time());
+      if(age_sec >= g_tp_hold_min * 60)
+      {
+         if(InpDebugLog)
+            PrintFormat("[EA] スキャルプ期限切れ: ticket=%d 保有=%ds profit=%.2f",
+                        (int)g_pos.Ticket(), age_sec, g_pos.Profit());
+         g_trade.PositionClose(g_pos.Ticket());
+      }
+   }
 }
 
 void UpdateTrailing(double atr, double trail_multi)
