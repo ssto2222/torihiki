@@ -20,7 +20,12 @@ class _TeeWriter(io.TextIOBase):
         self._buf: list[str] = []
 
     def write(self, text: str) -> int:
-        self._orig.write(text)
+        try:
+            self._orig.write(text)
+        except UnicodeEncodeError:
+            # Windows cp932 など狭いエンコーディングで ¥ × 等が書けない場合
+            enc = getattr(self._orig, 'encoding', 'utf-8') or 'utf-8'
+            self._orig.write(text.encode(enc, errors='replace').decode(enc, errors='replace'))
         self._buf.append(text)
         return len(text)
 
@@ -129,6 +134,15 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     flag_file  = str(Path(log_dir) / 'paused.flag') if log_dir else 'paused.flag'
 
     _setup_file_logging(log_dir, symbol)
+
+    # Windows cp932 コンソールでも ¥ × などの文字を出力できるよう UTF-8 に切り替え
+    # （-X utf8 モードで起動された場合や既に UTF-8 の場合は実質ノーオペレーション）
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            if hasattr(_stream, 'reconfigure') and getattr(_stream, 'encoding', '') != 'utf-8':
+                _stream.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
 
     # コンソール出力をファイルにも上書き保存する（log_dir が設定されている場合）
     console_log_path = Path(log_dir) / f'console_{symbol}.log' if log_dir else None
