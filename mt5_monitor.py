@@ -183,8 +183,21 @@ def watch(bridge_args: list[str]) -> None:
         _logger.info(f"[{_ts()}] ブリッジ起動 (再起動 #{restart_count}回目): {' '.join(cmd)}")
         try:
             with _open_bridge_log() as bf:
-                ret = subprocess.call(cmd, stdout=bf, stderr=bf)
+                proc = subprocess.Popen(cmd, stdout=bf, stderr=bf)
+                # ブリッジが動いている間、60 秒ごとに正常運転中を表示
+                STATUS_INTERVAL = 60
+                while True:
+                    try:
+                        ret = proc.wait(timeout=STATUS_INTERVAL)
+                        break  # プロセス終了
+                    except subprocess.TimeoutExpired:
+                        _logger.info(f"[{_ts()}] ✓ 正常運転中  PID={proc.pid}")
         except KeyboardInterrupt:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
             _logger.info("Ctrl+C → ウォッチドッグ終了")
             send_discord("【監視終了】Ctrl+C によりウォッチドッグを停止しました。")
             break
