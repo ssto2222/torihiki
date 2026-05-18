@@ -54,3 +54,7 @@
 2026-05-17 17:53:28,267 [INFO] [17:53:28] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode scalp --symbol XAUUSD
 2026-05-17 19:00:37,417 [INFO] [19:00:37] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode scalp --symbol BTCUSD
 2026-05-17 19:35:58,321 [INFO] [19:35:58] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode scalp --symbol XAUUSD
+2026-05-19 01:46:13,973 [INFO] ブリッジコンソールログ → C:\Users\YK\Documents\python\torihiki\logs\mt5_bridge_console.log
+2026-05-19 01:46:14,614 [INFO] [01:46:14] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe -X utf8 -u C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode scalp --symbol BTCUSD
+2026-05-19 01:49:26,493 [INFO] ブリッジコンソールログ → C:\Users\YK\Documents\python\torihiki\logs\mt5_bridge_console.log
+2026-05-19 01:49:27,487 [INFO] [01:49:27] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe -X utf8 -u C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode scalp --symbol BTCUSD
