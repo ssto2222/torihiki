@@ -71,12 +71,12 @@ EXECUTION = dict(
 SL = dict(
     spread_usd   = 0.30,
     sl_multi     = 1.5,         # SL = Entry ± ATR × sl_multi  ★BT最適(WR52%,SL刈55%,Sharpe26.4)
-    tp_atr_multi = 3.0,         # TP  = Entry ± ATR × tp_atr_multi  (R:R=2.0)
-    tp_atr_multi_above_d1_sma200 = 3.0,  # D1 SMA200 上での TP 倍率
-    tp_atr_multi_below_d1_sma200 = 2.5,  # D1 SMA200 下での TP 倍率
-    tp_atr_multi_rsi_high = 1.5,  # H1 RSI >= 70 での TP 倍率（強いRSI領域で早期利確）
-    tp_atr_multi_rsi_mid  = 2.5,  # H1 50 <= RSI < 70 での TP 倍率
-    tp_atr_multi_rsi_low  = 3.0,  # H1 RSI < 50 での TP 倍率
+    tp_atr_multi = {'BTCUSD': 3.0, 'XAUUSD': 4.5},  # TP  = Entry ± ATR × tp_atr_multi  (R:R=2.0)
+    tp_atr_multi_above_d1_sma200 = {'BTCUSD': 3.0, 'XAUUSD': 4.5},  # D1 SMA200 上での TP 倍率
+    tp_atr_multi_below_d1_sma200 = {'BTCUSD': 2.5, 'XAUUSD': 3.5},  # D1 SMA200 下での TP 倍率
+    tp_atr_multi_rsi_high = {'BTCUSD': 1.5, 'XAUUSD': 2.0},  # H1 RSI >= 70 での TP 倍率（強いRSI領域で早期利確）
+    tp_atr_multi_rsi_mid  = {'BTCUSD': 2.5, 'XAUUSD': 3.5},  # H1 50 <= RSI < 70 での TP 倍率
+    tp_atr_multi_rsi_low  = {'BTCUSD': 3.0, 'XAUUSD': 4.5},  # H1 RSI < 50 での TP 倍率
     hold_max_h1  = 48,
     rsi_exit_thr = 65,          # RSI≥65 でトレーリング起動
     trail_multi  = 2.0,         # トレーリング幅 = ATR × trail_multi (遅らせるため2.5→2.0)
@@ -138,7 +138,7 @@ SCALP = dict(
     jpy_per_usd       = 150.0,   # JPY/USD レート（定期的に手動更新）
     target_profit_jpy = 1000,     # 1トレードあたり目標利益（円）
     sl_ratio          = 3,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
-    tp_atr_fraction   = 0.5,     # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
+    tp_atr_fraction   = {'BTCUSD': 0.5, 'XAUUSD': 0.35},  # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
     signal_tf         = 'M5',    # シグナル生成足（M5クロス→M1で執行確認）
     rsi_buy_thrs      = [55.0, 60.0, 65.0],   # RSI 上抜け → BUY
     rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
@@ -149,7 +149,7 @@ SCALP = dict(
     big_move_lookback  = 12,     # 大変動判定: 過去 N 本（12本=60分）
     big_move_atr_multi = 5.0,   # 大変動判定: 価格変動 > ATR × N で切換え
     m1_early_margin    = 2.0,   # M5 RSI が閾値からこの値以内に接近 + M1 先行クロスで早期執行
-    lot_max            = {'XAUUSD': 0.05},  # シンボル別ロット上限。未設定 = 上限なし
+    lot_max            = {'XAUUSD': 0.05, 'BTCUSD': 0.10},  # シンボル別ロット上限。未設定 = 上限なし
     sma20_slope_bars   = 5,     # SELL SMA20タッチ判定: 傾き計算に使う M1 バー数
     sma20_slope_atr_thr = 0.10, # SELL SMA20タッチ判定: SMA20がATR×この値以上下落していること
 )

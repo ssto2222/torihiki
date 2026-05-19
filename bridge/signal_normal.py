@@ -484,17 +484,21 @@ def compute_signal(symbol: str, cfg: dict,
             sl_price = close_v - atr_v * 0.8
             tp_price = close_v + atr_v * 0.8
         else:
-            tp_multi = cfg['SL'].get('tp_atr_multi', 3.0)
+            def _sl_val(key, default, sym=symbol):
+                v = cfg['SL'].get(key, default)
+                return v.get(sym, default) if isinstance(v, dict) else v
+
+            tp_multi = _sl_val('tp_atr_multi', 3.0)
             if not np.isnan(d1_sma200):
-                tp_multi = (cfg['SL'].get('tp_atr_multi_above_d1_sma200', tp_multi)
+                tp_multi = (_sl_val('tp_atr_multi_above_d1_sma200', tp_multi)
                             if d1_above_sma200 else
-                            cfg['SL'].get('tp_atr_multi_below_d1_sma200', tp_multi))
+                            _sl_val('tp_atr_multi_below_d1_sma200', tp_multi))
             if rsi_h1_v >= 70.0:
-                tp_multi = min(tp_multi, cfg['SL'].get('tp_atr_multi_rsi_high', 2.0))
+                tp_multi = min(tp_multi, _sl_val('tp_atr_multi_rsi_high', 2.0))
             elif rsi_h1_v >= 50.0:
-                tp_multi = min(tp_multi, cfg['SL'].get('tp_atr_multi_rsi_mid',  2.5))
+                tp_multi = min(tp_multi, _sl_val('tp_atr_multi_rsi_mid',  2.5))
             else:
-                tp_multi = min(tp_multi, cfg['SL'].get('tp_atr_multi_rsi_low',  3.0))
+                tp_multi = min(tp_multi, _sl_val('tp_atr_multi_rsi_low',  3.0))
 
             if action == 'sell':
                 sl_price = close_v + atr_v * sl_multi

@@ -186,7 +186,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             state.buy_confirm_bar_time = None
 
         target_usd    = target / jpy_rate
-        tp_atr_frac   = scalp.get('tp_atr_fraction', 0.5)
+        _tp_frac_cfg  = scalp.get('tp_atr_fraction', 0.5)
+        tp_atr_frac   = (_tp_frac_cfg.get(symbol, 0.5) if isinstance(_tp_frac_cfg, dict) else _tp_frac_cfg)
         tp_move       = atr_v * tp_atr_frac
         sl_move       = tp_move * sl_ratio
         lot_raw       = target_usd / (tp_move * contract_size) if tp_move > 0 else 0
