@@ -164,9 +164,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _h1_di_buy   = _di_valid and dip_h1s > dim_h1s   # DI+ > DI-
         _h1_di_sell  = _di_valid and dim_h1s > dip_h1s   # DI- > DI+
 
-        mtf_buy_ok  = (regime_h1s in ('trend_up',   'weak_trend') and
+        # スキャルプはレンジ相場でも有効 → 'range' も許可し DI 方向で絞る
+        # 'trend_down' のみ BUY ブロック、'trend_up' のみ SELL ブロック
+        mtf_buy_ok  = (regime_h1s != 'trend_down' and
                        _h1_di_buy  and _sma20_ok(df, 'buy'))
-        mtf_sell_ok = (regime_h1s in ('trend_down', 'weak_trend') and
+        mtf_sell_ok = (regime_h1s != 'trend_up' and
                        _h1_di_sell and _sma20_ok(df, 'sell'))
 
         # トレンド転換時に逆方向の待機状態をキャンセル
@@ -503,7 +505,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.buy_sma_level   = crossed_level
                 skip = f'pending_scalp_buy_{int(crossed_level)}_wait_sma20'
             else:
-                skip = f'MTF条件NG(buy): H1={regime_h1s}'
+                if regime_h1s == 'trend_down':
+                    skip = f'MTF条件NG(buy): H1=trend_down'
+                elif not _h1_di_buy:
+                    _di_str = (f'DI+={dip_h1s:.1f}<DI-={dim_h1s:.1f}'
+                               if _di_valid else 'DI=NaN')
+                    skip = f'MTF条件NG(buy): {_di_str}'
+                else:
+                    skip = f'MTF条件NG(buy): M5 SMA20下向き'
             new_cross = None
         elif candidate_signal == 'sell':
             if mtf_sell_ok:
@@ -512,7 +521,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.sell_sma_level   = crossed_level
                 skip = f'pending_scalp_sell_{int(crossed_level)}_wait_sma20'
             else:
-                skip = f'MTF条件NG(sell): H1={regime_h1s}'
+                if regime_h1s == 'trend_up':
+                    skip = f'MTF条件NG(sell): H1=trend_up'
+                elif not _h1_di_sell:
+                    _di_str = (f'DI-={dim_h1s:.1f}<DI+={dip_h1s:.1f}'
+                               if _di_valid else 'DI=NaN')
+                    skip = f'MTF条件NG(sell): {_di_str}'
+                else:
+                    skip = f'MTF条件NG(sell): M5 SMA20上向き'
             new_cross = None
         else:
             new_cross = None
