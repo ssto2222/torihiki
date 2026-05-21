@@ -117,7 +117,7 @@ if not _logger.handlers:
 
 CFG = {k: getattr(C, k) for k in
        ['MT5', 'INDICATOR', 'SIGNAL', 'EXECUTION', 'SL', 'RULES', 'LOCAL', 'PLOT',
-        'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS']}
+        'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS', 'WHIPSAW']}
 
 
 def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:

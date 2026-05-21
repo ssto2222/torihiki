@@ -9,11 +9,12 @@ import numpy as np
 from core.data       import fetch_ohlcv
 from core.indicators import (add_h1_indicators, add_d1_indicators,
                               add_m5_indicators)
-from core.strategy   import check_m5_entry_filter, check_m5_surge
+from core.strategy   import check_m5_entry_filter, check_m5_surge, detect_whipsaw
 from core.patterns   import detect_all_patterns, PatternResult
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
-                              _calc_lot, _position_status, _get_jpy_per_usd)
+                              _calc_lot, _position_status, _get_jpy_per_usd,
+                              detect_bidirectional_loss)
 
 if TYPE_CHECKING:
     from bridge.state import SignalState, JpyRateCache
@@ -455,6 +456,19 @@ def compute_signal(symbol: str, cfg: dict,
         if action == 'sell' and h1_sma20_rising:
             action      = 'none'
             skip_reason = 'H1_SMA20_up_sell禁止'
+
+        # ── ウィップソー（行ってこい相場）対策 ──────────────────────
+        if action in ('buy', 'sell', 'limit_buy'):
+            _ws_cfg_n = cfg.get('WHIPSAW', {})
+            _is_ws, _ws_rat = detect_whipsaw(
+                df_h1, _ws_cfg_n.get('ratio_n', 20), _ws_cfg_n.get('ratio_thr', 2.0))
+            _magic_n  = cfg['MT5'].get('magic', 20240101)
+            _is_bd    = detect_bidirectional_loss(
+                symbol, _magic_n, _ws_cfg_n.get('bidir_lookback_h', 4), mt5=mt5)
+            if _is_ws or _is_bd:
+                action      = 'none'
+                skip_reason = (f'ウィップソー(ratio={_ws_rat})' if _is_ws
+                               else '双方向損失検出')
 
         if action == 'buy' and _engine is None and hour_jst == 14:
             action      = 'none'

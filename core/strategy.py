@@ -301,7 +301,26 @@ def detect_big_move(df_m5: pd.DataFrame,
 
     return 'none'
 
-    return 'none'
+
+def detect_whipsaw(df: pd.DataFrame, n: int = 20,
+                   threshold: float = 2.0) -> tuple[bool, float]:
+    """ATR合計 / 実効レンジ比でウィップソー（行ってこい相場）を検出。
+
+    ratio = Σ ATR(N本) / (N本の最高値 - N本の最安値)
+    ratio >= threshold → 価格が往復していてトレンドが出ていない
+
+    Returns: (is_whipsaw, ratio)
+    """
+    if df is None or len(df) < n or 'ATR' not in df.columns:
+        return False, 0.0
+    atr_sum    = float(df['ATR'].iloc[-n:].sum())
+    high_n     = float(df['High'].iloc[-n:].max())
+    low_n      = float(df['Low'].iloc[-n:].min())
+    true_range = high_n - low_n
+    if true_range <= 0 or np.isnan(atr_sum) or np.isnan(true_range):
+        return False, 0.0
+    ratio = atr_sum / true_range
+    return ratio >= threshold, round(ratio, 2)
 
 
 def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
