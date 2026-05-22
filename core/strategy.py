@@ -323,6 +323,192 @@ def detect_whipsaw(df: pd.DataFrame, n: int = 20,
     return ratio >= threshold, round(ratio, 2)
 
 
+def _ew_swing(df: pd.DataFrame, window: int = 3):
+    """EW2 検出用スイングポイント（遅延インポートで循環参照を回避）"""
+    from core.patterns import find_swing_points
+    return find_swing_points(df, window=window)
+
+
+def detect_elliott_w2_buy(
+    df: pd.DataFrame,
+    lookback:        int   = 40,
+    sw_window:       int   = 3,
+    fib_min:         float = 0.382,
+    fib_max:         float = 0.786,
+    min_wave1_atr:   float = 1.5,
+    rsi_div_min:     float = 3.0,
+    w2_rsi_max:      float = 45.0,
+    w2_bars_ago_max: int   = 5,
+) -> dict | None:
+    """エリオット波動 Wave2 第2底 BUY シグナル検出（M5 推奨）。
+
+    検出条件:
+      1. 直近 w2_bars_ago_max 本以内に確定スイングロー（第2底）が存在する
+      2. 第2底の RSI ≤ w2_rsi_max（売られすぎ圏）
+      3. 現在の RSI が第2底より高い（反転上昇開始）
+      4. 第2底と第1底の間にスイングハイ（Wave1 ピーク）が存在する
+      5. Wave1 の高さ ≥ ATR × min_wave1_atr
+      6. 第2底が Wave1 の Fibonacci fib_min〜fib_max 押し戻し範囲
+      7. 第2底 RSI > 第1底 RSI（強気ダイバージェンス）≥ rsi_div_min
+    """
+    if df is None or len(df) < lookback + sw_window + 2:
+        return None
+    if not {'RSI', 'ATR', 'High', 'Low', 'Close'}.issubset(df.columns):
+        return None
+
+    df_w = df.iloc[-lookback:]
+    rsi  = df_w['RSI'].values
+    atr  = float(df['ATR'].iloc[-1])
+    n    = len(df_w)
+
+    if atr <= 0 or np.isnan(atr):
+        return None
+
+    sh, sl = _ew_swing(df_w, window=sw_window)
+
+    # ① 第2底候補: 直近 w2_bars_ago_max 本以内の確定スイングロー
+    w2_cands = [(i, p) for i, p in sl if i >= n - 1 - w2_bars_ago_max]
+    if not w2_cands:
+        return None
+    w2_idx, w2_low = w2_cands[-1]
+    w2_rsi = float(rsi[w2_idx])
+
+    if np.isnan(w2_rsi) or w2_rsi > w2_rsi_max:
+        return None
+
+    # ③ RSI が第2底から反転上昇中
+    cur_rsi = float(rsi[-1])
+    if np.isnan(cur_rsi) or cur_rsi <= w2_rsi:
+        return None
+
+    # ④ Wave1 ピーク: 第2底より前のスイングハイ
+    prev_highs = [(i, p) for i, p in sh if i < w2_idx]
+    if not prev_highs:
+        return None
+    w1_peak_idx, w1_peak = prev_highs[-1]
+
+    # ④ 第1底: Wave1 ピークより前のスイングロー
+    first_lows = [(i, p) for i, p in sl if i < w1_peak_idx]
+    if not first_lows:
+        return None
+    w1_idx, w1_low = first_lows[-1]
+    w1_rsi = float(rsi[w1_idx])
+
+    # ⑤ Wave1 の高さチェック
+    wave1_size = w1_peak - w1_low
+    if wave1_size < atr * min_wave1_atr or wave1_size <= 0:
+        return None
+
+    # ⑥ フィボナッチ リトレースメント
+    fib_level = (w1_peak - w2_low) / wave1_size
+    if not (fib_min <= fib_level <= fib_max):
+        return None
+
+    # ⑦ 強気ダイバージェンス: 第2底 RSI > 第1底 RSI
+    if np.isnan(w1_rsi) or (w2_rsi - w1_rsi) < rsi_div_min:
+        return None
+
+    return {
+        'signal':      'elliott_w2_buy',
+        'w1_low':      round(w1_low, 2),
+        'w1_peak':     round(w1_peak, 2),
+        'w2_low':      round(w2_low, 2),
+        'fib_level':   round(fib_level, 3),
+        'rsi_div':     round(w2_rsi - w1_rsi, 1),
+        'w2_bars_ago': n - 1 - w2_idx,
+        'fib_38':      round(w1_peak - wave1_size * 0.382, 2),
+        'fib_50':      round(w1_peak - wave1_size * 0.500, 2),
+        'fib_62':      round(w1_peak - wave1_size * 0.618, 2),
+    }
+
+
+def detect_elliott_w2_sell(
+    df: pd.DataFrame,
+    lookback:        int   = 40,
+    sw_window:       int   = 3,
+    fib_min:         float = 0.382,
+    fib_max:         float = 0.786,
+    min_wave1_atr:   float = 1.5,
+    rsi_div_min:     float = 3.0,
+    w2_rsi_min:      float = 55.0,
+    w2_bars_ago_max: int   = 5,
+) -> dict | None:
+    """エリオット波動 Wave2 第2天井 SELL シグナル検出（M5 推奨）。
+
+    下落 Wave1 → 反発 Wave2（第2天井）→ Wave3 下落へのエントリー。
+    RSI 弱気ダイバージェンス: 第2天井の RSI < 第1天井の RSI。
+    """
+    if df is None or len(df) < lookback + sw_window + 2:
+        return None
+    if not {'RSI', 'ATR', 'High', 'Low', 'Close'}.issubset(df.columns):
+        return None
+
+    df_w = df.iloc[-lookback:]
+    rsi  = df_w['RSI'].values
+    atr  = float(df['ATR'].iloc[-1])
+    n    = len(df_w)
+
+    if atr <= 0 or np.isnan(atr):
+        return None
+
+    sh, sl = _ew_swing(df_w, window=sw_window)
+
+    # ① 第2天井候補: 直近 w2_bars_ago_max 本以内の確定スイングハイ
+    w2_cands = [(i, p) for i, p in sh if i >= n - 1 - w2_bars_ago_max]
+    if not w2_cands:
+        return None
+    w2_idx, w2_high = w2_cands[-1]
+    w2_rsi = float(rsi[w2_idx])
+
+    if np.isnan(w2_rsi) or w2_rsi < w2_rsi_min:
+        return None
+
+    # ③ RSI が第2天井から反転下落中
+    cur_rsi = float(rsi[-1])
+    if np.isnan(cur_rsi) or cur_rsi >= w2_rsi:
+        return None
+
+    # ④ Wave1 ボトム: 第2天井より前のスイングロー
+    prev_lows = [(i, p) for i, p in sl if i < w2_idx]
+    if not prev_lows:
+        return None
+    w1_valley_idx, w1_valley = prev_lows[-1]
+
+    # ④ 第1天井: Wave1 ボトムより前のスイングハイ
+    first_highs = [(i, p) for i, p in sh if i < w1_valley_idx]
+    if not first_highs:
+        return None
+    w1_idx, w1_high = first_highs[-1]
+    w1_rsi = float(rsi[w1_idx])
+
+    # ⑤ Wave1 の高さ
+    wave1_size = w1_high - w1_valley
+    if wave1_size < atr * min_wave1_atr or wave1_size <= 0:
+        return None
+
+    # ⑥ フィボナッチ
+    fib_level = (w2_high - w1_valley) / wave1_size
+    if not (fib_min <= fib_level <= fib_max):
+        return None
+
+    # ⑦ 弱気ダイバージェンス: 第1天井 RSI > 第2天井 RSI
+    if np.isnan(w1_rsi) or (w1_rsi - w2_rsi) < rsi_div_min:
+        return None
+
+    return {
+        'signal':      'elliott_w2_sell',
+        'w1_high':     round(w1_high, 2),
+        'w1_valley':   round(w1_valley, 2),
+        'w2_high':     round(w2_high, 2),
+        'fib_level':   round(fib_level, 3),
+        'rsi_div':     round(w1_rsi - w2_rsi, 1),
+        'w2_bars_ago': n - 1 - w2_idx,
+        'fib_38':      round(w1_valley + wave1_size * 0.382, 2),
+        'fib_50':      round(w1_valley + wave1_size * 0.500, 2),
+        'fib_62':      round(w1_valley + wave1_size * 0.618, 2),
+    }
+
+
 def find_m5_entry(df_m5: pd.DataFrame, signal_time: pd.Timestamp,
                   direction: str, cfg: dict,
                   rsi_d1: float = 50.0,

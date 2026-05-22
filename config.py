@@ -154,6 +154,20 @@ SCALP = dict(
     sma20_slope_atr_thr = 0.10, # SELL SMA20タッチ判定: SMA20がATR×この値以上下落していること
 )
 
+# ── エリオット波動 Wave2 エントリー ───────────────────────────────
+ELLIOTT = dict(
+    enabled          = True,
+    lookback_bars    = 40,    # スイング探索バー数
+    sw_window        = 3,     # スイングポイント確定ウィンドウ（両側 N 本）
+    fib_min          = 0.382, # Fibonacci 押し戻し下限
+    fib_max          = 0.786, # Fibonacci 押し戻し上限
+    min_wave1_atr    = 1.5,   # Wave1 の最小サイズ（ATR 倍）
+    rsi_div_min      = 3.0,   # 強気/弱気ダイバージェンス最小差分
+    w2_buy_rsi_max   = 45.0,  # BUY: 第2底の RSI 上限（売られすぎ圏）
+    w2_sell_rsi_min  = 55.0,  # SELL: 第2天井の RSI 下限（買われすぎ圏）
+    w2_bars_ago_max  = 5,     # 第2底/天井が直近 N 本以内であること
+)
+
 # ── ウィップソー（行ってこい相場）対策 ────────────────────────────
 WHIPSAW = dict(
     ratio_n            = 20,    # ATR集計本数（M5: 100分 / H1: 20時間）
