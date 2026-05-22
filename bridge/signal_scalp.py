@@ -320,6 +320,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # ── Elliott Wave2 エントリー ────────────────────────────────────
         _ew2_signal_type = None
+        _ew2_tp_price    = None   # Fibonacci extension TP（確定後に上書き）
+        _ew2_sl_price    = None   # W2 失効ライン SL
         _ew_cfg = cfg.get('ELLIOTT', {})
         if (_ew_cfg.get('enabled', True)
                 and confirmed_signal is None
@@ -351,9 +353,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         crossed_level    = _ew2b['w2_low']
                         _ew2_signal_type = (f"EW2_buy_fib{_ew2b['fib_level']:.2f}"
                                             f"_div{_ew2b['rsi_div']:.1f}")
+                        _ew2_fib_ext  = _ew_cfg.get('fib_tp_ext', 1.618)
+                        _ew2_sl_buf   = _ew_cfg.get('sl_buffer_atr', 0.3)
+                        _ew2_tp_price = _ew2b['w2_low'] + _ew2b['wave1_size'] * _ew2_fib_ext
+                        _ew2_sl_price = _ew2b['w2_low'] - atr_v * _ew2_sl_buf
                         _logger.info(f'[EW2-BUY] {symbol} W2底={_ew2b["w2_low"]:,.2f} '
                                      f'Fib={_ew2b["fib_level"]:.1%} '
-                                     f'RSI_div={_ew2b["rsi_div"]:.1f}')
+                                     f'RSI_div={_ew2b["rsi_div"]:.1f} '
+                                     f'TP={_ew2_tp_price:,.2f} SL={_ew2_sl_price:,.2f}')
             if confirmed_signal is None and sell_enabled and not avoid_sell_surge and mtf_sell_ok:
                 _ew2s = detect_elliott_w2_sell(
                     df, lookback=_ew_lb, sw_window=_ew_sw,
@@ -372,9 +379,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         crossed_level    = _ew2s['w2_high']
                         _ew2_signal_type = (f"EW2_sell_fib{_ew2s['fib_level']:.2f}"
                                             f"_div{_ew2s['rsi_div']:.1f}")
+                        _ew2_fib_ext  = _ew_cfg.get('fib_tp_ext', 1.618)
+                        _ew2_sl_buf   = _ew_cfg.get('sl_buffer_atr', 0.3)
+                        _ew2_tp_price = _ew2s['w2_high'] - _ew2s['wave1_size'] * _ew2_fib_ext
+                        _ew2_sl_price = _ew2s['w2_high'] + atr_v * _ew2_sl_buf
                         _logger.info(f'[EW2-SELL] {symbol} W2天井={_ew2s["w2_high"]:,.2f} '
                                      f'Fib={_ew2s["fib_level"]:.1%} '
-                                     f'RSI_div={_ew2s["rsi_div"]:.1f}')
+                                     f'RSI_div={_ew2s["rsi_div"]:.1f} '
+                                     f'TP={_ew2_tp_price:,.2f} SL={_ew2_sl_price:,.2f}')
 
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
@@ -674,6 +686,21 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 tp_price = max(close_v + tp_move, min(close_v + tp_move * 8, _pt_s))
             else:
                 tp_price = min(close_v - tp_move, max(close_v - tp_move * 8, _pt_s))
+
+        # EW2 TP/SL 上書き: Fibonacci 拡張TP + W2 失効ラインSL
+        # TP = W2底 + Wave1×1.618 (Wave3 目標) — 標準ATR-TPより通常大きい
+        # SL = W2底 - ATR×buffer  — W2を割ったら波動構造崩壊 → タイトなSL
+        if _ew2_tp_price is not None and action in ('buy', 'sell'):
+            if action == 'buy':
+                if _ew2_tp_price > close_v:
+                    tp_price = _ew2_tp_price
+                if _ew2_sl_price is not None and _ew2_sl_price < close_v:
+                    sl_price = _ew2_sl_price
+            else:
+                if _ew2_tp_price < close_v:
+                    tp_price = _ew2_tp_price
+                if _ew2_sl_price is not None and _ew2_sl_price > close_v:
+                    sl_price = _ew2_sl_price
 
         point  = float(info.point) if info else 0.01
         max_pt = max(1, int(tp_move * 0.5 / point))

@@ -166,6 +166,8 @@ ELLIOTT = dict(
     w2_buy_rsi_max   = 45.0,  # BUY: 第2底の RSI 上限（売られすぎ圏）
     w2_sell_rsi_min  = 55.0,  # SELL: 第2天井の RSI 下限（買われすぎ圏）
     w2_bars_ago_max  = 5,     # 第2底/天井が直近 N 本以内であること
+    fib_tp_ext       = 1.618, # TP = W2底 + Wave1_size × fib_tp_ext（Wave3 黄金比目標）
+    sl_buffer_atr    = 0.3,   # SL = W2底 - ATR × sl_buffer_atr（波動失効ライン）
 )
 
 # ── ウィップソー（行ってこい相場）対策 ────────────────────────────
