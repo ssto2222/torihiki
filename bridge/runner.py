@@ -108,7 +108,6 @@ from bridge.sma20        import _load_sma20_touch_margins
 from bridge.signal_normal  import compute_signal
 from bridge.signal_scalp   import compute_scalp_signal
 from bridge.param_override import apply_overrides
-from bridge.discord_cmd    import start_discord_bot
 from bridge.dashboard      import print_poll_status, activate_dashboard_mode
 from core.macro_analysis   import analyze_macro_bias
 
@@ -224,8 +223,6 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
         else:
             print("  時間帯バイアス: bias_file 未生成 → analyze_time_bias.py を先に実行してください")
     print("=" * 60)
-
-    start_discord_bot(cfg)
 
     # MT5 接続リトライ（ターミナル起動直後などに間に合わないケースに対応）
     _MT5_CONNECT_RETRIES = 3
