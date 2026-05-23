@@ -98,7 +98,7 @@ import MetaTrader5 as mt5
 import config as C
 from core.data import connect_mt5
 
-from bridge.state        import SignalState, ScalpState, TimeBiasState, JpyRateCache, Sma20TouchCache
+from bridge.state        import SignalState, ScalpState, TimeBiasState, JpyRateCache, Sma20TouchCache, MacroBiasState
 from bridge.io           import write_signal, read_ea_state
 from bridge.notify       import send_discord, check_pause_signal, _build_discord_signal_msg
 from bridge.utils        import (_setup_file_logging, _is_in_danger_skip_window,
@@ -110,6 +110,7 @@ from bridge.signal_scalp   import compute_scalp_signal
 from bridge.param_override import apply_overrides
 from bridge.discord_cmd    import start_discord_bot
 from bridge.dashboard      import print_poll_status
+from core.macro_analysis   import analyze_macro_bias
 
 _logger = logging.getLogger('torihiki')
 _logger.setLevel(logging.DEBUG)
@@ -118,7 +119,7 @@ if not _logger.handlers:
 
 CFG = {k: getattr(C, k) for k in
        ['MT5', 'INDICATOR', 'SIGNAL', 'EXECUTION', 'SL', 'RULES', 'LOCAL', 'PLOT',
-        'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS', 'WHIPSAW', 'ELLIOTT']}
+        'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS', 'WHIPSAW', 'ELLIOTT', 'MACRO']}
 
 
 def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
@@ -168,11 +169,12 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     deviation  = cfg['MT5'].get('deviation', 10)
 
     # 状態インスタンスを生成（各ポーリング間で共有される）
-    sig_state  = SignalState()
-    sc_state   = ScalpState()
-    tb_state   = TimeBiasState()
-    jpy_cache  = JpyRateCache()
+    sig_state   = SignalState()
+    sc_state    = ScalpState()
+    tb_state    = TimeBiasState()
+    jpy_cache   = JpyRateCache()
     sma20_cache = Sma20TouchCache()
+    macro_state = MacroBiasState()
     last_discord_action = ['none']
 
     rebias_interval = tb_cfg.get('rebias_interval_hours', 24)
@@ -254,12 +256,44 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
             effective_cfg = apply_overrides(cfg)
             _eff_scalp    = effective_cfg.get('SCALP', {})
             _eff_rules    = effective_cfg.get('RULES', {})
+            _macro_cfg    = effective_cfg.get('MACRO', {})
+
+            # ── マクロバイアス定期更新 ─────────────────────────────────
+            if _macro_cfg.get('enabled', True):
+                _macro_interval_h = _macro_cfg.get('update_interval_h', 4)
+                _macro_elapsed_h  = (time.time() - macro_state.last_updated_at) / 3600
+                if macro_state.last_updated_at == 0.0 or _macro_elapsed_h >= max(_macro_interval_h, 0.1):
+                    try:
+                        _close_now = 0.0
+                        _atr_now   = 0.0
+                        _mb = analyze_macro_bias(symbol, effective_cfg, _close_now, _atr_now, mt5=mt5)
+                        macro_state.bias            = _mb['bias']
+                        macro_state.bias_label      = _mb['bias_label']
+                        macro_state.buy_tp_multi    = _mb['buy_tp_multi']
+                        macro_state.sell_tp_multi   = _mb['sell_tp_multi']
+                        macro_state.buy_risk_multi  = _mb['buy_risk_multi']
+                        macro_state.sell_risk_multi = _mb['sell_risk_multi']
+                        macro_state.score_adj_buy   = _mb['score_adj_buy']
+                        macro_state.score_adj_sell  = _mb['score_adj_sell']
+                        macro_state.nearest_nl      = _mb['nearest_nl']
+                        macro_state.nl_dir          = _mb['nl_dir']
+                        macro_state.target_up       = _mb['target_up']
+                        macro_state.target_down     = _mb['target_down']
+                        macro_state.d1_rsi          = _mb['d1_rsi']
+                        macro_state.d1_above_sma200 = _mb['d1_above_sma200']
+                        macro_state.summary         = _mb['summary']
+                        macro_state.last_updated_at = time.time()
+                        print(f"  [マクロ] {macro_state.summary}")
+                    except Exception as _me:
+                        print(f"  [マクロ] 分析失敗: {_me}")
 
             if mode == 'scalp':
                 data = compute_scalp_signal(symbol, effective_cfg, sc_state, sig_state,
-                                            jpy_cache, sma20_cache, mt5=mt5)
+                                            jpy_cache, sma20_cache, mt5=mt5,
+                                            macro_state=macro_state)
             else:
-                data = compute_signal(symbol, effective_cfg, sig_state, jpy_cache, mt5=mt5)
+                data = compute_signal(symbol, effective_cfg, sig_state, jpy_cache,
+                                      mt5=mt5, macro_state=macro_state)
 
             if data:
                 _fail_count = 0
@@ -323,7 +357,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                     tb_state.hours          = _build_time_bias(cfg)
                     tb_state.last_rebias_at = time.time()
 
-                print_poll_status(data, mode, itr, bal, consec_losses, effective_cfg)
+                print_poll_status(data, mode, itr, bal, consec_losses, effective_cfg,
+                                  macro_state=macro_state)
 
                 # Discord 通知: アクション変化時のみ
                 curr_action = data.get('action', 'none')

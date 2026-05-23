@@ -21,7 +21,7 @@ from bridge.utils    import (_detect_regime, _regime_lot_multi,
 from bridge.signal_normal import compute_signal
 
 if TYPE_CHECKING:
-    from bridge.state import ScalpState, SignalState, JpyRateCache, Sma20TouchCache
+    from bridge.state import ScalpState, SignalState, JpyRateCache, Sma20TouchCache, MacroBiasState
 
 _logger = logging.getLogger('torihiki')
 
@@ -31,7 +31,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                          sig_state: 'SignalState',
                          jpy_cache: 'JpyRateCache',
                          sma20_cache: 'Sma20TouchCache',
-                         *, mt5) -> dict | None:
+                         *, mt5,
+                         macro_state: 'MacroBiasState | None' = None) -> dict | None:
     """
     スキャルプモード: M5 RSI がクロスしたら SMA20 タッチ → M1 確認バー 2 本でエントリー。
     state は ScalpState、sig_state は通常モードフォールバック用 SignalState。
@@ -836,6 +837,21 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 if _ew2_sl_price is not None and _ew2_sl_price > close_v:
                     sl_price = _ew2_sl_price
 
+        # マクロバイアス TP/SL 倍率適用（EW2上書き後に適用し最終 TP/SL を決定）
+        if macro_state is not None and action in ('buy', 'sell'):
+            _mb_tp_m = macro_state.buy_tp_multi  if action == 'buy' else macro_state.sell_tp_multi
+            _mb_rm   = macro_state.buy_risk_multi if action == 'buy' else macro_state.sell_risk_multi
+            if action == 'buy':
+                _tp_dist = tp_price - close_v
+                _sl_dist = close_v  - sl_price
+                tp_price = close_v + _tp_dist * _mb_tp_m
+                sl_price = close_v - _sl_dist * _mb_rm
+            else:
+                _tp_dist = close_v  - tp_price
+                _sl_dist = sl_price - close_v
+                tp_price = close_v - _tp_dist * _mb_tp_m
+                sl_price = close_v + _sl_dist * _mb_rm
+
         point  = float(info.point) if info else 0.01
         max_pt = max(1, int(tp_move * 0.5 / point))
 
@@ -912,6 +928,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'rvol': (round(float(df['RVOL'].iloc[-1]), 2)
                      if 'RVOL' in df.columns and not np.isnan(float(df['RVOL'].iloc[-1]))
                      else 0.0),
+            'macro_bias':         macro_state.bias       if macro_state else 0.0,
+            'macro_bias_label':   macro_state.bias_label if macro_state else 'neutral',
+            'macro_summary':      macro_state.summary    if macro_state else '',
         }
 
     except Exception:

@@ -57,8 +57,8 @@ def fetch_ohlcv(symbol: str, tf_str: str, bars: int) -> pd.DataFrame | None:
         from datetime import datetime, timezone, timedelta
         tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,'M15':mt5.TIMEFRAME_M15,
                   'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
-                  'D1':mt5.TIMEFRAME_D1}
-        tf_minutes = {'M1':1,'M5':5,'M15':15,'H1':60,'H4':240,'D1':1440}
+                  'D1':mt5.TIMEFRAME_D1,'W1':mt5.TIMEFRAME_W1,'MN1':mt5.TIMEFRAME_MN1}
+        tf_minutes = {'M1':1,'M5':5,'M15':15,'H1':60,'H4':240,'D1':1440,'W1':10080,'MN1':43200}
 
         rates = mt5.copy_rates_from_pos(symbol, tf_map[tf_str], 0, bars)
         if rates is None or len(rates) == 0:
@@ -126,8 +126,8 @@ def fetch_ohlcv_range(symbol: str, tf_str: str,
         from datetime import timedelta
         tf_map = {'M1':mt5.TIMEFRAME_M1,'M5':mt5.TIMEFRAME_M5,'M15':mt5.TIMEFRAME_M15,
                   'H1':mt5.TIMEFRAME_H1,'H4':mt5.TIMEFRAME_H4,
-                  'D1':mt5.TIMEFRAME_D1}
-        tf_minutes = {'M1':1,'M5':5,'M15':15,'H1':60,'H4':240,'D1':1440}
+                  'D1':mt5.TIMEFRAME_D1,'W1':mt5.TIMEFRAME_W1,'MN1':mt5.TIMEFRAME_MN1}
+        tf_minutes = {'M1':1,'M5':5,'M15':15,'H1':60,'H4':240,'D1':1440,'W1':10080,'MN1':43200}
 
         # MT5 は tz-naive UTC datetime を要求する
         dt_from = _strip_tz(date_from)

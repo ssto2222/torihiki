@@ -17,7 +17,7 @@ from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               detect_bidirectional_loss)
 
 if TYPE_CHECKING:
-    from bridge.state import SignalState, JpyRateCache
+    from bridge.state import SignalState, JpyRateCache, MacroBiasState
 
 _logger = logging.getLogger('torihiki')
 
@@ -33,7 +33,8 @@ except Exception as _e:
 def compute_signal(symbol: str, cfg: dict,
                    state: 'SignalState',
                    jpy_cache: 'JpyRateCache',
-                   *, mt5) -> dict | None:
+                   *, mt5,
+                   macro_state: 'MacroBiasState | None' = None) -> dict | None:
     """
     バックテストと同じシグナルロジック（クロス検出）でリアルタイムシグナルを生成。
     state は呼び出しをまたいで保持される SignalState インスタンス。
@@ -296,6 +297,10 @@ def compute_signal(symbol: str, cfg: dict,
         if m5_ok:
             score = min(100, score + 10)
 
+        # マクロバイアス スコア補正
+        if macro_state is not None:
+            score = int(np.clip(score + macro_state.score_adj_buy, 0, 100))
+
         if result is not None and result.signal != 'BUY':
             active_buy  = False
             skip_reason = ' | '.join(result.reasons[:2])
@@ -514,11 +519,23 @@ def compute_signal(symbol: str, cfg: dict,
             else:
                 tp_multi = min(tp_multi, _sl_val('tp_atr_multi_rsi_low',  3.0))
 
+            # マクロバイアス TP/リスク倍率適用
+            _macro_tp_m   = 1.0
+            _macro_sl_mul = sl_multi
+            if macro_state is not None:
+                if action in ('buy', 'limit_buy'):
+                    _macro_tp_m   = macro_state.buy_tp_multi
+                    _macro_sl_mul = sl_multi * macro_state.buy_risk_multi
+                elif action == 'sell':
+                    _macro_tp_m   = macro_state.sell_tp_multi
+                    _macro_sl_mul = sl_multi * macro_state.sell_risk_multi
+            tp_multi  = tp_multi  * _macro_tp_m
+
             if action == 'sell':
-                sl_price = close_v + atr_v * sl_multi
+                sl_price = close_v + atr_v * _macro_sl_mul
                 tp_price = close_v - atr_v * tp_multi
             else:
-                sl_price = close_v - atr_v * sl_multi
+                sl_price = close_v - atr_v * _macro_sl_mul
                 tp_price = close_v + atr_v * tp_multi
 
             bb_near_pct = cfg['INDICATOR'].get('bb_tp_near_pct', 0.85)
@@ -560,7 +577,9 @@ def compute_signal(symbol: str, cfg: dict,
         regime_m5  = _detect_regime(adx_m5_v, dip_m5, dim_m5, regime_cfg)
         r_multi    = _regime_lot_multi(regime_h1, regime_m5, regime_cfg)
 
-        lot_base = _calc_lot(balance_usd, risk_pct, atr_v * sl_multi,
+        _lot_sl_dist = atr_v * (macro_state.buy_risk_multi if (macro_state and action in ('buy','limit_buy')) else
+                                macro_state.sell_risk_multi if (macro_state and action == 'sell') else 1.0) * sl_multi
+        lot_base = _calc_lot(balance_usd, risk_pct, _lot_sl_dist,
                              c_sz, l_min, l_max, l_step, cfg['BRIDGE']['lot_size'])
         lot_size = max(l_min, min(l_max, round(lot_base * r_multi / l_step) * l_step))
 
@@ -723,6 +742,9 @@ def compute_signal(symbol: str, cfg: dict,
             'limit_prices':       limit_prices,
             'h1_patterns':        h1_patterns,
             'pattern_tp_target':  state.pattern_tp_target,
+            'macro_bias':         macro_state.bias        if macro_state else 0.0,
+            'macro_bias_label':   macro_state.bias_label  if macro_state else 'neutral',
+            'macro_summary':      macro_state.summary     if macro_state else '',
         }
     except Exception:
         _logger.exception("[ブリッジ] compute_signal 例外")
