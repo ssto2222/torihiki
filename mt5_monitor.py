@@ -21,6 +21,7 @@ import logging.handlers
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -148,6 +149,268 @@ def restart_all(bridge_cmd: list[str]) -> None:
     _logger.info(f"ブリッジを再起動しました: {' '.join(bridge_cmd)}")
 
 
+# ─── Discord ウォッチドッグボット ───────────────────────────────────────
+
+def _is_bridge_running() -> bool:
+    """mt5_ea_bridge.py が実行中かどうか psutil で確認する"""
+    try:
+        for p in psutil.process_iter(['cmdline']):
+            if MAIN_SCRIPT in ' '.join(p.info.get('cmdline') or []):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _load_bot_cfg() -> dict:
+    """ボット用の設定辞書（config.py + オーバーライド適用済み）を返す"""
+    try:
+        import config as C
+        from bridge.param_override import apply_overrides
+        _KEYS = ['MT5', 'INDICATOR', 'SIGNAL', 'EXECUTION', 'SL', 'RULES', 'LOCAL',
+                 'PLOT', 'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS', 'WHIPSAW', 'ELLIOTT', 'MACRO']
+        cfg = {k: getattr(C, k) for k in _KEYS if hasattr(C, k)}
+        return apply_overrides(cfg)
+    except Exception:
+        return {}
+
+
+def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
+    """
+    ウォッチドッグ用 Discord ボットをバックグラウンドスレッドで起動する。
+
+    shared dict:
+        proc          : Popen | None   現在のブリッジプロセス
+        paused        : bool           True = 次の再起動をスキップ
+        cmd           : list[str]      ブリッジ起動コマンド
+        use_new_console: bool          CREATE_NEW_CONSOLE フラグ
+        restart_count : int            再起動回数（表示用）
+
+    discord.py 未インストール / secret.py に認証情報なければ None を返す。
+    ブリッジ側の discord_cmd.py はボットを起動しないため、同一トークンの競合なし。
+    """
+    try:
+        from secret import DISCORD_BOT_TOKEN as _token, DISCORD_CMD_CHANNEL_ID as _chan_id
+        _chan_id = int(_chan_id)
+    except (ImportError, AttributeError):
+        _logger.info('ウォッチドッグボット: secret.py に認証情報なし → スキップ')
+        return None
+
+    try:
+        import discord as _discord
+    except ModuleNotFoundError:
+        _logger.warning('ウォッチドッグボット: discord.py 未インストール → スキップ (pip install discord.py)')
+        return None
+
+    # bridge.param_override を使ったパラメータコマンド統合（任意）
+    try:
+        from bridge.param_override import (
+            set_override, set_override_path, reset_override_path,
+            clear_overrides, current_values_text, section_lines,
+            get_value_text, all_overrides_text,
+            parse_value, PARAMS, CFG_SECTIONS,
+        )
+        from bridge.discord_cmd import (
+            _paginate, _lines_to_pages, _build_command_help,
+            _build_section_help, _build_key_help, _readme_chunks,
+        )
+        _has_param_cmds = True
+    except ImportError:
+        _has_param_cmds = False
+
+    _CREATE_NEW_CONSOLE = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0)
+
+    class _MonitorBot(_discord.Client):
+        def __init__(self) -> None:
+            intents = _discord.Intents.default()
+            intents.message_content = True
+            super().__init__(intents=intents)
+
+        async def on_ready(self) -> None:
+            _logger.info(f'ウォッチドッグボット起動: {self.user}')
+            ch = self.get_channel(_chan_id)
+            if ch:
+                await ch.send('【ウォッチドッグボット】起動しました。`!help` でコマンド一覧')
+
+        async def on_message(self, msg: _discord.Message) -> None:
+            if msg.author == self.user or msg.channel.id != _chan_id:
+                return
+            content = msg.content.strip()
+            if not content.startswith('!'):
+                return
+            parts = content[1:].split()
+            if not parts:
+                return
+            cmd, args = parts[0].lower(), parts[1:]
+            try:
+                replies = await self._dispatch(cmd, args)
+            except Exception as e:
+                replies = [f'エラー: {e}']
+                _logger.exception(f'ウォッチドッグボット コマンドエラー: {content}')
+            for reply in replies:
+                if reply:
+                    await msg.channel.send(reply)
+
+        async def _dispatch(self, cmd: str, args: list[str]) -> list[str]:
+            # ── !start ──────────────────────────────────────────────
+            if cmd == 'start':
+                if _is_bridge_running():
+                    return ['⚠️ ブリッジは既に起動中です。']
+                shared['paused'] = False
+                return ['✅ 再起動を許可しました。数秒以内に起動します。']
+
+            # ── !stop ────────────────────────────────────────────────
+            if cmd == 'stop':
+                shared['paused'] = True
+                proc = shared.get('proc')
+                if proc is not None and proc.poll() is None:
+                    try:
+                        proc.terminate()
+                        _logger.info(f'Discord [stop] ブリッジを終了 PID={proc.pid}')
+                        return [
+                            f'🛑 ブリッジを停止しました (PID={proc.pid})。'
+                            '再起動しません。`!start` で再開できます。'
+                        ]
+                    except Exception as e:
+                        return [f'❌ 停止に失敗: {e}']
+                # psutil でフォールバック
+                stopped = []
+                for p in psutil.process_iter(['pid', 'cmdline']):
+                    if MAIN_SCRIPT in ' '.join(p.info.get('cmdline') or []):
+                        try:
+                            p.kill()
+                            stopped.append(str(p.pid))
+                        except Exception:
+                            pass
+                if stopped:
+                    return [
+                        f'🛑 ブリッジを停止しました (PID={", ".join(stopped)})。'
+                        '`!start` で再開できます。'
+                    ]
+                return ['⚠️ ブリッジは既に停止しています。']
+
+            # ── !status ──────────────────────────────────────────────
+            if cmd == 'status':
+                proc    = shared.get('proc')
+                running = (proc is not None and proc.poll() is None) or _is_bridge_running()
+                paused  = shared.get('paused', False)
+                rc      = shared.get('restart_count', 0)
+                lines   = [
+                    '**【ウォッチドッグ ステータス】**',
+                    f'ブリッジ: {"✅ 稼働中" if running else "❌ 停止中"}',
+                    f'一時停止: {"はい（`!start` で再開）" if paused else "いいえ"}',
+                    f'再起動回数: {rc}',
+                ]
+                if proc is not None:
+                    lines.append(f'PID: {proc.pid}')
+                return ['\n'.join(lines)]
+
+            # ── !help ────────────────────────────────────────────────
+            if cmd == 'help' and not args:
+                proc_help = (
+                    '**プロセス管理コマンド**\n'
+                    '```\n'
+                    '!start    ブリッジを起動（停止中のとき）\n'
+                    '!stop     ブリッジを停止（再起動しない）\n'
+                    '!status   現在の稼働状態を表示\n'
+                    '```\n'
+                )
+                if _has_param_cmds:
+                    return [proc_help + _build_command_help()]
+                return [proc_help]
+
+            # ── パラメータコマンド ─────────────────────────────────
+            if _has_param_cmds:
+                cfg = _load_bot_cfg()
+
+                if cmd == 'help':
+                    t = args[0] if args else ''
+                    if '.' in t and t.count('.') == 1:
+                        return [_build_key_help(cfg, t)]
+                    return _build_section_help(cfg, t.upper())
+
+                if cmd == 'list':
+                    lines = ['**セクション一覧**  (!help SECTION で詳細)', '```']
+                    for sec in CFG_SECTIONS:
+                        n = len(cfg.get(sec, {})) if isinstance(cfg.get(sec), dict) else 0
+                        lines.append(f'{sec:<14} ({n}パラメータ)')
+                    lines.append('```')
+                    return ['\n'.join(lines)]
+
+                if cmd == 'readme':
+                    keyword = ' '.join(args)
+                    pages   = _readme_chunks(keyword)
+                    total   = len(pages)
+                    return [p + (f'\n（{i+1}/{total}）' if total > 1 else '')
+                            for i, p in enumerate(pages)]
+
+                if cmd == 'overrides':
+                    return _paginate(all_overrides_text())
+
+                if cmd in ('params', 'get'):
+                    if not args:
+                        return [current_values_text(cfg)]
+                    t = args[0]
+                    if '.' in t:
+                        return [get_value_text(cfg, t)]
+                    if t.upper() in CFG_SECTIONS or t.isupper():
+                        return _lines_to_pages(section_lines(cfg, t.upper()),
+                                               f'**{t.upper()}** 現在値')
+                    spec = PARAMS.get(t.lower())
+                    if spec:
+                        return [get_value_text(cfg, f'{spec.section}.{spec.key}')]
+                    return [f'不明: `{t}`  例: `!get SCALP` / `!get SCALP.cooldown_min`']
+
+                if cmd == 'set':
+                    if len(args) < 2:
+                        return ['使い方: `!set SECTION.KEY value` または `!set shortname value`']
+                    name, raw = args[0], ' '.join(args[1:])
+                    if '.' in name:
+                        val, err = set_override_path(name, raw, cfg)
+                        if err:
+                            return [err]
+                        _logger.info(f'Discord [set] {name} = {val}')
+                        return [f'`{name}` を **{val}** に設定しました\n次のポーリングから反映されます']
+                    name_l = name.lower()
+                    if name_l not in PARAMS:
+                        return [f'不明: `{name}`\n短縮名: {", ".join(sorted(PARAMS))}']
+                    val, err = parse_value(name_l, raw)
+                    if err:
+                        return [err]
+                    set_override(name_l, val)
+                    _logger.info(f'Discord [set] {name_l} = {val}')
+                    return [f'`{name_l}` を **{val}** に設定しました（{PARAMS[name_l].desc}）\n次のポーリングから反映されます']
+
+                if cmd == 'reset':
+                    if not args:
+                        clear_overrides()
+                        _logger.info('Discord [reset] 全オーバーライド削除')
+                        return ['全パラメータのオーバーライドを削除しました']
+                    target = args[0]
+                    msg = reset_override_path(target if '.' in target else None)
+                    _logger.info(f'Discord [reset] {target}')
+                    return [msg]
+
+            return [f'不明なコマンド: `!{cmd}`\n`!help` でコマンド一覧']
+
+    def _run() -> None:
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        client = _MonitorBot()
+        try:
+            loop.run_until_complete(client.start(_token))
+        except Exception:
+            _logger.exception('ウォッチドッグボット 予期せぬ終了')
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_run, daemon=True, name='monitor-discord-bot')
+    t.start()
+    _logger.info(f'ウォッチドッグボット スレッド起動 channel_id={_chan_id}')
+    return t
+
+
 # ─── ウォッチドッグモード ───────────────────────────────────────────
 
 # ブリッジの stdout/stderr を書き出すファイル（ローカルログディレクトリ）
@@ -175,60 +438,84 @@ def _build_cmd(extra_args: list[str]) -> list[str]:
 
 def watch(bridge_args: list[str]) -> None:
     """ブリッジを起動し、異常終了時に自動再起動するウォッチドッグループ"""
-    if os.path.exists(FLAG_FILE):
-        _logger.info("一時停止フラグを検出 → 起動しません")
-        return
-
     cmd = _build_cmd(bridge_args)
     restart_count = 0
 
-    # Windows + BRIDGE_NEW_CONSOLE=True: 別ウィンドウ起動でダッシュボードを表示
     _CREATE_NEW_CONSOLE = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0)
     _use_new_console = os.name == 'nt' and BRIDGE_NEW_CONSOLE and bool(_CREATE_NEW_CONSOLE)
+
+    # ボットスレッドとウォッチドッグループで proc と paused 状態を共有する
+    shared: dict = {
+        'proc':            None,
+        'paused':          os.path.exists(FLAG_FILE),  # FLAG_FILE があれば最初から一時停止
+        'cmd':             cmd,
+        'use_new_console': _use_new_console,
+        'restart_count':   0,
+    }
+    start_monitor_bot(shared)
 
     if _use_new_console:
         _logger.info("ブリッジを別コンソールウィンドウで起動します（ダッシュボードモード）")
         _logger.info("ブリッジのログ → BRIDGE.log_dir で設定されたフォルダ")
     else:
         _logger.info(f"ブリッジコンソールログ → {_BRIDGE_LOG_FILE}")
+    if shared['paused']:
+        _logger.info("一時停止フラグを検出 → 一時停止状態で起動します（`!start` で開始）")
     send_discord(f"【監視開始】ウォッチドッグを起動しました。 cmd={' '.join(cmd)}")
 
+    STATUS_INTERVAL = 60
     while True:
+        # ── 一時停止中: Discord !start を待つ ──────────────────────
+        if shared['paused'] or os.path.exists(FLAG_FILE):
+            time.sleep(5)
+            continue
+
         _logger.info(f"[{_ts()}] ブリッジ起動 (再起動 #{restart_count}回目): {' '.join(cmd)}")
+        proc = None
+        ret  = -1  # Popen 失敗時のデフォルト（異常終了として扱う）
         try:
             if _use_new_console:
-                # 別コンソールウィンドウで起動: ダッシュボードがそのウィンドウに表示される
-                # stdout/stderr はブリッジ自身の _TeeWriter / _ErrTeeWriter がログに書く
                 proc = subprocess.Popen(cmd, creationflags=_CREATE_NEW_CONSOLE)
             else:
-                # 従来モード: stdout/stderr をファイルにキャプチャ（ダッシュボード不可）
                 with _open_bridge_log() as bf:
                     proc = subprocess.Popen(cmd, stdout=bf, stderr=bf)
 
-            # ブリッジが動いている間、60 秒ごとに正常運転中を表示
-            STATUS_INTERVAL = 60
+            shared['proc'] = proc
+
             while True:
                 try:
                     ret = proc.wait(timeout=STATUS_INTERVAL)
-                    break  # プロセス終了
+                    break
                 except subprocess.TimeoutExpired:
                     _logger.info(f"[{_ts()}] ✓ 正常運転中  PID={proc.pid}")
         except KeyboardInterrupt:
-            try:
-                proc.terminate()
-                proc.wait(timeout=5)
-            except Exception:
-                pass
+            if proc is not None:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
             _logger.info("Ctrl+C → ウォッチドッグ終了")
             send_discord("【監視終了】Ctrl+C によりウォッチドッグを停止しました。")
             break
+        except Exception as e:
+            _logger.error(f"ブリッジ起動エラー: {e}")
+            time.sleep(RESTART_DELAY_SEC)
+        finally:
+            shared['proc'] = None
 
-        if ret == 0:
-            _logger.info("ブリッジが正常終了 (code=0) → 再起動しません")
-            send_discord("【監視終了】ブリッジが正常終了しました。再起動しません。")
-            break
+        # ── プロセス終了後の処理 ────────────────────────────────────
+        # !stop による意図的な終了、または正常終了 → 一時停止して !start 待ち
+        if ret == 0 or shared['paused']:
+            reason = "正常終了 (code=0)" if ret == 0 else f"停止コマンドにより終了 (code={ret})"
+            _logger.info(f"ブリッジが{reason} → 一時停止モード（`!start` で再起動）")
+            send_discord(f"【監視】ブリッジが停止しました。`!start` で再起動できます。")
+            shared['paused'] = True
+            continue
 
+        # 異常終了 → 再起動
         restart_count += 1
+        shared['restart_count'] = restart_count
         _logger.warning(
             f"ブリッジ異常終了 (code={ret}) → {RESTART_DELAY_SEC}秒後に再起動"
             f" (#{restart_count}回目)"
@@ -239,15 +526,18 @@ def watch(bridge_args: list[str]) -> None:
         )
 
         if MAX_RESTARTS > 0 and restart_count > MAX_RESTARTS:
-            _logger.error(f"最大再起動回数 ({MAX_RESTARTS}回) 到達 → 停止")
-            send_discord(f"🛑 **【停止】** 最大再起動回数 ({MAX_RESTARTS}回) に達しました。")
-            break
+            _logger.error(f"最大再起動回数 ({MAX_RESTARTS}回) 到達 → 一時停止")
+            send_discord(
+                f"🛑 **【停止】** 最大再起動回数 ({MAX_RESTARTS}回) に達しました。"
+                "`!start` で再開できます。"
+            )
+            shared['paused'] = True
+            continue
 
         if ret == 2:
             # exit(2) = MT5 接続失敗: MT5 は kill せずブリッジのみ再起動
-            # （kill すると「接続失敗→MT5再起動→接続失敗→…」のループを防ぐ）
             _logger.info("MT5 接続失敗による終了 → MT5 は維持してブリッジのみ再起動")
-            _start_mt5_terminal()  # 落ちていれば起動（起動済みなら何もしない）
+            _start_mt5_terminal()
         else:
             # exit(1) = 稼働中の実行時エラー: MT5 を強制終了して再起動
             _kill_mt5_terminal()
@@ -255,9 +545,9 @@ def watch(bridge_args: list[str]) -> None:
 
         time.sleep(RESTART_DELAY_SEC)
 
-        if os.path.exists(FLAG_FILE):
+        if shared['paused'] or os.path.exists(FLAG_FILE):
             _logger.info("一時停止フラグを検出 → 再起動をキャンセル")
-            break
+            shared['paused'] = True
 
 
 # ─── ヘルスチェックモード（後方互換）──────────────────────────────
