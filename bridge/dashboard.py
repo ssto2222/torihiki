@@ -27,7 +27,6 @@ if os.name == 'nt' and _USE_COLOR:
 # ANSI エスケープ除去用 (recent_logs の幅計算に使用)
 _ANSI_RE = re.compile(r'\033\[[0-9;]*[mA-Za-z]')
 
-
 def _c(text: str, *codes: str) -> str:
     if not _USE_COLOR:
         return text
@@ -36,6 +35,24 @@ def _c(text: str, *codes: str) -> str:
 
 def _strip_ansi(s: str) -> str:
     return _ANSI_RE.sub('', s)
+
+
+def activate_dashboard_mode() -> None:
+    """ダッシュボードモードを強制有効化する。
+
+    isatty() が False の環境（ランチャー経由・nohup 等）でも動作するよう
+    _USE_COLOR を True に上書きし、Windows ANSI を再有効化する。
+    run_bridge() の初期化時に一度だけ呼ぶこと。
+    """
+    global _USE_COLOR
+    _USE_COLOR = True
+    if os.name == 'nt':
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32          # type: ignore[attr-defined]
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        except Exception:
+            pass
 
 
 _BOLD   = '\033[1m'
@@ -130,7 +147,7 @@ def print_poll_status(
     recent_logs が指定されている場合は下部にログ行を表示する。
     """
     # ── ダッシュボードモード: 画面クリア ──────────────────────────────────
-    if dashboard_mode and _USE_COLOR:
+    if dashboard_mode:
         # \033[2J: 画面クリア  \033[H: カーソルを左上へ
         sys.stdout.write('\033[2J\033[H')
         sys.stdout.flush()

@@ -109,7 +109,7 @@ from bridge.signal_normal  import compute_signal
 from bridge.signal_scalp   import compute_scalp_signal
 from bridge.param_override import apply_overrides
 from bridge.discord_cmd    import start_discord_bot
-from bridge.dashboard      import print_poll_status
+from bridge.dashboard      import print_poll_status, activate_dashboard_mode
 from core.macro_analysis   import analyze_macro_bias
 
 _logger = logging.getLogger('torihiki')
@@ -154,9 +154,12 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     _tee = _TeeWriter(_orig_stdout)
     _err_tee: _ErrTeeWriter | None = None
 
-    # ダッシュボードモード検出（isatty + config 両方が有効な場合のみ）
+    # ダッシュボードモード: config が True ならターミナル種別に依存せず有効化
+    # isatty() は使わない — ランチャー経由や nohup でも動作させるため
     _dash_cfg = cfg['BRIDGE'].get('dashboard_mode', True)
-    _is_dashboard = _dash_cfg and getattr(_orig_stdout, 'isatty', lambda: False)()
+    _is_dashboard = bool(_dash_cfg)
+    if _is_dashboard:
+        activate_dashboard_mode()  # _USE_COLOR=True + Windows ANSI 強制有効
 
     # _tee を常に stdout に差し込む（ダッシュボード用ログバッファ確保のため）
     # log_dir 未設定でも _tee._buf でポーリング毎のログを蓄積できる
