@@ -5,7 +5,7 @@
       run_bridge / main は bridge.runner または mt5_ea_bridge から直接インポートすること。
 """
 from bridge.state         import (SignalState, ScalpState, TimeBiasState,
-                                   JpyRateCache, Sma20TouchCache)
+                                   JpyRateCache, Sma20TouchCache, MacroBiasState)
 from bridge.io            import write_signal, read_ea_state
 from bridge.notify        import send_discord, _build_discord_signal_msg
 from bridge.utils         import (_calc_lot, _detect_regime, _regime_lot_multi,
@@ -23,7 +23,7 @@ from bridge.param_override import (
 from bridge.discord_cmd    import start_discord_bot
 
 __all__ = [
-    'SignalState', 'ScalpState', 'TimeBiasState', 'JpyRateCache', 'Sma20TouchCache',
+    'SignalState', 'ScalpState', 'TimeBiasState', 'JpyRateCache', 'Sma20TouchCache', 'MacroBiasState',
     'write_signal', 'read_ea_state',
     'send_discord', '_build_discord_signal_msg',
     '_calc_lot', '_detect_regime', '_regime_lot_multi', '_position_status',
