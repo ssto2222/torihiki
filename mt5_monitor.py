@@ -47,8 +47,14 @@ MT5_PROFILE       = ""  # 環境に合わせて修正
 MT5_STARTUP_WAIT  = 40
 
 # ウォッチドッグ設定
-RESTART_DELAY_SEC = 10    # 再起動前の待機秒数
-MAX_RESTARTS      = 0     # 最大再起動回数（0 = 無制限）
+RESTART_DELAY_SEC   = 10   # 再起動前の待機秒数
+MAX_RESTARTS        = 0    # 最大再起動回数（0 = 無制限）
+
+# ブリッジを別コンソールウィンドウで起動するか（Windows のみ有効）
+# True : 独立したウィンドウで起動 → ダッシュボードがそのウィンドウに表示される
+#        stdout はブリッジ自身の log_dir ログに書かれるため watchdog 側キャプチャ不要
+# False: 従来どおり stdout を _BRIDGE_LOG_FILE にキャプチャ（ダッシュボード不可）
+BRIDGE_NEW_CONSOLE  = True
 
 # ブリッジに渡すデフォルト引数（--watch 時に使用）
 _DEFAULT_BRIDGE_ARGS = [
@@ -176,22 +182,37 @@ def watch(bridge_args: list[str]) -> None:
     cmd = _build_cmd(bridge_args)
     restart_count = 0
 
-    _logger.info(f"ブリッジコンソールログ → {_BRIDGE_LOG_FILE}")
+    # Windows + BRIDGE_NEW_CONSOLE=True: 別ウィンドウ起動でダッシュボードを表示
+    _CREATE_NEW_CONSOLE = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0)
+    _use_new_console = os.name == 'nt' and BRIDGE_NEW_CONSOLE and bool(_CREATE_NEW_CONSOLE)
+
+    if _use_new_console:
+        _logger.info("ブリッジを別コンソールウィンドウで起動します（ダッシュボードモード）")
+        _logger.info("ブリッジのログ → BRIDGE.log_dir で設定されたフォルダ")
+    else:
+        _logger.info(f"ブリッジコンソールログ → {_BRIDGE_LOG_FILE}")
     send_discord(f"【監視開始】ウォッチドッグを起動しました。 cmd={' '.join(cmd)}")
 
     while True:
         _logger.info(f"[{_ts()}] ブリッジ起動 (再起動 #{restart_count}回目): {' '.join(cmd)}")
         try:
-            with _open_bridge_log() as bf:
-                proc = subprocess.Popen(cmd, stdout=bf, stderr=bf)
-                # ブリッジが動いている間、60 秒ごとに正常運転中を表示
-                STATUS_INTERVAL = 60
-                while True:
-                    try:
-                        ret = proc.wait(timeout=STATUS_INTERVAL)
-                        break  # プロセス終了
-                    except subprocess.TimeoutExpired:
-                        _logger.info(f"[{_ts()}] ✓ 正常運転中  PID={proc.pid}")
+            if _use_new_console:
+                # 別コンソールウィンドウで起動: ダッシュボードがそのウィンドウに表示される
+                # stdout/stderr はブリッジ自身の _TeeWriter / _ErrTeeWriter がログに書く
+                proc = subprocess.Popen(cmd, creationflags=_CREATE_NEW_CONSOLE)
+            else:
+                # 従来モード: stdout/stderr をファイルにキャプチャ（ダッシュボード不可）
+                with _open_bridge_log() as bf:
+                    proc = subprocess.Popen(cmd, stdout=bf, stderr=bf)
+
+            # ブリッジが動いている間、60 秒ごとに正常運転中を表示
+            STATUS_INTERVAL = 60
+            while True:
+                try:
+                    ret = proc.wait(timeout=STATUS_INTERVAL)
+                    break  # プロセス終了
+                except subprocess.TimeoutExpired:
+                    _logger.info(f"[{_ts()}] ✓ 正常運転中  PID={proc.pid}")
         except KeyboardInterrupt:
             try:
                 proc.terminate()
