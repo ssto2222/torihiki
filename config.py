@@ -155,11 +155,24 @@ SCALP = dict(
     # 急落・急騰時 SMA20 バイパス（大きく乖離している場合はタッチ不要）
     sell_sma_bypass_atr  = 2.0,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ
     buy_sma_bypass_atr   = 2.0,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ
+    # SMA20 タッチマージン（キャッシュ未計算時の ATR ベースフォールバック）
+    sma20_touch_margin_atr = 0.15, # タッチマージン = M5_ATR × この値（BTCUSD: ATR1000→$150）
+    # MTF H1 フィルター緩和
+    h1_di_filter          = False, # True=H1 DI+/DI-方向必須(厳格) / False=H1レジームのみ(推奨)
     # 極端RSI後の反発・反落シグナル
     extreme_oversold_rsi  = 25.0,  # この値以下で「極端売られすぎ」フラグをセット
     extreme_overbought_rsi = 75.0, # この値以上で「極端買われすぎ」フラグをセット
     extreme_os_buy_thr    = 33.0,  # 極端売られすぎ後、RSIがこの値を上抜けで直接BUYエントリー
     extreme_ob_sell_thr   = 67.0,  # 極端買われすぎ後、RSIがこの値を下抜けで直接SELLエントリー
+    # ── ボリュームブレイクアウト（大変動予兆を検知しSMA20タッチをスキップ） ──────────
+    vol_bo_enabled        = True,  # ボリュームブレイクアウト有効/無効
+    vol_bo_rvol_thr       = 2.0,   # RVOL ≥ この値でブレイクアウト候補
+    vol_bo_body_ratio_min = 0.45,  # ローソク実体/レンジ比率の最小値（騙しフィルター）
+    vol_bo_atr_move_min   = 0.3,   # 同バー内価格変動 ≥ ATR × この値（動き確認）
+    vol_bo_rsi_buy_min    = 52.0,  # ブレイクアウトBUY: RSI ≥ この値（上昇方向確認）
+    vol_bo_rsi_sell_max   = 48.0,  # ブレイクアウトSELL: RSI ≤ この値（下落方向確認）
+    vol_bo_tp_multi       = 1.8,   # TP倍率（通常スキャルプTP × この値 → 大きな波に乗る）
+    vol_bo_sl_multi       = 0.8,   # SL倍率（通常SL × この値 → エントリー根拠明確ならタイトに）
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────

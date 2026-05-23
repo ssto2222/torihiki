@@ -133,6 +133,7 @@ def print_poll_status(
     ws_ratio   = data.get('ws_ratio',   0.0)
     ext_os     = data.get('extreme_oversold',  False)
     ext_ob     = data.get('extreme_overbought', False)
+    rvol       = data.get('rvol', 0.0)
 
     mode_tag = _c(f'[{mode.upper()}]', _CYAN, _BOLD)
     line1 = f" {_c(sym, _WHITE, _BOLD)} {mode_tag} #{itr}  {_c(ts + ' UTC', _DIM)}"
@@ -161,12 +162,16 @@ def print_poll_status(
         adx_h1 = data.get('adx_h1', 0.0)
         print(f" H1 {h1_str}(ADX {adx_h1:.0f}) RSI {rsi_h1_str}  M5 {m5_str}")
 
-    # ── 特殊状態行（WS・ExtRSI・EW2） ────────────────────────────────────
+    # ── 特殊状態行（WS・ExtRSI・RVOL・EW2・VolBO） ──────────────────────
     flags: list[str] = []
     if ws_blocked:
         flags.append(_c(f'WS ブロック (ratio={ws_ratio:.1f})', _YELLOW, _BOLD))
     elif ws_ratio >= 1.5:
         flags.append(_c(f'WS ratio={ws_ratio:.1f}', _YELLOW))
+    if rvol >= 3.0:
+        flags.append(_c(f'⚡ RVOL={rvol:.1f}', _RED, _BOLD))
+    elif rvol >= 1.5:
+        flags.append(_c(f'RVOL={rvol:.1f}', _YELLOW))
     if ext_os:
         rsi_str = _c(f'RSI={rsi_m5:.1f}', _RED, _BOLD)
         flags.append(_c('⚠ 極端売られすぎ ', _RED, _BOLD) + rsi_str)
@@ -176,6 +181,8 @@ def print_poll_status(
     sig_type = data.get('signal_type', '')
     if 'EW2' in sig_type:
         flags.append(_c(f'EW2 {sig_type}', _MAGENTA))
+    if 'vol_bo' in sig_type:
+        flags.append(_c(f'⚡ VOL-BO {sig_type}', _GREEN if 'up' in sig_type else _RED, _BOLD))
     if flags:
         print(f" {' │ '.join(flags)}")
 
@@ -228,7 +235,8 @@ def print_poll_status(
         if sell_sig != 'none':
             print(f" SELL signal: {_c(sell_sig, _RED)}")
         if data.get('scalp_cooldown_rem', 0) > 0:
-            print(f" {_c(f'scalp cooldown 残{data[\"scalp_cooldown_rem\"]}分', _DIM)}")
+            _cd_rem = data['scalp_cooldown_rem']
+            print(f" {_c(f'scalp cooldown 残{_cd_rem}分', _DIM)}")
         if data.get('skip_reason') and not is_scalp:
             print(f" skip: {_c(data['skip_reason'], _DIM)}")
         if data.get('sell_skip_reason'):

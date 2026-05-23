@@ -10,7 +10,8 @@ from core.data       import fetch_ohlcv
 from core.indicators import add_m5_indicators, add_m1_indicators, add_h1_indicators
 from core.strategy   import (detect_big_move, detect_early_surge,
                               should_avoid_entry_during_surge, detect_whipsaw,
-                              detect_elliott_w2_buy, detect_elliott_w2_sell)
+                              detect_elliott_w2_buy, detect_elliott_w2_sell,
+                              detect_volume_breakout)
 from core.patterns   import detect_all_patterns, PatternResult
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
@@ -161,18 +162,24 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 return True
             slope = sma_now - sma_prev
             thr_v = (atr_v_tf * _slope_thr) if not np.isnan(atr_v_tf) else 0.0
-            return slope > thr_v if direction == 'buy' else slope < -thr_v
+            # BUY: 明確な下落でなければOK（上昇必須→フラット許容に緩和）
+            # SELL: 明確な上昇でなければOK
+            return slope > -thr_v if direction == 'buy' else slope < thr_v
 
         _di_valid    = not np.isnan(dip_h1s) and not np.isnan(dim_h1s)
         _h1_di_buy   = _di_valid and dip_h1s > dim_h1s   # DI+ > DI-
         _h1_di_sell  = _di_valid and dim_h1s > dip_h1s   # DI- > DI+
 
-        # スキャルプはレンジ相場でも有効 → 'range' も許可し DI 方向で絞る
-        # 'trend_down' のみ BUY ブロック、'trend_up' のみ SELL ブロック
+        # スキャルプはレンジ相場でも有効 → 'range' も許可
+        # h1_di_filter=False(デフォルト): H1レジームのみで判断（DI不要）
+        # h1_di_filter=True(厳格): DI方向も必須
+        _use_di_filter = scalp.get('h1_di_filter', False)
         mtf_buy_ok  = (regime_h1s != 'trend_down' and
-                       _h1_di_buy  and _sma20_ok(df, 'buy'))
+                       (not _use_di_filter or _h1_di_buy) and
+                       _sma20_ok(df, 'buy'))
         mtf_sell_ok = (regime_h1s != 'trend_up' and
-                       _h1_di_sell and _sma20_ok(df, 'sell'))
+                       (not _use_di_filter or _h1_di_sell) and
+                       _sma20_ok(df, 'sell'))
 
         # ── ウィップソー（行ってこい相場）検出 ─────────────────────
         _ws_cfg       = cfg.get('WHIPSAW', {})
@@ -200,15 +207,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         elif rsi_cur < 50.0:
             state.extreme_overbought = False
 
-        # トレンド転換時に逆方向の待機状態をキャンセル
-        if regime_m5s == 'trend_up' and (state.sell_sma_pending or state.sell_confirm_pending):
+        # 確定トレンド転換時に逆方向の待機状態をキャンセル
+        # M5（短期）ではなく H1（中期）確定トレンドのみでキャンセル
+        # → M5 一時的押し目で pending が消えるのを防ぐ
+        if regime_h1s == 'trend_up' and (state.sell_sma_pending or state.sell_confirm_pending):
             state.sell_sma_pending      = False
             state.sell_sma_at           = None
             state.sell_confirm_pending  = False
             state.sell_confirm_at       = None
             state.sell_confirm_count    = 0
             state.sell_confirm_bar_time = None
-        if regime_m5s == 'trend_down' and (state.buy_sma_pending or state.buy_confirm_pending):
+        if regime_h1s == 'trend_down' and (state.buy_sma_pending or state.buy_confirm_pending):
             state.buy_sma_pending      = False
             state.buy_sma_at           = None
             state.buy_confirm_pending  = False
@@ -426,6 +435,53 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 print(f"[極端買われすぎ反落SELL] RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}  閾値={_ext_sell_thr}")
                 _logger.info(f'[ExtOB-SELL] {symbol} RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}')
 
+        # ── SMA20 タッチマージン事前計算 ─────────────────────────────────────────
+        # キャッシュあり → キャッシュ値、なし → M5 ATR × 0.15 (BTCで約$150、動的に適正化)
+        _touch_atr_frac = scalp.get('sma20_touch_margin_atr', 0.15)
+        _cached_margin  = sma20_cache.margins.get(symbol, None)
+        touch_margin    = (_cached_margin if _cached_margin is not None
+                           else atr_v * _touch_atr_frac)
+
+        # TP/SL ブレイクアウト倍率（デフォルト 1.0 = 変更なし）
+        _vb_tp_multi = 1.0
+        _vb_sl_multi = 1.0
+
+        # ── ボリュームブレイクアウト: 出来高急増 + 方向性確認でSMA20チェーンをスキップ ──
+        # RVOL ≥ threshold + ローソク足が方向性を持つ（騙しフィルター: 実体/レンジ比率）
+        if (scalp.get('vol_bo_enabled', True) and confirmed_signal is None
+                and not _ws_block and 'RVOL' in df.columns):
+            _vol_bo = detect_volume_breakout(df, cfg)
+            _vb_rsi_buy_min  = scalp.get('vol_bo_rsi_buy_min',  52.0)
+            _vb_rsi_sell_max = scalp.get('vol_bo_rsi_sell_max', 48.0)
+            if (_vol_bo['direction'] == 'up'
+                    and buy_enabled and not avoid_buy_surge
+                    and mtf_buy_ok
+                    and rsi_cur >= _vb_rsi_buy_min
+                    and bar_time != state.vol_breakout_bar):
+                state.vol_breakout_bar = bar_time
+                state.vol_breakout_dir = 'up'
+                confirmed_signal = 'buy'
+                crossed_level    = close_v
+                _ew2_signal_type = f'vol_bo_up_rvol{_vol_bo["rvol"]:.1f}'
+                _vb_tp_multi = scalp.get('vol_bo_tp_multi', 1.8)
+                _vb_sl_multi = scalp.get('vol_bo_sl_multi', 0.8)
+                _logger.info(f'[VOL-BO-BUY] {symbol} RVOL={_vol_bo["rvol"]:.1f} '
+                             f'body={_vol_bo["body_ratio"]:.2f} RSI={rsi_cur:.1f}')
+            elif (_vol_bo['direction'] == 'down'
+                    and sell_enabled and not avoid_sell_surge
+                    and mtf_sell_ok
+                    and rsi_cur <= _vb_rsi_sell_max
+                    and bar_time != state.vol_breakout_bar):
+                state.vol_breakout_bar = bar_time
+                state.vol_breakout_dir = 'down'
+                confirmed_signal = 'sell'
+                crossed_level    = close_v
+                _ew2_signal_type = f'vol_bo_down_rvol{_vol_bo["rvol"]:.1f}'
+                _vb_tp_multi = scalp.get('vol_bo_tp_multi', 1.8)
+                _vb_sl_multi = scalp.get('vol_bo_sl_multi', 0.8)
+                _logger.info(f'[VOL-BO-SELL] {symbol} RVOL={_vol_bo["rvol"]:.1f} '
+                             f'body={_vol_bo["body_ratio"]:.2f} RSI={rsi_cur:.1f}')
+
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
         if (confirmed_signal is None
@@ -473,8 +529,6 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.sell_sma_pending = False
                     state.sell_sma_at      = None
                 elif not np.isnan(sma20_m1):
-                    touch_margin_cfg = sma20_cache.margins.get(
-                        symbol, cfg.get('EXECUTION', {}).get('touch_margin', 0.20))
                     close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
                     # ── SMA20 バイパス: 急落で価格が大きく乖離 → タッチ不要で確認フェーズへ ──
                     _sell_bp  = scalp.get('sell_sma_bypass_atr', 2.0)
@@ -491,14 +545,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         else:
                             state.sell_sma_pending = False
                             state.sell_sma_at      = None
-                    elif abs(close_m1 - sma20_m1) <= touch_margin_cfg:
+                    elif abs(close_m1 - sma20_m1) <= touch_margin:
                         slope_bars = scalp.get('sma20_slope_bars', 5)
                         slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
+                        # 明確な上昇中でなければ OK（上昇は SELL に不利なので弱い上昇も許可）
                         sma20_slope_ok = (
-                            not np.isnan(atr_m1_v) and not np.isnan(sma20_prev) and
-                            (sma20_m1 - sma20_prev) < -(atr_m1_v * slope_thr)
+                            np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
+                            (sma20_m1 - sma20_prev) < (atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok:
                             if mtf_sell_ok:
@@ -558,8 +613,6 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.buy_sma_pending = False
                     state.buy_sma_at      = None
                 elif not np.isnan(sma20_m1):
-                    touch_margin_cfg = sma20_cache.margins.get(
-                        symbol, cfg.get('EXECUTION', {}).get('touch_margin', 0.20))
                     close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
                     # ── SMA20 バイパス: 急騰で価格が大きく乖離 → タッチ不要で確認フェーズへ ──
                     _buy_bp = scalp.get('buy_sma_bypass_atr', 2.0)
@@ -576,14 +629,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         else:
                             state.buy_sma_pending = False
                             state.buy_sma_at      = None
-                    elif abs(close_m1 - sma20_m1) <= touch_margin_cfg:
+                    elif abs(close_m1 - sma20_m1) <= touch_margin:
                         slope_bars = scalp.get('sma20_slope_bars', 5)
                         slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
+                        # 明確な下落中でなければ OK（フラット・上昇中は BUY を許可）
                         sma20_slope_ok = (
-                            not np.isnan(atr_m1_v) and not np.isnan(sma20_prev) and
-                            (sma20_m1 - sma20_prev) > (atr_m1_v * slope_thr)
+                            np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
+                            (sma20_m1 - sma20_prev) > -(atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok:
                             if mtf_buy_ok:
@@ -665,7 +719,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             else:
                 if regime_h1s == 'trend_down':
                     skip = f'MTF条件NG(buy): H1=trend_down'
-                elif not _h1_di_buy:
+                elif _use_di_filter and not _h1_di_buy:
                     _di_str = (f'DI+={dip_h1s:.1f}<DI-={dim_h1s:.1f}'
                                if _di_valid else 'DI=NaN')
                     skip = f'MTF条件NG(buy): {_di_str}'
@@ -684,7 +738,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             else:
                 if regime_h1s == 'trend_up':
                     skip = f'MTF条件NG(sell): H1=trend_up'
-                elif not _h1_di_sell:
+                elif _use_di_filter and not _h1_di_sell:
                     _di_str = (f'DI-={dim_h1s:.1f}<DI+={dip_h1s:.1f}'
                                if _di_valid else 'DI=NaN')
                     skip = f'MTF条件NG(sell): {_di_str}'
@@ -746,6 +800,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         else:
             sl_price = close_v + sl_move
             tp_price = close_v - tp_move
+
+        # ボリュームブレイクアウト: TP拡大 + SL独立タイト
+        # sl_move × vb_sl_multi で SL を通常より短く（方向明確なため）
+        if _vb_tp_multi != 1.0 and action in ('buy', 'sell'):
+            _vb_tp_move = tp_move * _vb_tp_multi
+            _vb_sl_move = sl_move * _vb_sl_multi
+            if action == 'buy':
+                tp_price = close_v + _vb_tp_move
+                sl_price = close_v - _vb_sl_move
+            else:
+                tp_price = close_v - _vb_tp_move
+                sl_price = close_v + _vb_sl_move
 
         # パターンTP目標で tp_price を上書き（最低 1ATR 確保）
         if state.pattern_tp_target is not None and action in ('buy', 'sell'):
@@ -843,6 +909,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'extreme_overbought': state.extreme_overbought,
             'ws_blocked':         _ws_block,
             'ws_ratio':           round(_ws_ratio, 2),
+            'rvol': (round(float(df['RVOL'].iloc[-1]), 2)
+                     if 'RVOL' in df.columns and not np.isnan(float(df['RVOL'].iloc[-1]))
+                     else 0.0),
         }
 
     except Exception:
