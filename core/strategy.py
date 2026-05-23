@@ -302,6 +302,70 @@ def detect_big_move(df_m5: pd.DataFrame,
     return 'none'
 
 
+def detect_volume_breakout(df: pd.DataFrame, cfg: dict) -> dict:
+    """出来高急増 + 方向性確認によるブレイクアウト検出。
+
+    騙し防止: ローソク足実体/レンジ比率チェック（ヒゲ多い = 方向性なし = スキップ）。
+    RVOL 列がない場合（出来高データ未提供ブローカー）は direction='none' を返す。
+
+    Returns: {'direction': 'up'/'down'/'none', 'rvol': float,
+              'strength': float 0-1, 'body_ratio': float, 'rsi': float}
+    """
+    _empty = lambda r=0.0: {'direction': 'none', 'rvol': r, 'strength': 0.0,
+                             'body_ratio': 0.0, 'rsi': 50.0}
+    if df is None or len(df) < 5:
+        return _empty()
+    if 'RVOL' not in df.columns:
+        return _empty()
+
+    scalp        = cfg.get('SCALP', {})
+    rvol_thr     = scalp.get('vol_bo_rvol_thr',       2.0)
+    body_min     = scalp.get('vol_bo_body_ratio_min',  0.45)
+    atr_move_min = scalp.get('vol_bo_atr_move_min',    0.3)
+
+    rvol = float(df['RVOL'].iloc[-1])
+    if np.isnan(rvol):
+        return _empty()
+    if rvol < rvol_thr:
+        return _empty(round(rvol, 2))
+
+    o   = float(df['Open'].iloc[-1])
+    h   = float(df['High'].iloc[-1])
+    l   = float(df['Low'].iloc[-1])
+    c   = float(df['Close'].iloc[-1])
+    rng = h - l
+    body = abs(c - o)
+    body_ratio = body / rng if rng > 0 else 0.0
+    atr  = float(df['ATR'].iloc[-1]) if ('ATR' in df.columns
+           and not np.isnan(df['ATR'].iloc[-1])) else 0.0
+    rsi  = float(df['RSI'].iloc[-1]) if 'RSI' in df.columns else 50.0
+
+    rv_r  = round(rvol, 2)
+    br_r  = round(body_ratio, 2)
+    rsi_r = round(rsi, 1)
+
+    # 騙しフィルター: ヒゲが大きい（実体が小さい）＝ マーケットメーカーのストップ狩り
+    if body_ratio < body_min:
+        return {'direction': 'none', 'rvol': rv_r, 'strength': 0.0,
+                'body_ratio': br_r, 'rsi': rsi_r}
+
+    # 実際の価格移動確認: 小さな動きで出来高だけ多い（スプレッド拡大等）を除外
+    atr_move = body / atr if atr > 0 else 0.0
+    if atr_move < atr_move_min:
+        return {'direction': 'none', 'rvol': rv_r, 'strength': 0.0,
+                'body_ratio': br_r, 'rsi': rsi_r}
+
+    direction = 'up' if c > o else 'down'
+    strength  = round(min(1.0, (rvol / rvol_thr - 1.0) * 0.4 + body_ratio * 0.6), 2)
+    return {
+        'direction':  direction,
+        'rvol':       rv_r,
+        'strength':   strength,
+        'body_ratio': br_r,
+        'rsi':        rsi_r,
+    }
+
+
 def detect_whipsaw(df: pd.DataFrame, n: int = 20,
                    threshold: float = 2.0) -> tuple[bool, float]:
     """ATR合計 / 実効レンジ比でウィップソー（行ってこい相場）を検出。
