@@ -5,3 +5,4 @@
 config.cpython-314.pyc
 secret.py
 mt5_ea_bridge copy.py
+*.bat

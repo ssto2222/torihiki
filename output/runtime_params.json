@@ -1,5 +1,6 @@
 {
   "SCALP": {
-    "buy_enabled": true
+    "buy_enabled": true,
+    "sell_enabled": true
   }
 }
