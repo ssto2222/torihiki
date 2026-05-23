@@ -2,9 +2,11 @@
 
 各ポーリングの結果を色付き・セクション区切りで整形出力する。
 ANSI エスケープコードを使用（Windows 10+ / Windows Terminal 対応）。
+dashboard_mode=True の場合は毎回画面をクリアして上書き描画（live 表示）。
 """
 from __future__ import annotations
 import os
+import re
 import sys
 from typing import Any
 
@@ -22,10 +24,19 @@ if os.name == 'nt' and _USE_COLOR:
     except Exception:
         pass
 
+# ANSI エスケープ除去用 (recent_logs の幅計算に使用)
+_ANSI_RE = re.compile(r'\033\[[0-9;]*[mA-Za-z]')
+
+
 def _c(text: str, *codes: str) -> str:
     if not _USE_COLOR:
         return text
     return ''.join(codes) + str(text) + '\033[0m'
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub('', s)
+
 
 _BOLD   = '\033[1m'
 _DIM    = '\033[2m'
@@ -110,8 +121,20 @@ def print_poll_status(
     consec_losses: int,
     effective_cfg: dict | None = None,
     macro_state: Any = None,
+    dashboard_mode: bool = False,
+    recent_logs: list[str] | None = None,
 ) -> None:
-    """ポーリング1回分の状態を整形して stdout に出力する。"""
+    """ポーリング1回分の状態を整形して stdout に出力する。
+
+    dashboard_mode=True の場合は画面をクリアして上書き描画する。
+    recent_logs が指定されている場合は下部にログ行を表示する。
+    """
+    # ── ダッシュボードモード: 画面クリア ──────────────────────────────────
+    if dashboard_mode and _USE_COLOR:
+        # \033[2J: 画面クリア  \033[H: カーソルを左上へ
+        sys.stdout.write('\033[2J\033[H')
+        sys.stdout.flush()
+
     eff  = effective_cfg or {}
     scalp_cfg = eff.get('SCALP', {})
     is_scalp  = (mode == 'scalp' and data.get('scalp_mode', True))
@@ -284,3 +307,12 @@ def print_poll_status(
           f"  残高 {bal_str}  連続損失 {consec_str}回")
 
     print(_sep(64, '━'))
+
+    # ── 直近ログ（ダッシュボードモード専用） ──────────────────────────────
+    if dashboard_mode and recent_logs:
+        _shown = [l for l in recent_logs if l.strip()][-10:]
+        if _shown:
+            print(_c(' ─ recent log ' + '─' * 50, _DIM))
+            for _line in _shown:
+                _plain = _strip_ansi(_line)[:100]
+                print(_c(f' {_plain}', _DIM))

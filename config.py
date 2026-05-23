@@ -131,6 +131,7 @@ BRIDGE = dict(
     fallback_balance = 15_000,    # MT5残高取得失敗時のデフォルト残高（円）
     scalp_lot_multi  = 1.0,          # スキャルプモードのロット倍率
     log_dir          = r"G:\マイドライブ\mt5_log",   # signal_SYMBOL.json のコピー先ディレクトリ（空文字で無効）
+    dashboard_mode   = True,         # True: ターミナルで画面クリア + 上書き live 表示 (isatty 時のみ有効)
 )
 
 # ── スキャルプモード（--mode scalp で有効）────────────────────
