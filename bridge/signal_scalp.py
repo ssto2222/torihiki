@@ -838,6 +838,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'mtf_sell_ok':        mtf_sell_ok,
             'h1_patterns':        h1_pattern_bars,
             'pattern_tp_target':  state.pattern_tp_target,
+            # ダッシュボード表示用
+            'extreme_oversold':   state.extreme_oversold,
+            'extreme_overbought': state.extreme_overbought,
+            'ws_blocked':         _ws_block,
+            'ws_ratio':           round(_ws_ratio, 2),
         }
 
     except Exception:

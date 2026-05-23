@@ -109,6 +109,7 @@ from bridge.signal_normal  import compute_signal
 from bridge.signal_scalp   import compute_scalp_signal
 from bridge.param_override import apply_overrides
 from bridge.discord_cmd    import start_discord_bot
+from bridge.dashboard      import print_poll_status
 
 _logger = logging.getLogger('torihiki')
 _logger.setLevel(logging.DEBUG)
@@ -322,98 +323,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                     tb_state.hours          = _build_time_bias(cfg)
                     tb_state.last_rebias_at = time.time()
 
-                ts = datetime.now().strftime('%H:%M:%S')
-
-                if mode == 'scalp' and data.get('scalp_mode', True):
-                    early_tag = ' [M1早期]' if data.get('execution_tf') == 'm1_early' else ''
-                    print(f"\n[{ts}] #{itr} [SCALP]{early_tag}  "
-                          f"close=${data['close']:,.2f}  "
-                          f"RSI_M5={data['rsi_m5']:.1f}  "
-                          f"RSI_M1={data['rsi_m1']:.1f}  "
-                          f"ATR=${data['atr']:.2f}  "
-                          f"残高=¥{bal}  "
-                          f"lot={data['lot_size']}(TP={_eff_scalp.get('tp_atr_fraction',0.5)}×ATR)  "
-                          f"今日={data['trades_today']}/{_eff_scalp.get('max_trades_day',20)}回")
-                    if data.get('scalp_buy_sma_pending'):
-                        status_tag = '  [BUY] SMA20タッチ待ち'
-                    elif data.get('scalp_buy_confirm_pending'):
-                        status_tag = f"  [BUY] 確認 {data.get('scalp_buy_confirm_count',0)}/2本"
-                    elif data.get('scalp_sell_sma_pending'):
-                        status_tag = '  [SELL] SMA20タッチ待ち'
-                    elif data.get('scalp_sell_confirm_pending'):
-                        status_tag = f"  [SELL] 確認 {data.get('scalp_sell_confirm_count',0)}/2本"
-                    elif data.get('skip_reason'):
-                        status_tag = f"  skip={data['skip_reason']}"
-                    else:
-                        b_ok = data.get('mtf_buy_ok',  False)
-                        s_ok = data.get('mtf_sell_ok', False)
-                        status_tag = (f"  [待機中] H1={data.get('regime_h1','?')}"
-                                      f"  M5={data.get('regime_m5','?')}"
-                                      f"  MTF:BUY={'OK' if b_ok else 'NG'}"
-                                      f"  SELL={'OK' if s_ok else 'NG'}")
-                    print(f"  action={data['action'].upper():4s}  "
-                          f"signal={data['signal_type']}  "
-                          f"expected_profit=+${data.get('expected_profit_usd',0):.2f}"
-                          f"(¥{int(data.get('expected_profit_jpy',0))}) "
-                          f"target=¥{data.get('target_profit_jpy',0)}  "
-                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}"
-                          f"{status_tag}")
-                    for pat in data.get('h1_patterns', []):
-                        ok = '✓' if pat['confirmed'] else '…'
-                        print(f"  [H1パターン] {pat['label']} {ok}"
-                              f"  信頼度={pat['confidence']:.0%}"
-                              f"  NL=${pat['neckline']:,.0f}"
-                              f"  TP=${pat['target']:,.0f}"
-                              f"  ({pat['bars_ago']}本前)")
-                else:
-                    surge_tag = f"[{data['m5_surge']}]" if data['m5_surge'] != 'none' else ''
-                    scalp_tag = f"[SCALP:{data['scalp_type']}]" if data['scalp_type'] != 'none' else ''
-                    trend_tag = '[SELL↓]' if data['downtrend_ok'] else ''
-                    print(f"\n[{ts}] #{itr}  "
-                          f"close=${data['close']:,.2f}  "
-                          f"RSI_H1={data['rsi_h1']:.1f}  RSI_D1={data['rsi_d1']:.1f}{trend_tag}  "
-                          f"RSI_M5={data['rsi_m5']:.1f}({'↑' if data['m5_filter_ok'] else '↓/NG'})  "
-                          f"RSI_M1={data['rsi_m1']:.1f}{surge_tag}  "
-                          f"ATR=${data['atr']:.2f}")
-                    rg_tag = (f"[ADX_H1={data.get('adx_h1',0):.0f}/{data.get('regime_h1','?')}"
-                              f" M5={data.get('adx_m5',0):.0f}/{data.get('regime_m5','?')}"
-                              f" ×{data.get('regime_lot_multi',1.0)}]")
-                    ep_tag = (f" entry#{data.get('entry_in_window',0)}/{effective_cfg.get('REGIME',{}).get('max_entry_per_signal',3)}"
-                              if data.get('entry_in_window', 0) > 0 else '')
-                    print(f"  action={data['action'].upper():4s}  "
-                          f"signal={data['signal_type']}{scalp_tag}  "
-                          f"SL=${data['sl_price']:,.2f}  TP=${data['tp_price']:,.2f}  "
-                          f"score={data['score']}({data['strength']})  "
-                          f"lot={data['lot_size']}{ep_tag}")
-                    if data.get('limit_prices'):
-                        prices_str = ', '.join(f'${p:,.2f}' for p in data['limit_prices'])
-                        print(f"  リミット注文: {prices_str}")
-                    print(f"  {rg_tag}")
-                    if data.get('careful_entry', False):
-                        print("  [慎重分散エントリー: 2本連続陽線後3本目BB2σタッチ]")
-                    if data['signal_valid_until']:
-                        print(f"  buy_window_until={data['signal_valid_until']}")
-                    if data['sell_signal_type'] != 'none':
-                        print(f"  sell_signal={data['sell_signal_type']}  "
-                              f"sell_window_until={data['sell_valid_until']}")
-                    if data.get('scalp_cooldown_rem', 0) > 0:
-                        print(f"  [SCALP cooldown残{data['scalp_cooldown_rem']}分 → 通常モード中]")
-                    for pat in data.get('h1_patterns', []):
-                        ok = '✓' if pat['confirmed'] else '…'
-                        print(f"  [H1パターン] {pat['label']} {ok}"
-                              f"  信頼度={pat['confidence']:.0%}"
-                              f"  NL=${pat['neckline']:,.0f}"
-                              f"  TP=${pat['target']:,.0f}"
-                              f"  ({pat['bars_ago']}本前)")
-
-                if data['skip_reason'] and not (mode == 'scalp' and data.get('scalp_mode', True)):
-                    print(f"  skip: {data['skip_reason']}")
-                if data.get('sell_skip_reason'):
-                    print(f"  sell_skip: {data['sell_skip_reason']}")
-                max_p   = data.get('max_positions',   20)
-                total_p = data.get('total_positions', pos)
-                avail   = data.get('available_slots',  max_p - pos)
-                print(f"  残高=¥{bal}  ポジション={total_p}/{max_p}件(空き{avail})  連続損失={consec_losses}回")
+                print_poll_status(data, mode, itr, bal, consec_losses, effective_cfg)
 
                 # Discord 通知: アクション変化時のみ
                 curr_action = data.get('action', 'none')
