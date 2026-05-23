@@ -152,6 +152,14 @@ SCALP = dict(
     lot_max            = {'XAUUSD': 0.05, 'BTCUSD': 0.10},  # シンボル別ロット上限。未設定 = 上限なし
     sma20_slope_bars   = 5,     # SELL SMA20タッチ判定: 傾き計算に使う M1 バー数
     sma20_slope_atr_thr = 0.10, # SELL SMA20タッチ判定: SMA20がATR×この値以上下落していること
+    # 急落・急騰時 SMA20 バイパス（大きく乖離している場合はタッチ不要）
+    sell_sma_bypass_atr  = 2.0,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ
+    buy_sma_bypass_atr   = 2.0,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ
+    # 極端RSI後の反発・反落シグナル
+    extreme_oversold_rsi  = 25.0,  # この値以下で「極端売られすぎ」フラグをセット
+    extreme_overbought_rsi = 75.0, # この値以上で「極端買われすぎ」フラグをセット
+    extreme_os_buy_thr    = 33.0,  # 極端売られすぎ後、RSIがこの値を上抜けで直接BUYエントリー
+    extreme_ob_sell_thr   = 67.0,  # 極端買われすぎ後、RSIがこの値を下抜けで直接SELLエントリー
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────
