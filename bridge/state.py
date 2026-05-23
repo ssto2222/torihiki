@@ -116,3 +116,24 @@ class JpyRateCache:
 class Sma20TouchCache:
     """シンボル別 SMA20 タッチマージンキャッシュ"""
     margins: dict = field(default_factory=dict)
+
+
+@dataclass
+class MacroBiasState:
+    """D1/W1/MN1 マクロバイアスの定期更新キャッシュ"""
+    bias:             float            = 0.0
+    bias_label:       str              = 'neutral'
+    buy_tp_multi:     float            = 1.0
+    sell_tp_multi:    float            = 1.0
+    buy_risk_multi:   float            = 1.0
+    sell_risk_multi:  float            = 1.0
+    score_adj_buy:    int              = 0
+    score_adj_sell:   int              = 0
+    nearest_nl:       Optional[float]  = None
+    nl_dir:           str              = 'none'
+    target_up:        Optional[float]  = None
+    target_down:      Optional[float]  = None
+    d1_rsi:           float            = float('nan')
+    d1_above_sma200:  bool             = False
+    summary:          str              = ''
+    last_updated_at:  float            = 0.0   # time.time() の値

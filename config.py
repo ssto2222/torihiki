@@ -227,6 +227,17 @@ TIME_BIAS = dict(
     time_ref              = 'exit', # 'exit': 決済時刻基準（ノーマル向き）/ 'entry': エントリー時刻基準
 )
 
+# ── マクロバイアス分析（D1/W1/MN1 パターン・RSI・SMA200）────────────
+MACRO = dict(
+    enabled             = True,      # マクロ分析を有効化
+    update_interval_h   = 4,         # 再分析間隔（時間）。0 = 起動時1回のみ
+    d1_bars             = 200,       # D1 取得バー数
+    w1_bars             = 100,       # W1 取得バー数
+    mn1_bars            = 60,        # MN1 取得バー数
+    pattern_top_n       = 2,         # TFごとのパターン最大取得数
+    min_bias_to_show    = 15,        # ダッシュボード表示閾値（|bias| >= この値で表示）
+)
+
 # ── 可視化 ────────────────────────────────────────────────
 PLOT = dict(
     font_family = ['MS Gothic', 'Noto Sans JP', 'DejaVu Sans'],

@@ -109,6 +109,7 @@ def print_poll_status(
     bal: Any,
     consec_losses: int,
     effective_cfg: dict | None = None,
+    macro_state: Any = None,
 ) -> None:
     """ポーリング1回分の状態を整形して stdout に出力する。"""
     eff  = effective_cfg or {}
@@ -194,6 +195,30 @@ def print_poll_status(
               f"  NL=${pat['neckline']:,.0f}"
               f"  TP=${pat['target']:,.0f}"
               f"  ({pat['bars_ago']}本前)")
+
+    # ── マクロバイアス ──────────────────────────────────────────────────────
+    _macro_min = (effective_cfg or {}).get('MACRO', {}).get('min_bias_to_show', 15)
+    _mb_bias   = data.get('macro_bias', 0.0)
+    _mb_label  = data.get('macro_bias_label', 'neutral')
+    if macro_state is not None and macro_state.last_updated_at > 0:
+        _mb_bias  = macro_state.bias
+        _mb_label = macro_state.bias_label
+    if abs(_mb_bias) >= _macro_min or _mb_label != 'neutral':
+        _mb_col = (_GREEN if _mb_bias >= 50 else
+                   _CYAN  if _mb_bias >= 15 else
+                   _DIM   if abs(_mb_bias) < 15 else
+                   _YELLOW if _mb_bias > -50 else _RED)
+        _mb_str = _c(f'マクロ {_mb_bias:+.0f}[{_mb_label}]', _mb_col)
+        _mb_extra = ''
+        if macro_state is not None:
+            if macro_state.nearest_nl is not None:
+                _nl_col = _GREEN if macro_state.nl_dir == 'bullish' else _RED
+                _mb_extra += f'  NL={_c(f"${macro_state.nearest_nl:,.0f}", _nl_col)}'
+            if macro_state.target_up is not None:
+                _mb_extra += f'  ↑TP=${macro_state.target_up:,.0f}'
+            if macro_state.target_down is not None:
+                _mb_extra += f'  ↓TP=${macro_state.target_down:,.0f}'
+        print(f" {_mb_str}{_mb_extra}")
 
     print(_sep(64, '─'))
 
