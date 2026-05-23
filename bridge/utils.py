@@ -152,6 +152,34 @@ def _has_positions_in_direction(symbol: str, magic: int, direction: str, *, mt5)
         return False
 
 
+def detect_bidirectional_loss(symbol: str, magic: int,
+                               lookback_h: int = 4, *, mt5) -> bool:
+    """直近2件のクローズトレードが逆方向かつ両方損失か（行ってこい相場の痕跡）。
+
+    クローズディールの type が異なる = ポジション方向が逆
+    DEAL_TYPE_SELL(=1) でクローズ → 買いポジを決済
+    DEAL_TYPE_BUY (=0) でクローズ → 売りポジを決済
+    """
+    try:
+        now   = datetime.now(timezone.utc)
+        since = now - timedelta(hours=lookback_h)
+        deals = mt5.history_deals_get(since, now)
+        if not deals:
+            return False
+        close_deals = [d for d in deals
+                       if d.symbol == symbol
+                       and d.magic == magic
+                       and d.entry == mt5.DEAL_ENTRY_OUT]
+        if len(close_deals) < 2:
+            return False
+        last2     = sorted(close_deals, key=lambda d: d.time)[-2:]
+        both_loss = all(d.profit + d.commission + d.swap < 0 for d in last2)
+        opp_dir   = last2[0].type != last2[1].type
+        return both_loss and opp_dir
+    except Exception:
+        return False
+
+
 def _close_profitable_positions(symbol: str, magic: int, deviation: int, *, mt5) -> int:
     """MT5 の含み益ポジション（magic 一致）を全決済する。決済した件数を返す。"""
     closed = 0

@@ -117,7 +117,7 @@ if not _logger.handlers:
 
 CFG = {k: getattr(C, k) for k in
        ['MT5', 'INDICATOR', 'SIGNAL', 'EXECUTION', 'SL', 'RULES', 'LOCAL', 'PLOT',
-        'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS']}
+        'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS', 'WHIPSAW', 'ELLIOTT']}
 
 
 def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
@@ -286,13 +286,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                         pre_warn_end   = pre_warn_start + timedelta(minutes=5)
                         if (pre_warn_start <= now_utc < pre_warn_end and
                                 tb_state.danger_close_done_hr != danger_hour):
-                            n_closed = _close_profitable_positions(
-                                symbol, magic, deviation, mt5=mt5)
                             tb_state.danger_close_done_hr = danger_hour
-                            if n_closed:
-                                print(f"  [時間帯バイアス] {now_utc.strftime('%H:%M')}UTC"
-                                      f" → {danger_hour:02d}:00が危険時間帯"
-                                      f" → 30分前からスキップ開始 → 含み益{n_closed}本を決済")
 
                     if in_skip_window and data.get('action') in ('buy', 'sell'):
                         data['action']      = 'none'

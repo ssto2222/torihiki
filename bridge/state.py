@@ -83,6 +83,9 @@ class ScalpState:
     pattern_traded: set = field(default_factory=set)
     pattern_tp_target: Optional[float] = None
 
+    # Elliott Wave2 執行管理（指紋の重複エントリー防止）
+    ew2_traded: set = field(default_factory=set)
+
 
 @dataclass
 class TimeBiasState:
