@@ -149,14 +149,20 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     # コンソール出力をファイルにも上書き保存する（log_dir が設定されている場合）
     console_log_path = Path(log_dir) / f'console_{symbol}.log' if log_dir else None
     error_log_path   = Path(log_dir) / f'error_{symbol}.log'   if log_dir else None
-    _tee = _TeeWriter(sys.stdout)
     _orig_stdout = sys.stdout
     _orig_stderr = sys.stderr
+    _tee = _TeeWriter(_orig_stdout)
     _err_tee: _ErrTeeWriter | None = None
-    if console_log_path:
-        sys.stdout = _tee
+
+    # ダッシュボードモード検出（isatty + config 両方が有効な場合のみ）
+    _dash_cfg = cfg['BRIDGE'].get('dashboard_mode', True)
+    _is_dashboard = _dash_cfg and getattr(_orig_stdout, 'isatty', lambda: False)()
+
+    # _tee を常に stdout に差し込む（ダッシュボード用ログバッファ確保のため）
+    # log_dir 未設定でも _tee._buf でポーリング毎のログを蓄積できる
+    sys.stdout = _tee
     if error_log_path:
-        _err_tee = _ErrTeeWriter(sys.stderr, error_log_path)
+        _err_tee = _ErrTeeWriter(_orig_stderr, error_log_path)
         sys.stderr = _err_tee
 
     poll_sec   = cfg['BRIDGE']['poll_sec']
@@ -250,8 +256,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
 
             itr += 1
             t_s  = time.time()
-            if console_log_path:
-                _tee.reset()
+            _tee.reset()  # 常にリセット（ダッシュボード用バッファを毎イテレーション更新）
 
             effective_cfg = apply_overrides(cfg)
             _eff_scalp    = effective_cfg.get('SCALP', {})
@@ -357,8 +362,13 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                     tb_state.hours          = _build_time_bias(cfg)
                     tb_state.last_rebias_at = time.time()
 
+                # ダッシュボード用: 今のイテレーションで _tee に蓄積されたログ行を抽出
+                _recent_logs = ''.join(_tee._buf).splitlines() if _is_dashboard else []
+
                 print_poll_status(data, mode, itr, bal, consec_losses, effective_cfg,
-                                  macro_state=macro_state)
+                                  macro_state=macro_state,
+                                  dashboard_mode=_is_dashboard,
+                                  recent_logs=_recent_logs)
 
                 # Discord 通知: アクション変化時のみ
                 curr_action = data.get('action', 'none')
