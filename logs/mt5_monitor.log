@@ -15669,3 +15669,8 @@
 2026-05-24 07:11:48,620 [INFO] [07:11:48] ✓ 正常運転中  PID=23368
 2026-05-24 07:12:37,564 [INFO] ブリッジコンソールログ → C:\Users\YK\Documents\python\torihiki\logs\mt5_bridge_console.log
 2026-05-24 07:12:39,048 [INFO] [07:12:39] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe -X utf8 -u C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode scalp --symbol BTCUSD
+2026-05-24 07:13:05,656 [INFO] ブリッジコンソールログ → C:\Users\YK\Documents\python\torihiki\logs\mt5_bridge_console.log
+2026-05-24 07:13:06,239 [INFO] [07:13:06] ブリッジ起動 (再起動 #0回目): C:\Users\YK\Documents\python\torihiki\myenv\Scripts\python.exe -X utf8 -u C:\Users\YK\Documents\python\torihiki\mt5_ea_bridge.py --mode scalp --symbol BTCUSD
+2026-05-24 07:14:06,291 [INFO] [07:14:06] ✓ 正常運転中  PID=20488
+2026-05-24 07:15:06,299 [INFO] [07:15:06] ✓ 正常運転中  PID=20488
+2026-05-24 07:16:06,308 [INFO] [07:16:06] ✓ 正常運転中  PID=20488
