@@ -188,6 +188,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                           else '双方向損失検出')
             _logger.info(f'[WS] {symbol} {_ws_reason}  bidir={_is_bidir}')
 
+        # ── 極端 RSI 状態の追跡（急落後反発BUY / 急騰後反落SELL） ─────────────
+        _ext_os_rsi  = scalp.get('extreme_oversold_rsi',   25.0)
+        _ext_ob_rsi  = scalp.get('extreme_overbought_rsi', 75.0)
+        if rsi_cur <= _ext_os_rsi:
+            state.extreme_oversold = True
+        elif rsi_cur > 50.0:
+            state.extreme_oversold = False      # RSI 正常圏復帰でクリア
+        if rsi_cur >= _ext_ob_rsi:
+            state.extreme_overbought = True
+        elif rsi_cur < 50.0:
+            state.extreme_overbought = False
+
         # トレンド転換時に逆方向の待機状態をキャンセル
         if regime_m5s == 'trend_up' and (state.sell_sma_pending or state.sell_confirm_pending):
             state.sell_sma_pending      = False
@@ -388,6 +400,32 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                      f'RSI_div={_ew2s["rsi_div"]:.1f} '
                                      f'TP={_ew2_tp_price:,.2f} SL={_ew2_sl_price:,.2f}')
 
+        # ── 極端売られすぎ/買われすぎ 反発・反落シグナル ───────────────────────
+        # 急落でRSI≤25まで下落後、RSIが回復閾値を上抜けた瞬間に直接BUYエントリー
+        # SMA20タッチ不要（価格がSMA20から大きく乖離しているため）
+        _ext_buy_thr  = scalp.get('extreme_os_buy_thr',  33.0)
+        _ext_sell_thr = scalp.get('extreme_ob_sell_thr', 67.0)
+        if (confirmed_signal is None and not _ws_block
+                and state.extreme_oversold and buy_enabled and not avoid_buy_surge
+                and not (state.buy_sma_pending or state.buy_confirm_pending)):
+            if rsi_prev_bar <= _ext_buy_thr < rsi_cur and regime_h1s != 'trend_down':
+                confirmed_signal      = 'buy'
+                crossed_level         = _ext_buy_thr
+                _ew2_signal_type      = f'extreme_os_bounce_{int(_ext_buy_thr)}'
+                state.extreme_oversold = False
+                print(f"[極端売られすぎ反発BUY] RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}  閾値={_ext_buy_thr}")
+                _logger.info(f'[ExtOS-BUY] {symbol} RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}')
+        if (confirmed_signal is None and not _ws_block
+                and state.extreme_overbought and sell_enabled and not avoid_sell_surge
+                and not (state.sell_sma_pending or state.sell_confirm_pending)):
+            if rsi_prev_bar >= _ext_sell_thr > rsi_cur and regime_h1s != 'trend_up':
+                confirmed_signal        = 'sell'
+                crossed_level           = _ext_sell_thr
+                _ew2_signal_type        = f'extreme_ob_bounce_{int(_ext_sell_thr)}'
+                state.extreme_overbought = False
+                print(f"[極端買われすぎ反落SELL] RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}  閾値={_ext_sell_thr}")
+                _logger.info(f'[ExtOB-SELL] {symbol} RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}')
+
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
         if (confirmed_signal is None
@@ -438,7 +476,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     touch_margin_cfg = sma20_cache.margins.get(
                         symbol, cfg.get('EXECUTION', {}).get('touch_margin', 0.20))
                     close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
-                    if abs(close_m1 - sma20_m1) <= touch_margin_cfg:
+                    # ── SMA20 バイパス: 急落で価格が大きく乖離 → タッチ不要で確認フェーズへ ──
+                    _sell_bp  = scalp.get('sell_sma_bypass_atr', 2.0)
+                    if _sell_bp > 0 and close_m1 < sma20_m1 - atr_v * _sell_bp:
+                        if mtf_sell_ok:
+                            state.sell_sma_pending      = False
+                            state.sell_sma_at           = None
+                            state.sell_confirm_pending  = True
+                            state.sell_confirm_at       = now
+                            state.sell_confirm_count    = 0
+                            state.sell_confirm_bar_time = None
+                            state.sell_confirm_level    = state.sell_sma_level
+                            print(f"[SELL SMA20バイパス] 乖離={sma20_m1-close_m1:.0f} > ATR×{_sell_bp}={atr_v*_sell_bp:.0f}")
+                        else:
+                            state.sell_sma_pending = False
+                            state.sell_sma_at      = None
+                    elif abs(close_m1 - sma20_m1) <= touch_margin_cfg:
                         slope_bars = scalp.get('sma20_slope_bars', 5)
                         slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
@@ -508,7 +561,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     touch_margin_cfg = sma20_cache.margins.get(
                         symbol, cfg.get('EXECUTION', {}).get('touch_margin', 0.20))
                     close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
-                    if abs(close_m1 - sma20_m1) <= touch_margin_cfg:
+                    # ── SMA20 バイパス: 急騰で価格が大きく乖離 → タッチ不要で確認フェーズへ ──
+                    _buy_bp = scalp.get('buy_sma_bypass_atr', 2.0)
+                    if _buy_bp > 0 and close_m1 > sma20_m1 + atr_v * _buy_bp:
+                        if mtf_buy_ok:
+                            state.buy_sma_pending      = False
+                            state.buy_sma_at           = None
+                            state.buy_confirm_pending  = True
+                            state.buy_confirm_at       = now
+                            state.buy_confirm_count    = 0
+                            state.buy_confirm_bar_time = None
+                            state.buy_confirm_level    = state.buy_sma_level
+                            print(f"[BUY SMA20バイパス] 乖離={close_m1-sma20_m1:.0f} > ATR×{_buy_bp}={atr_v*_buy_bp:.0f}")
+                        else:
+                            state.buy_sma_pending = False
+                            state.buy_sma_at      = None
+                    elif abs(close_m1 - sma20_m1) <= touch_margin_cfg:
                         slope_bars = scalp.get('sma20_slope_bars', 5)
                         slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
