@@ -1,8 +1,8 @@
 {
-  "generated": "2026-05-22 01:13:08",
+  "generated": "2026-05-24 14:00:16",
   "symbol": "BTCUSD",
   "data_source": "MT5実データ",
-  "n_trades_total": 23,
+  "n_trades_total": 21,
   "danger_hours": [],
   "params": {
     "danger_win_rate_thr": 0.4,
@@ -11,9 +11,9 @@
   },
   "hour_stats": {
     "0": {
-      "n": 2,
-      "win_rate": 0.5,
-      "avg_pnl": 20920.69,
+      "n": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -83634.0,
       "is_danger": false
     },
     "1": {
@@ -25,31 +25,31 @@
     "2": {
       "n": 1,
       "win_rate": 0.0,
-      "avg_pnl": -72946.86,
+      "avg_pnl": -73500.24,
       "is_danger": false
     },
     "3": {
-      "n": 0,
-      "win_rate": null,
-      "avg_pnl": null,
+      "n": 1,
+      "win_rate": 0.0,
+      "avg_pnl": -65677.69,
       "is_danger": false
     },
     "4": {
-      "n": 1,
-      "win_rate": 1.0,
-      "avg_pnl": 122638.62,
+      "n": 0,
+      "win_rate": null,
+      "avg_pnl": null,
       "is_danger": false
     },
     "5": {
       "n": 1,
       "win_rate": 1.0,
-      "avg_pnl": 20240.18,
+      "avg_pnl": 183859.26,
       "is_danger": false
     },
     "6": {
-      "n": 0,
-      "win_rate": null,
-      "avg_pnl": null,
+      "n": 1,
+      "win_rate": 1.0,
+      "avg_pnl": 28276.1,
       "is_danger": false
     },
     "7": {
@@ -77,33 +77,33 @@
       "is_danger": false
     },
     "11": {
-      "n": 2,
+      "n": 1,
       "win_rate": 0.0,
-      "avg_pnl": -67095.75,
+      "avg_pnl": -91348.76,
       "is_danger": false
     },
     "12": {
       "n": 2,
       "win_rate": 0.5,
-      "avg_pnl": 25404.72,
+      "avg_pnl": -28824.07,
       "is_danger": false
     },
     "13": {
       "n": 2,
       "win_rate": 0.5,
-      "avg_pnl": -2627.04,
+      "avg_pnl": -23486.85,
       "is_danger": false
     },
     "14": {
       "n": 2,
       "win_rate": 0.5,
-      "avg_pnl": -15988.84,
+      "avg_pnl": -1771.79,
       "is_danger": false
     },
     "15": {
       "n": 1,
       "win_rate": 1.0,
-      "avg_pnl": 25726.29,
+      "avg_pnl": 19661.21,
       "is_danger": false
     },
     "16": {
@@ -113,9 +113,9 @@
       "is_danger": false
     },
     "17": {
-      "n": 1,
-      "win_rate": 1.0,
-      "avg_pnl": 183859.26,
+      "n": 0,
+      "win_rate": null,
+      "avg_pnl": null,
       "is_danger": false
     },
     "18": {
@@ -132,26 +132,26 @@
     },
     "20": {
       "n": 4,
-      "win_rate": 0.25,
-      "avg_pnl": -12326.99,
+      "win_rate": 0.5,
+      "avg_pnl": 956.48,
       "is_danger": false
     },
     "21": {
       "n": 1,
       "win_rate": 1.0,
-      "avg_pnl": 29678.66,
+      "avg_pnl": 31570.14,
       "is_danger": false
     },
     "22": {
       "n": 1,
       "win_rate": 1.0,
-      "avg_pnl": 67788.52,
+      "avg_pnl": 5721.0,
       "is_danger": false
     },
     "23": {
       "n": 1,
       "win_rate": 0.0,
-      "avg_pnl": -61990.33,
+      "avg_pnl": -25131.64,
       "is_danger": false
     }
   }

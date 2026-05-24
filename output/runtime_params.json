@@ -1,6 +1,7 @@
 {
   "SCALP": {
     "buy_enabled": true,
-    "sell_enabled": true
+    "sell_enabled": true,
+    "target_profit_jpy": 1600
   }
 }
