@@ -184,17 +184,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # ── ウィップソー（行ってこい相場）検出 ─────────────────────
         _ws_cfg       = cfg.get('WHIPSAW', {})
-        _ws_n         = _ws_cfg.get('ratio_n', 20)
-        _ws_thr       = _ws_cfg.get('ratio_thr', 2.0)
-        _ws_lh        = _ws_cfg.get('bidir_lookback_h', 4)
-        _magic_ws     = cfg['MT5'].get('magic', 20240101)
-        _is_whipsaw, _ws_ratio = detect_whipsaw(df, _ws_n, _ws_thr)
-        _is_bidir     = detect_bidirectional_loss(symbol, _magic_ws, _ws_lh, mt5=mt5)
-        _ws_block     = _is_whipsaw or _is_bidir
-        if _ws_block:
-            _ws_reason = (f'ウィップソー(ratio={_ws_ratio})' if _is_whipsaw
-                          else '双方向損失検出')
-            _logger.info(f'[WS] {symbol} {_ws_reason}  bidir={_is_bidir}')
+        _ws_block     = False
+        _ws_ratio     = 0.0
+        _is_whipsaw   = False
+        _is_bidir     = False
 
         # ── 極端 RSI 状態の追跡（急落後反発BUY / 急騰後反落SELL） ─────────────
         _ext_os_rsi  = scalp.get('extreme_oversold_rsi',   25.0)
