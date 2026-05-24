@@ -845,6 +845,21 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 tp_price = close_v - _tp_dist * _mb_tp_m
                 sl_price = close_v + _sl_dist * _mb_rm
 
+        # ── 最低 SL 距離フロア ────────────────────────────────────────
+        # シグナル生成から EA 執行まで価格が動いた場合に SL が約定価格を
+        # 跨いで即損切りになるのを防ぐ。EW2 など SL バッファが小さい経路で特に重要。
+        _min_sl_atr = scalp.get('min_sl_atr', 0.5)
+        _min_sl_dist = atr_v * _min_sl_atr
+        if action == 'buy':
+            sl_price = min(sl_price, close_v - _min_sl_dist)
+        elif action == 'sell':
+            sl_price = max(sl_price, close_v + _min_sl_dist)
+
+        # sl_dist / tp_dist: 約定価格からの距離として EA に渡す
+        # EA はこれを使って actual_sl = fill - sl_dist (buy) と再計算できる
+        _sl_dist_out = round(abs(close_v - sl_price), 2)
+        _tp_dist_out = round(abs(tp_price - close_v), 2)
+
         point  = float(info.point) if info else 0.01
         max_pt = max(1, int(tp_move * 0.5 / point))
 
@@ -875,6 +890,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sell_skip_reason':   '',
             'sl_price':           round(sl_price, 2),
             'tp_price':           round(tp_price, 2),
+            'sl_dist':            _sl_dist_out,
+            'tp_dist':            _tp_dist_out,
             'score':              100,
             'strength':           'scalp',
             'tp_hold_minutes':    0,

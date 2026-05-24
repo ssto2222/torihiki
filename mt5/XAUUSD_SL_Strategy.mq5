@@ -89,12 +89,14 @@ void OnTimer()
 {
    string action, sig_ts, strength, limit_prices_str = "";
    double sl_price, tp_price, atr_v, sl_multi, rsi_exit, trail_m, lot_sig;
+   double sl_dist, tp_dist;
    int    max_slip, score, tp_hold_min, max_pos;
 
    // シグナルファイルの読み込み
    bool read_ok = ReadSignal(action, sl_price, tp_price, atr_v, sl_multi,
                             max_slip, rsi_exit, trail_m, lot_sig, score, strength,
-                            tp_hold_min, sig_ts, max_pos, limit_prices_str);
+                            tp_hold_min, sig_ts, max_pos, limit_prices_str,
+                            sl_dist, tp_dist);
 
    // --- 【新規】UI表示の更新 ---
    UpdateSignalUI(read_ok, action, score, strength);
@@ -152,8 +154,8 @@ void OnTimer()
    // 新規エントリー（全ポジション数が max_pos 未満の時のみ）
    if(CountAllPos() < max_pos)
    {
-      if(action == "buy")  OpenBuy(sl_price,  tp_price, score);  // scoreを追加
-      if(action == "sell") OpenSell(sl_price, tp_price, score); // scoreを追加
+      if(action == "buy")  OpenBuy(sl_price,  tp_price, sl_dist, tp_dist, score);
+      if(action == "sell") OpenSell(sl_price, tp_price, sl_dist, tp_dist, score);
       if(action == "limit_buy") OpenLimitBuy(limit_prices_str, sl_price, tp_price, score);
    }
 
@@ -204,9 +206,16 @@ void UpdateSignalUI(bool success, string action, int score, string strength)
 //+------------------------------------------------------------------+
 // エントリー関数（スマホ通知付き）
 //+------------------------------------------------------------------+
-void OpenBuy(double sl, double tp, int score) // scoreを引数に追加
+void OpenBuy(double sl, double tp, double sl_dist, double tp_dist, int score)
 {
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   // sl_dist > 0 なら約定価格（ask）から距離で再計算してシグナル遅延による即損切りを防ぐ
+   if(sl_dist > 0.0)
+   {
+      sl = NormalizeDouble(ask - sl_dist, _Digits);
+      tp = NormalizeDouble(ask + tp_dist, _Digits);
+   }
    if(sl >= ask) return;
 
    if(g_trade.Buy(g_lot_size, _Symbol, 0, sl, tp, "SL_BUY"))
@@ -254,10 +263,17 @@ void OpenLimitBuy(string limit_prices_str, double sl, double tp, int score)
    }
 }
 
-void OpenSell(double sl, double tp, int score) // scoreを引数に追加
+void OpenSell(double sl, double tp, double sl_dist, double tp_dist, int score)
 {
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   if(sl <= ask) return;
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+   // sl_dist > 0 なら約定価格（bid）から距離で再計算してシグナル遅延による即損切りを防ぐ
+   if(sl_dist > 0.0)
+   {
+      sl = NormalizeDouble(bid + sl_dist, _Digits);
+      tp = NormalizeDouble(bid - tp_dist, _Digits);
+   }
+   if(sl <= bid) return;
 
    if(g_trade.Sell(g_lot_size, _Symbol, 0, sl, tp, "SL_SELL"))
    {
@@ -390,7 +406,8 @@ int GetConsecLosses()
    return consec;
 }
 
-bool ReadSignal(string &action, double &sl, double &tp, double &atr, double &sl_multi, int &max_slip, double &rsi_exit, double &trail_m, double &lot_size, int &score, string &strength, int &tp_hold_min, string &ts, int &max_pos, string &limit_prices_str)
+bool ReadSignal(string &action, double &sl, double &tp, double &atr, double &sl_multi, int &max_slip, double &rsi_exit, double &trail_m, double &lot_size, int &score, string &strength, int &tp_hold_min, string &ts, int &max_pos, string &limit_prices_str,
+               double &sl_dist, double &tp_dist)
 {
    int fh = FileOpen(g_signal_file, FILE_READ|FILE_TXT|FILE_ANSI|FILE_COMMON);
    if(fh == INVALID_HANDLE) return false;
@@ -402,6 +419,8 @@ bool ReadSignal(string &action, double &sl, double &tp, double &atr, double &sl_
    action      = JStr(raw, "action");
    sl          = JDbl(raw, "sl_price");
    tp          = JDbl(raw, "tp_price");
+   sl_dist     = JDbl(raw, "sl_dist");   // 0 = 旧ブリッジ互換（絶対価格使用）
+   tp_dist     = JDbl(raw, "tp_dist");
    atr         = JDbl(raw, "atr");
    sl_multi    = JDbl(raw, "sl_multi");
    max_slip    = (int)JDbl(raw, "max_slip_pt");
