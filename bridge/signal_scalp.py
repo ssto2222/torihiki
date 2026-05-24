@@ -203,10 +203,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _sma20_m1_sell_ok    = _sma20_ok(df_m1, 'sell')
         _sma20_m15_buy_ok    = _sma20_ok(df_m15, 'buy')  # M15
         _sma20_m15_sell_ok   = _sma20_ok(df_m15, 'sell')
-        # M1/M5/M15 が全て下落中 → BUY禁止。全て上昇中 → SELL禁止
-        # 1つでも OK なら通す（EW2 の W2 押し目でも M15 は安定していることが多い）
-        _sma20_consensus_buy  = (_sma20_m1_buy_ok  or _sma20_slope_buy_ok  or _sma20_m15_buy_ok)
-        _sma20_consensus_sell = (_sma20_m1_sell_ok or _sma20_slope_sell_ok or _sma20_m15_sell_ok)
+        # M1 は絶対ゲート（エントリーゲートで別途チェック）
+        # M5/M15 が両方とも逆向き → BUY/SELL禁止（M1クリア後の二次フィルター）
+        _sma20_consensus_buy  = (_sma20_slope_buy_ok  or _sma20_m15_buy_ok)
+        _sma20_consensus_sell = (_sma20_slope_sell_ok or _sma20_m15_sell_ok)
         mtf_buy_ok  = (regime_h1s != 'trend_down' and
                        (not _use_di_filter or _h1_di_buy) and
                        _sma20_slope_buy_ok)
@@ -338,6 +338,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         candidate_signal  = None
         crossed_level     = 0.0
         _direct_confirmed = False  # EW2/極端RSI/H1パターン由来: M5レジームチェックをスキップ
+        _is_ew2_signal    = False  # EW2専用フラグ: RSIゲートをバイパスする
 
         # ── H1 パターン ネックライン突破: スキャルプ直接エントリー ─────────────
         if df_h1_raw is not None and len(df_h1_raw) >= 2 and _h1_pats_raw:
@@ -421,6 +422,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         confirmed_signal  = 'buy'
                         crossed_level     = _ew2b['w2_low']
                         _direct_confirmed = True
+                        _is_ew2_signal    = True
                         _ew2_signal_type  = (f"EW2_buy_fib{_ew2b['fib_level']:.2f}"
                                              f"_div{_ew2b['rsi_div']:.1f}")
                         _ew2_tp_price = _b_tp
@@ -463,6 +465,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         confirmed_signal  = 'sell'
                         crossed_level     = _ew2s['w2_high']
                         _direct_confirmed = True
+                        _is_ew2_signal    = True
                         _ew2_signal_type  = (f"EW2_sell_fib{_ew2s['fib_level']:.2f}"
                                              f"_div{_ew2s['rsi_div']:.1f}")
                         _ew2_tp_price = _s_tp
@@ -843,13 +846,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
+            elif new_cross == 'buy' and not _sma20_m1_buy_ok:
+                skip = 'M1 SMA20下落中 BUY絶対禁止'
+            elif new_cross == 'sell' and not _sma20_m1_sell_ok:
+                skip = 'M1 SMA20上昇中 SELL絶対禁止'
             elif new_cross == 'buy' and not _sma20_consensus_buy:
-                skip = 'SMA20下落(M1/M5/M15全て負) BUY禁止'
+                skip = 'SMA20下落(M5/M15両方負) BUY禁止'
             elif new_cross == 'sell' and not _sma20_consensus_sell:
-                skip = 'SMA20上昇(M1/M5/M15全て正) SELL禁止'
-            elif new_cross == 'buy' and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
+                skip = 'SMA20上昇(M5/M15両方正) SELL禁止'
+            elif new_cross == 'buy' and not _is_ew2_signal and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
                 skip = f'RSI{rsi_cur:.1f}<BUY最低閾値{scalp.get("rsi_buy_gate_min", 40.0):.0f} 禁止'
-            elif new_cross == 'sell' and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
+            elif new_cross == 'sell' and not _is_ew2_signal and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
                 skip = f'RSI{rsi_cur:.1f}>SELL最高閾値{scalp.get("rsi_sell_gate_max", 60.0):.0f} 禁止'
             elif (not _direct_confirmed and
                   ((regime_m5s == 'trend_up'   and new_cross == 'sell') or
