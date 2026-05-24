@@ -116,12 +116,12 @@ def _pending_status(data: dict) -> str:
         return _c('BUY SMA20タッチ待ち', _YELLOW)
     if data.get('scalp_buy_confirm_pending'):
         n = data.get('scalp_buy_confirm_count', 0)
-        return _c(f'BUY M1確認 {n}/2本', _YELLOW)
+        return _c(f'BUY M1確認 {n}/1本', _YELLOW)
     if data.get('scalp_sell_sma_pending'):
         return _c('SELL SMA20タッチ待ち', _YELLOW)
     if data.get('scalp_sell_confirm_pending'):
         n = data.get('scalp_sell_confirm_count', 0)
-        return _c(f'SELL M1確認 {n}/2本', _YELLOW)
+        return _c(f'SELL M1確認 {n}/1本', _YELLOW)
     skip = data.get('skip_reason', '')
     if skip and skip.startswith('pending_'):
         return _c(skip, _DIM)

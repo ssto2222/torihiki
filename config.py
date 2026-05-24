@@ -141,8 +141,8 @@ SCALP = dict(
     sl_ratio          = 3,     # SL幅 = TP幅 × sl_ratio  → 損失 = 目標 × 1.5
     tp_atr_fraction   = {'BTCUSD': 0.5, 'XAUUSD': 0.35},  # TP幅 = M5 ATR × tp_atr_fraction（スプレッド以上を確保）
     signal_tf         = 'M5',    # シグナル生成足（M5クロス→M1で執行確認）
-    rsi_buy_thrs      = [55.0, 60.0, 65.0],   # RSI 上抜け → BUY
-    rsi_sell_thrs     = [45.0, 40.0, 35.0],   # RSI 下抜け → SELL
+    rsi_buy_thrs      = [50.0, 55.0, 60.0, 65.0],   # RSI 上抜け → BUY
+    rsi_sell_thrs     = [50.0, 45.0, 40.0, 35.0],   # RSI 下抜け → SELL
     buy_enabled       = True,     # scalp buy を有効化 / 無効化
     sell_enabled      = True,     # scalp sell を有効化 / 無効化
     max_trades_day    = 20,      # 1日の最大エントリー回数
