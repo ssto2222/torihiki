@@ -485,6 +485,61 @@ def _build_cmd(extra_args: list[str]) -> list[str]:
     return [sys.executable, '-X', 'utf8', '-u', script] + extra_args
 
 
+# ─── git 自動アップデート ────────────────────────────────────────────
+
+_REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _auto_update() -> bool:
+    """git pull でリポジトリを最新化する。
+
+    stale packed-refs エラー（ネットワークドライブ環境で多発）を検出した場合は
+    `git remote prune origin` で参照を整理してからリトライする。
+    失敗しても取引は継続するため、常に True を返す。
+    """
+    def _run(args: list[str]) -> tuple[int, str]:
+        r = subprocess.run(
+            ['git'] + args,
+            cwd=_REPO_DIR,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return r.returncode, (r.stdout + r.stderr).strip()
+
+    try:
+        code, out = _run(['pull', '--ff-only'])
+        if code == 0:
+            if 'Already up to date' not in out:
+                _logger.info(f'[auto-update] 更新完了:\n{out}')
+                send_discord(f'🔄 **【自動更新】** リポジトリを更新しました。\n```\n{out[:400]}\n```')
+            return True
+
+        # stale ref エラー → prune して再試行
+        if 'incorrect old value provided' in out or 'fetching ref' in out:
+            _logger.warning('[auto-update] stale ref を検出 → git remote prune origin を実行します')
+            _run(['remote', 'prune', 'origin'])
+            code2, out2 = _run(['pull', '--ff-only'])
+            if code2 == 0:
+                _logger.info(f'[auto-update] prune 後に更新完了:\n{out2}')
+                return True
+            _logger.warning(f'[auto-update] prune 後も失敗 (code={code2}):\n{out2}')
+            send_discord(
+                f'⚠️ **【自動更新】** git pull でエラーが発生しましたが、再起動を続行します:\n'
+                f'```\n{out2[:400]}\n```'
+            )
+        else:
+            _logger.warning(f'[auto-update] git pull 失敗 (code={code}):\n{out}')
+            send_discord(
+                f'⚠️ **【自動更新】** git pull でエラーが発生しましたが、再起動を続行します:\n'
+                f'```\n{out[:400]}\n```'
+            )
+    except Exception as e:
+        _logger.warning(f'[auto-update] 例外: {e}')
+
+    return True  # 失敗しても起動を継続
+
+
 def watch(bridge_args: list[str]) -> None:
     """ブリッジを起動し、異常終了時に自動再起動するウォッチドッグループ"""
     # シンボルを bridge_args から取得（重複チェックと残留プロセス管理に使用）
@@ -539,6 +594,7 @@ def watch(bridge_args: list[str]) -> None:
             time.sleep(5)
             continue
 
+        _auto_update()
         _logger.info(f"[{_ts()}] ブリッジ起動 (再起動 #{restart_count}回目): {' '.join(cmd)}")
         # 残留プロセス・ウィンドウを確実に閉じてから起動
         _kill_bridge_procs(_watch_symbol)
