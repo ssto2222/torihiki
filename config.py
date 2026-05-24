@@ -155,14 +155,14 @@ SCALP = dict(
     sma20_slope_atr_thr = 0.10, # SELL SMA20タッチ判定: SMA20がATR×この値以上下落していること
     # 急落・急騰時 SMA20 バイパス（大きく乖離している場合はタッチ不要）
     sell_sma_bypass_atr  = 2.0,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ
-    buy_sma_bypass_atr   = 2.0,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ
+    buy_sma_bypass_atr   = 1.2,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ
     # SMA20 タッチマージン（キャッシュ未計算時の ATR ベースフォールバック）
-    sma20_touch_margin_atr = 0.15, # タッチマージン = M5_ATR × この値（BTCUSD: ATR1000→$150）
+    sma20_touch_margin_atr = 0.4, # タッチマージン = M5_ATR × この値（BTCUSD: ATR1000→$150）
     # MTF H1 フィルター緩和
     h1_di_filter          = False, # True=H1 DI+/DI-方向必須(厳格) / False=H1レジームのみ(推奨)
     # 極端RSI後の反発・反落シグナル
-    extreme_oversold_rsi  = 25.0,  # この値以下で「極端売られすぎ」フラグをセット
-    extreme_overbought_rsi = 75.0, # この値以上で「極端買われすぎ」フラグをセット
+    extreme_oversold_rsi  = 28.0,  # この値以下で「極端売られすぎ」フラグをセット
+    extreme_overbought_rsi = 72.0, # この値以上で「極端買われすぎ」フラグをセット
     extreme_os_buy_thr    = 33.0,  # 極端売られすぎ後、RSIがこの値を上抜けで直接BUYエントリー
     extreme_ob_sell_thr   = 67.0,  # 極端買われすぎ後、RSIがこの値を下抜けで直接SELLエントリー
     # ── ボリュームブレイクアウト（大変動予兆を検知しSMA20タッチをスキップ） ──────────
@@ -196,7 +196,7 @@ ELLIOTT = dict(
 WHIPSAW = dict(
     ratio_n            = 20,    # ATR集計本数（M5: 100分 / H1: 20時間）
     ratio_thr          = 2.0,   # ATR合計÷実効レンジ がこの値以上でウィップソー判定
-    bidir_lookback_h   = 4,     # 双方向損失チェック: 過去N時間の約定を参照
+    bidir_lookback_h   = 2,     # 双方向損失チェック: 過去N時間の約定を参照
 )
 
 # ── レジーム判定・分散エントリー ──────────────────────────────────
@@ -221,7 +221,7 @@ TIME_BIAS = dict(
     danger_win_rate_thr  = 0.40,    # win_rate がこの値未満 → 危険
     danger_avg_pnl       = 0.0,     # avg_pnl がこの値以下 → 危険（OR条件）
     min_trades_per_hour  = 5,       # サンプル不足の時間帯は判定スキップ
-    skip_before_min      = 30,      # 危険時間帯の N 分前からスキップ開始
+    skip_before_min      = 15,      # 危険時間帯の N 分前からスキップ開始
     skip_after_min       = 0,      # 危険時間帯終了後 N 分までスキップ継続
     rebias_interval_hours = 24,     # この間隔（時間）で自動再分析。0 = 起動時1回のみ
     bias_file             = "./output/time_bias.json",
