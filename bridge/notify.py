@@ -8,19 +8,6 @@ try:
 except ImportError:
     DISCORD_WEBHOOK_URL = ''
 
-try:
-    from secret import DISCORD_BOT_TOKEN
-except ImportError:
-    DISCORD_BOT_TOKEN = ''
-
-try:
-    from secret import DISCORD_CHANNEL_ID
-except ImportError:
-    DISCORD_CHANNEL_ID = ''
-
-_DISCORD_API    = 'https://discord.com/api/v10'
-_QUERY_TRIGGERS = {'!status', 'status', '!照会', '照会', 'ステータス', '!ステータス', '!s'}
-
 
 def send_discord(message: str) -> None:
     """Discord へ通知を送る"""
@@ -85,40 +72,6 @@ def _build_discord_signal_msg(data: dict, mode: str) -> str:
 
     return '\n'.join(lines)
 
-
-def check_discord_query(last_msg_id: list) -> bool:
-    """チャンネルの新着メッセージを確認し、照会コマンドがあれば True を返す。
-
-    last_msg_id は [''] のような 1 要素リスト（可変参照）。
-    Bot トークンまたはチャンネル ID が未設定の場合は常に False を返す。
-    """
-    if not DISCORD_BOT_TOKEN or not DISCORD_CHANNEL_ID:
-        return False
-    headers = {'Authorization': f'Bot {DISCORD_BOT_TOKEN}'}
-    params: dict = {'limit': 10}
-    if last_msg_id[0]:
-        params['after'] = last_msg_id[0]
-    try:
-        r = requests.get(
-            f'{_DISCORD_API}/channels/{DISCORD_CHANNEL_ID}/messages',
-            headers=headers, params=params, timeout=5,
-        )
-        if r.status_code != 200:
-            return False
-        msgs = r.json()
-        if not msgs:
-            return False
-        # Discord は新しい順で返す。最新 ID を記録してから全件チェック
-        last_msg_id[0] = msgs[0]['id']
-        for msg in msgs:
-            if msg.get('author', {}).get('bot'):
-                continue  # 自分自身の返信は無視
-            content = msg.get('content', '').strip().lower()
-            if any(t in content for t in _QUERY_TRIGGERS):
-                return True
-        return False
-    except Exception:
-        return False
 
 
 def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:

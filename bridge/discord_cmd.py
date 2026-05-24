@@ -33,6 +33,7 @@ from bridge.param_override import (
     get_value_text, section_lines, all_overrides_text,
     get_param_desc, _get_docs,
 )
+from bridge.notify import _build_discord_hourly_msg
 
 _logger = logging.getLogger('torihiki')
 _PREFIX    = '!'
@@ -80,6 +81,7 @@ def _build_command_help() -> str:
     return (
         '**torihiki パラメータ制御ボット**\n'
         '```\n'
+        '!status                       現在のシグナル状態を照会\n'
         '!set SECTION.KEY value        設定変更   例: !set SCALP.cooldown_min 10\n'
         '!set SECTION.KEY.SUB value    dict変更   例: !set SL.tp_atr_multi.BTCUSD 3.5\n'
         '!set shortname value          短縮名変更 例: !set target 1500 / !set buy off\n'
@@ -184,11 +186,14 @@ def _get_credentials() -> tuple[str, int] | tuple[None, None]:
 
 # ── Bot 起動 ──────────────────────────────────────────────────────────────
 
-def start_discord_bot(cfg: dict[str, Any]) -> threading.Thread | None:
+def start_discord_bot(cfg: dict[str, Any],
+                      data_ref: list | None = None,
+                      macro_ref: list | None = None) -> threading.Thread | None:
     """
     バックグラウンドスレッドで Discord ボットを起動する。
     discord.py 未インストール / secret.py に認証情報がなければ何もしない。
     cfg は runner.py の元 cfg dict への参照（apply_overrides でポーリングごとに更新される）。
+    data_ref / macro_ref は [None] のような 1 要素リスト（runner.py が最新値を書き込む）。
     """
     token, chan_id = _get_credentials()
     if not token:
@@ -239,6 +244,14 @@ def start_discord_bot(cfg: dict[str, Any]) -> threading.Thread | None:
                     await message.channel.send(reply)
 
         async def _dispatch(self, cmd: str, args: list[str]) -> list[str]:
+            # ── !status ────────────────────────────────────────────────
+            if cmd == 'status':
+                if data_ref is None or data_ref[0] is None:
+                    return ['データ未取得（ブリッジ起動直後）']
+                macro = macro_ref[0] if macro_ref else None
+                msg = _build_discord_hourly_msg(data_ref[0], macro)
+                return [msg + '\n*(照会応答)*']
+
             # ── !help ──────────────────────────────────────────────────
             if cmd == 'help':
                 if not args:
