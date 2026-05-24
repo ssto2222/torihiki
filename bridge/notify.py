@@ -65,7 +65,7 @@ def _build_discord_signal_msg(data: dict, mode: str) -> str:
     equity = data.get('account_equity', 0.0)
     if equity > 0:
         _ml_warn = ' ⚠' if ml < ml_min else ''
-        lines.append(f'証拠金維持率: {ml:.0f}%{_ml_warn}  有効: ${equity:,.2f}')
+        lines.append(f'証拠金維持率: {ml:.0f}%{_ml_warn}  有効: ¥{equity:,.0f}')
 
     lines.append(f'H1={h1}')
 
@@ -174,7 +174,7 @@ def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
     margin = data.get('account_margin', 0.0)
     if equity > 0:
         _ml_warn = ' ⚠' if ml < ml_min else ''
-        lines.append(f'証拠金維持率: {ml:.0f}%{_ml_warn}  有効: ${equity:,.2f}  使用中: ${margin:,.2f}')
+        lines.append(f'証拠金維持率: {ml:.0f}%{_ml_warn}  有効: ¥{equity:,.0f}  使用中: ¥{margin:,.0f}')
 
     return '\n'.join(lines)
 
