@@ -186,6 +186,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         mtf_sell_ok = (regime_h1s != 'trend_up' and
                        (not _use_di_filter or _h1_di_sell) and
                        _sma20_ok(df, 'sell'))
+        # EW2 専用: W2底/天井形成中はM5 SMA20がまだ逆向きのため、スロープチェックを外す
+        mtf_ew2_buy_ok  = (regime_h1s != 'trend_down' and (not _use_di_filter or _h1_di_buy))
+        mtf_ew2_sell_ok = (regime_h1s != 'trend_up'   and (not _use_di_filter or _h1_di_sell))
 
         # ── ウィップソー（行ってこい相場）検出 ─────────────────────
         _ws_cfg       = cfg.get('WHIPSAW', {})
@@ -303,9 +306,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             print(f"[売られすぎ回避] RSI={rsi_cur:.1f} が低すぎる → SELL見送り")
 
         # ── M1 待機ロジック ────────────────────────────────────────
-        confirmed_signal = None
-        candidate_signal = None
-        crossed_level    = 0.0
+        confirmed_signal  = None
+        candidate_signal  = None
+        crossed_level     = 0.0
+        _direct_confirmed = False  # EW2/極端RSI/H1パターン由来: M5レジームチェックをスキップ
 
         # ── H1 パターン ネックライン突破: スキャルプ直接エントリー ─────────────
         if df_h1_raw is not None and len(df_h1_raw) >= 2 and _h1_pats_raw:
@@ -321,8 +325,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     continue
                 if _pat_s.direction == 'bullish' and buy_enabled and not avoid_buy_surge:
                     if _prev_h1_close_s <= _pat_s.neckline < _close_h1_cur_s:
-                        confirmed_signal = 'buy'
-                        crossed_level    = _pat_s.neckline
+                        confirmed_signal  = 'buy'
+                        crossed_level     = _pat_s.neckline
+                        _direct_confirmed = True
                         state.pattern_traded.add(_fp_s)
                         state.pattern_tp_target = _pat_s.target
                         _logger.info(f'[スキャルプパターンBUY] {_pat_s.label} '
@@ -330,8 +335,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         break
                 elif _pat_s.direction == 'bearish' and sell_enabled and not avoid_sell_surge:
                     if _prev_h1_close_s >= _pat_s.neckline > _close_h1_cur_s:
-                        confirmed_signal = 'sell'
-                        crossed_level    = _pat_s.neckline
+                        confirmed_signal  = 'sell'
+                        crossed_level     = _pat_s.neckline
+                        _direct_confirmed = True
                         state.pattern_traded.add(_fp_s)
                         state.pattern_tp_target = _pat_s.target
                         _logger.info(f'[スキャルプパターンSELL] {_pat_s.label} '
@@ -355,7 +361,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             _ew_w1at = _ew_cfg.get('min_wave1_atr', 1.5)
             _ew_div  = _ew_cfg.get('rsi_div_min', 3.0)
             _ew_bago = _ew_cfg.get('w2_bars_ago_max', 5)
-            if buy_enabled and not avoid_buy_surge and mtf_buy_ok:
+            if buy_enabled and not avoid_buy_surge and mtf_ew2_buy_ok:
                 _ew2b = detect_elliott_w2_buy(
                     df, lookback=_ew_lb, sw_window=_ew_sw,
                     fib_min=_ew_fmin, fib_max=_ew_fmax,
@@ -369,10 +375,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         state.ew2_traded.clear()
                     if _fp_ew2 not in state.ew2_traded:
                         state.ew2_traded.add(_fp_ew2)
-                        confirmed_signal = 'buy'
-                        crossed_level    = _ew2b['w2_low']
-                        _ew2_signal_type = (f"EW2_buy_fib{_ew2b['fib_level']:.2f}"
-                                            f"_div{_ew2b['rsi_div']:.1f}")
+                        confirmed_signal  = 'buy'
+                        crossed_level     = _ew2b['w2_low']
+                        _direct_confirmed = True
+                        _ew2_signal_type  = (f"EW2_buy_fib{_ew2b['fib_level']:.2f}"
+                                             f"_div{_ew2b['rsi_div']:.1f}")
                         _ew2_fib_ext  = _ew_cfg.get('fib_tp_ext', 1.618)
                         _ew2_sl_buf   = _ew_cfg.get('sl_buffer_atr', 0.3)
                         _ew2_tp_price = _ew2b['w2_low'] + _ew2b['wave1_size'] * _ew2_fib_ext
@@ -381,7 +388,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                      f'Fib={_ew2b["fib_level"]:.1%} '
                                      f'RSI_div={_ew2b["rsi_div"]:.1f} '
                                      f'TP={_ew2_tp_price:,.2f} SL={_ew2_sl_price:,.2f}')
-            if confirmed_signal is None and sell_enabled and not avoid_sell_surge and mtf_sell_ok:
+            if confirmed_signal is None and sell_enabled and not avoid_sell_surge and mtf_ew2_sell_ok:
                 _ew2s = detect_elliott_w2_sell(
                     df, lookback=_ew_lb, sw_window=_ew_sw,
                     fib_min=_ew_fmin, fib_max=_ew_fmax,
@@ -395,10 +402,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         state.ew2_traded.clear()
                     if _fp_ew2 not in state.ew2_traded:
                         state.ew2_traded.add(_fp_ew2)
-                        confirmed_signal = 'sell'
-                        crossed_level    = _ew2s['w2_high']
-                        _ew2_signal_type = (f"EW2_sell_fib{_ew2s['fib_level']:.2f}"
-                                            f"_div{_ew2s['rsi_div']:.1f}")
+                        confirmed_signal  = 'sell'
+                        crossed_level     = _ew2s['w2_high']
+                        _direct_confirmed = True
+                        _ew2_signal_type  = (f"EW2_sell_fib{_ew2s['fib_level']:.2f}"
+                                             f"_div{_ew2s['rsi_div']:.1f}")
                         _ew2_fib_ext  = _ew_cfg.get('fib_tp_ext', 1.618)
                         _ew2_sl_buf   = _ew_cfg.get('sl_buffer_atr', 0.3)
                         _ew2_tp_price = _ew2s['w2_high'] - _ew2s['wave1_size'] * _ew2_fib_ext
@@ -417,9 +425,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 and state.extreme_oversold and buy_enabled and not avoid_buy_surge
                 and not (state.buy_sma_pending or state.buy_confirm_pending)):
             if rsi_prev_bar <= _ext_buy_thr < rsi_cur and regime_h1s != 'trend_down':
-                confirmed_signal      = 'buy'
-                crossed_level         = _ext_buy_thr
-                _ew2_signal_type      = f'extreme_os_bounce_{int(_ext_buy_thr)}'
+                confirmed_signal       = 'buy'
+                crossed_level          = _ext_buy_thr
+                _direct_confirmed      = True
+                _ew2_signal_type       = f'extreme_os_bounce_{int(_ext_buy_thr)}'
                 state.extreme_oversold = False
                 print(f"[極端売られすぎ反発BUY] RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}  閾値={_ext_buy_thr}")
                 _logger.info(f'[ExtOS-BUY] {symbol} RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}')
@@ -427,9 +436,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 and state.extreme_overbought and sell_enabled and not avoid_sell_surge
                 and not (state.sell_sma_pending or state.sell_confirm_pending)):
             if rsi_prev_bar >= _ext_sell_thr > rsi_cur and regime_h1s != 'trend_up':
-                confirmed_signal        = 'sell'
-                crossed_level           = _ext_sell_thr
-                _ew2_signal_type        = f'extreme_ob_bounce_{int(_ext_sell_thr)}'
+                confirmed_signal         = 'sell'
+                crossed_level            = _ext_sell_thr
+                _direct_confirmed        = True
+                _ew2_signal_type         = f'extreme_ob_bounce_{int(_ext_sell_thr)}'
                 state.extreme_overbought = False
                 print(f"[極端買われすぎ反落SELL] RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}  閾値={_ext_sell_thr}")
                 _logger.info(f'[ExtOB-SELL] {symbol} RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}')
@@ -775,10 +785,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
-            elif (regime_m5s == 'trend_up'   and new_cross == 'sell') or \
-                 (regime_m5s == 'trend_down' and new_cross == 'buy'):
+            elif (not _direct_confirmed and
+                  ((regime_m5s == 'trend_up'   and new_cross == 'sell') or
+                   (regime_m5s == 'trend_down' and new_cross == 'buy'))):
                 skip = f'逆トレンドエントリー禁止(regime={regime_m5s})'
-            elif eff_hour in {9, 16, 21}:
+            elif eff_hour in {21}:
                 skip = f'forbidden_hour={eff_hour}'
             elif state.count >= max_day:
                 skip = f'daily_limit={state.count}/{max_day}'
