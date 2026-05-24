@@ -220,12 +220,30 @@ def print_poll_status(
         _m5_di = _c(f"ADX{adx_m5:.0f} DI+{di_plus_m5:.0f}/DI-{di_minus_m5:.0f}", _DIM)
         _sma20_dist = close - sma20_m5 if sma20_m5 > 0 else 0.0
         _sma20_str = _c(f'SMA20_M5 ${sma20_m5:,.0f}({_sma20_dist:+,.0f})', _DIM)
-        _slope_str  = f'slope BUY{_ok(sma20_slope_buy)} SELL{_ok(sma20_slope_sell)}'
-        print(f" M5 {m5_str}  {_m5_di}  │  {_sma20_str}  {_slope_str}")
-        if sma20_m1 > 0:
-            _sma20_m1_dist = close - sma20_m1
-            _sma20_m1_str  = _c(f'SMA20_M1 ${sma20_m1:,.0f}({_sma20_m1_dist:+,.0f})', _DIM)
-            print(f" M1 RSI {rsi1_str}  {_sma20_m1_str}")
+        _slope_buy_m5  = data.get('sma20_slope_buy_ok',  True)
+        _slope_sell_m5 = data.get('sma20_slope_sell_ok', True)
+        _slope_buy_m1  = data.get('sma20_m1_buy_ok',  True)
+        _slope_sell_m1 = data.get('sma20_m1_sell_ok', True)
+        _slope_buy_m15  = data.get('sma20_m15_buy_ok',  True)
+        _slope_sell_m15 = data.get('sma20_m15_sell_ok', True)
+        sma20_m15 = data.get('sma20_m15', 0.0)
+        # slope: M1/M5/M15 各TF の BUY/SELL方向OK/NG をコンパクトに表示
+        def _slope_icon(ok: bool) -> str:
+            return _c('↑', _GREEN) if ok else _c('↓', _RED)
+        _slope_line = (f"M1{_slope_icon(_slope_buy_m1)}/{_slope_icon(_slope_sell_m1)}"
+                       f" M5{_slope_icon(_slope_buy_m5)}/{_slope_icon(_slope_sell_m5)}"
+                       f" M15{_slope_icon(_slope_buy_m15)}/{_slope_icon(_slope_sell_m15)}"
+                       f"  (BUY/SELL方向)")
+        print(f" M5 {m5_str}  {_m5_di}  │  {_sma20_str}")
+        print(f" SMA20傾き {_slope_line}")
+        if sma20_m1 > 0 or sma20_m15 > 0:
+            _parts = []
+            if sma20_m1 > 0:
+                _parts.append(_c(f'M1 ${sma20_m1:,.0f}({close-sma20_m1:+,.0f})', _DIM))
+            if sma20_m15 > 0:
+                _parts.append(_c(f'M15 ${sma20_m15:,.0f}({close-sma20_m15:+,.0f})', _DIM))
+            _sma20_vals = '  '.join(_parts)
+            print(f" SMA20値  {_sma20_vals}")
     else:
         rsi_h1_str = _c(f'{rsi_h1:.1f}', _rsi_color(rsi_h1))
         print(f" H1 {h1_str}(ADX {adx_h1:.0f}) RSI {rsi_h1_str}  M5 {m5_str}")
