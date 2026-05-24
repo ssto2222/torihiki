@@ -154,7 +154,7 @@ SCALP = dict(
     sma20_slope_bars   = 5,     # SELL SMA20タッチ判定: 傾き計算に使う M1 バー数
     sma20_slope_atr_thr = 0.10, # SELL SMA20タッチ判定: SMA20がATR×この値以上下落していること
     # 急落・急騰時 SMA20 バイパス（大きく乖離している場合はタッチ不要）
-    sell_sma_bypass_atr  = 2.0,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ
+    sell_sma_bypass_atr  = 1.2,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ
     buy_sma_bypass_atr   = 1.2,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ
     # SMA20 タッチマージン（キャッシュ未計算時の ATR ベースフォールバック）
     sma20_touch_margin_atr = 0.4, # タッチマージン = M5_ATR × この値（BTCUSD: ATR1000→$150）
@@ -185,8 +185,8 @@ ELLIOTT = dict(
     fib_max          = 0.786, # Fibonacci 押し戻し上限
     min_wave1_atr    = 1.5,   # Wave1 の最小サイズ（ATR 倍）
     rsi_div_min      = 3.0,   # 強気/弱気ダイバージェンス最小差分
-    w2_buy_rsi_max   = 45.0,  # BUY: 第2底の RSI 上限（売られすぎ圏）
-    w2_sell_rsi_min  = 55.0,  # SELL: 第2天井の RSI 下限（買われすぎ圏）
+    w2_buy_rsi_max   = 50.0,  # BUY: 第2底の RSI 上限（中立圏まで許容）
+    w2_sell_rsi_min  = 50.0,  # SELL: 第2天井の RSI 下限（中立圏まで許容）
     w2_bars_ago_max  = 5,     # 第2底/天井が直近 N 本以内であること
     fib_tp_ext       = 1.618, # TP = W2底 + Wave1_size × fib_tp_ext（Wave3 黄金比目標）
     sl_buffer_atr    = 0.3,   # SL = W2底 - ATR × sl_buffer_atr（波動失効ライン）
