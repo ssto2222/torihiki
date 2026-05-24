@@ -575,12 +575,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 m1_bar_cur   = df_m1.index[-1]
                 close_m1_cur = float(df_m1['Close'].iloc[-1])
                 close_m1_prv = float(df_m1['Close'].iloc[-2])
+                sma20_m1_c   = (float(df_m1['SMA20'].iloc[-1])
+                                if 'SMA20' in df_m1.columns else float('nan'))
                 is_down_bar  = close_m1_cur < close_m1_prv
+                # M1 上昇トレンド中（close > SMA20）の下落バーはカウントしない
+                trend_ok     = np.isnan(sma20_m1_c) or close_m1_cur <= sma20_m1_c
 
-                if is_down_bar and m1_bar_cur != state.sell_confirm_bar_time:
+                if is_down_bar and trend_ok and m1_bar_cur != state.sell_confirm_bar_time:
                     state.sell_confirm_count   += 1
                     state.sell_confirm_bar_time = m1_bar_cur
-                elif not is_down_bar:
+                elif not is_down_bar or not trend_ok:
                     state.sell_confirm_count    = 0
                     state.sell_confirm_bar_time = None
 
@@ -660,11 +664,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 close_m1_cur = float(df_m1['Close'].iloc[-1])
                 close_m1_prv = float(df_m1['Close'].iloc[-2])
                 is_up_bar    = close_m1_cur > close_m1_prv
+                sma20_m1_c   = (float(df_m1['SMA20'].iloc[-1])
+                                if 'SMA20' in df_m1.columns else float('nan'))
+                # M1 下落トレンド中（close < SMA20）の上昇バーはカウントしない
+                trend_ok     = np.isnan(sma20_m1_c) or close_m1_cur >= sma20_m1_c
 
-                if is_up_bar and m1_bar_cur != state.buy_confirm_bar_time:
+                if is_up_bar and trend_ok and m1_bar_cur != state.buy_confirm_bar_time:
                     state.buy_confirm_count   += 1
                     state.buy_confirm_bar_time = m1_bar_cur
-                elif not is_up_bar:
+                elif not is_up_bar or not trend_ok:
                     state.buy_confirm_count    = 0
                     state.buy_confirm_bar_time = None
 
