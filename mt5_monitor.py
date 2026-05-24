@@ -162,6 +162,54 @@ def _is_bridge_running() -> bool:
     return False
 
 
+def _find_bridge_procs(symbol: str) -> list:
+    """指定シンボルで動いているブリッジプロセスの一覧を返す"""
+    found = []
+    try:
+        for p in psutil.process_iter(['pid', 'cmdline']):
+            cl = ' '.join(p.info.get('cmdline') or [])
+            if MAIN_SCRIPT in cl and f'--symbol {symbol}' in cl:
+                found.append(p)
+    except Exception:
+        pass
+    return found
+
+
+def _kill_bridge_procs(symbol: str) -> None:
+    """指定シンボルの残留ブリッジプロセスを終了し、コンソールウィンドウが閉じるまで待つ"""
+    procs = _find_bridge_procs(symbol)
+    if not procs:
+        return
+    for p in procs:
+        try:
+            p.terminate()
+        except Exception:
+            pass
+    for p in procs:
+        try:
+            p.wait(timeout=5)
+        except Exception:
+            pass
+    _logger.info(f"残留ブリッジ {len(procs)} プロセスを終了しました (symbol={symbol})")
+    time.sleep(2)  # コンソールウィンドウが閉じるまで待機
+
+
+def _is_watch_duplicate(symbol: str) -> bool:
+    """同一シンボルの --watch ウォッチドッグが既に動いているか確認する"""
+    my_pid    = os.getpid()
+    my_script = os.path.basename(__file__)      # 'mt5_monitor.py'
+    try:
+        for p in psutil.process_iter(['pid', 'cmdline']):
+            if p.pid == my_pid:
+                continue
+            cl = ' '.join(p.info.get('cmdline') or [])
+            if my_script in cl and '--watch' in cl and symbol in cl:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _load_bot_cfg() -> dict:
     """ボット用の設定辞書（config.py + オーバーライド適用済み）を返す"""
     try:
@@ -256,6 +304,7 @@ def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
             if cmd == 'start':
                 if _is_bridge_running():
                     return ['⚠️ ブリッジは既に起動中です。']
+                _kill_bridge_procs(shared.get('symbol', 'unknown'))  # 残留プロセスを掃除
                 shared['paused'] = False
                 return ['✅ 再起動を許可しました。数秒以内に起動します。']
 
@@ -438,6 +487,25 @@ def _build_cmd(extra_args: list[str]) -> list[str]:
 
 def watch(bridge_args: list[str]) -> None:
     """ブリッジを起動し、異常終了時に自動再起動するウォッチドッグループ"""
+    # シンボルを bridge_args から取得（重複チェックと残留プロセス管理に使用）
+    _watch_symbol = next(
+        (bridge_args[i + 1] for i, a in enumerate(bridge_args) if a == '--symbol'),
+        'unknown',
+    )
+
+    # ── 同一シンボルの重複起動を防止 ────────────────────────────
+    if _is_watch_duplicate(_watch_symbol):
+        _logger.error(
+            f"シンボル {_watch_symbol} のウォッチドッグは既に起動中です → 終了します。"
+            "同一シンボルは 1 プロセスのみ許可されます。"
+        )
+        return
+
+    # ── 前回の残留ブリッジプロセスを終了 ────────────────────────
+    # 旧ウォッチドッグが kill されてブリッジだけ生き残っている場合や
+    # 別ウィンドウが閉じきれていない場合に一掃する
+    _kill_bridge_procs(_watch_symbol)
+
     cmd = _build_cmd(bridge_args)
     restart_count = 0
 
@@ -449,6 +517,7 @@ def watch(bridge_args: list[str]) -> None:
         'proc':            None,
         'paused':          os.path.exists(FLAG_FILE),  # FLAG_FILE があれば最初から一時停止
         'cmd':             cmd,
+        'symbol':          _watch_symbol,
         'use_new_console': _use_new_console,
         'restart_count':   0,
     }
@@ -471,6 +540,8 @@ def watch(bridge_args: list[str]) -> None:
             continue
 
         _logger.info(f"[{_ts()}] ブリッジ起動 (再起動 #{restart_count}回目): {' '.join(cmd)}")
+        # 残留プロセス・ウィンドウを確実に閉じてから起動
+        _kill_bridge_procs(_watch_symbol)
         proc = None
         ret  = -1  # Popen 失敗時のデフォルト（異常終了として扱う）
         try:
