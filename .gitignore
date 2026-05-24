@@ -8,4 +8,4 @@ mt5_ea_bridge copy.py
 *.bat
 *.log
 *.log.*
-/logs/
+./logs/
