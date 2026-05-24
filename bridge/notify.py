@@ -31,19 +31,27 @@ def _build_discord_signal_msg(data: dict, mode: str) -> str:
     else:
         head = f'⬜ **[シグナル消灯]** {symbol}'
 
-    close  = data.get('close',  0)
-    rsi_m5 = data.get('rsi_m5', 0)
-    rsi_m1 = data.get('rsi_m1', 0)
-    atr    = data.get('atr',    0)
-    sl     = data.get('sl_price', 0)
-    tp     = data.get('tp_price', 0)
-    h1     = data.get('regime_h1', '?')
-    m5r    = data.get('regime_m5', '?')
+    close   = data.get('close',  0)
+    rsi_m5  = data.get('rsi_m5', 0)
+    rsi_m1  = data.get('rsi_m1', 0)
+    atr     = data.get('atr',    0)
+    rvol    = data.get('rvol',   0.0)
+    sl      = data.get('sl_price', 0)
+    tp      = data.get('tp_price', 0)
+    h1      = data.get('regime_h1', '?')
+    m5r     = data.get('regime_m5', '?')
+    adx_m5  = data.get('adx_m5',  0.0)
+    dip_m5  = data.get('di_plus_m5',  0.0)
+    dim_m5  = data.get('di_minus_m5', 0.0)
+    sma20_m5 = data.get('sma20_m5', 0.0)
+    _sma20_dist = close - sma20_m5 if sma20_m5 > 0 else 0.0
 
     lines = [
         head,
-        f'close=${close:,.2f}  RSI_M5={rsi_m5:.1f}  RSI_M1={rsi_m1:.1f}  ATR=${atr:.2f}',
+        f'close=${close:,.2f}  RSI_M5={rsi_m5:.1f}  RSI_M1={rsi_m1:.1f}  ATR=${atr:.2f}  RVOL={rvol:.1f}',
         f'SL=${sl:,.2f}  TP=${tp:,.2f}',
+        f'M5={m5r}(ADX{adx_m5:.0f} DI+{dip_m5:.0f}/DI-{dim_m5:.0f})'
+        f'  SMA20:${sma20_m5:,.0f}({_sma20_dist:+.0f})',
     ]
 
     if data.get('scalp_mode'):
@@ -52,7 +60,7 @@ def _build_discord_signal_msg(data: dict, mode: str) -> str:
         tgt    = data.get('target_profit_jpy', 0)
         lines.append(f'期待利益=+${ep_usd:.2f}(¥{ep_jpy})  target=¥{tgt}')
 
-    lines.append(f'H1={h1}  M5={m5r}')
+    lines.append(f'H1={h1}')
 
     if data.get('scalp_buy_sma_pending'):
         status = '[BUY] SMA20タッチ待ち'
@@ -81,23 +89,42 @@ def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
     atr       = data.get('atr',     0)
     rsi_m5    = data.get('rsi_m5',  0)
     rsi_m1    = data.get('rsi_m1',  0)
+    rvol      = data.get('rvol',    0.0)
     regime_h1 = data.get('regime_h1', '?')
     regime_m5 = data.get('regime_m5', '?')
+    adx_h1    = data.get('adx_h1',  0.0)
+    adx_m5    = data.get('adx_m5',  0.0)
+    dip_h1    = data.get('di_plus_h1',  0.0)
+    dim_h1    = data.get('di_minus_h1', 0.0)
+    dip_m5    = data.get('di_plus_m5',  0.0)
+    dim_m5    = data.get('di_minus_m5', 0.0)
+    sma20_m5  = data.get('sma20_m5', 0.0)
+    sma20_m1  = data.get('sma20_m1', 0.0)
+    sma20_buy = '✓' if data.get('sma20_slope_buy_ok',  True) else '✗'
+    sma20_sel = '✓' if data.get('sma20_slope_sell_ok', True) else '✗'
     action    = data.get('action', 'none')
     total_p   = data.get('total_positions', 0)
     max_p     = data.get('max_positions',   3)
     avail     = data.get('available_slots', max_p)
     today     = data.get('trades_today',    0)
     max_day   = data.get('cooldown_min',    20)
+    cd_cycle  = data.get('trades_cd_cycle', 0)
+    cd_trades = data.get('cooldown_trades', 3)
     skip      = data.get('skip_reason', '')
     mtf_b     = 'OK' if data.get('mtf_buy_ok',  False) else 'NG'
     mtf_s     = 'OK' if data.get('mtf_sell_ok', False) else 'NG'
 
     act_str = {'buy': '🟢 BUY', 'sell': '🔴 SELL'}.get(action, '⬜ 待機')
+    _rvol_tag = f'⚡RVOL:{rvol:.1f}' if rvol >= 3.0 else f'RVOL:{rvol:.1f}'
+    _sma20_dist = close - sma20_m5 if sma20_m5 > 0 else 0.0
+    _sma20_m1_info = f'  SMA20_M1:${sma20_m1:,.0f}({close-sma20_m1:+.0f})' if sma20_m1 > 0 else ''
     lines = [
         f'📊 **[{symbol}] 1時間ステータス**',
-        f'close=${close:,.2f}  RSI M5:{rsi_m5:.1f}  M1:{rsi_m1:.1f}  ATR:${atr:.2f}',
-        f'レジーム: H1={regime_h1}  M5={regime_m5}  MTF:BUY={mtf_b}/SELL={mtf_s}',
+        f'close=${close:,.2f}  RSI M5:{rsi_m5:.1f}  M1:{rsi_m1:.1f}  ATR:${atr:.2f}  {_rvol_tag}',
+        f'H1={regime_h1}(ADX{adx_h1:.0f} DI+{dip_h1:.0f}/DI-{dim_h1:.0f})  MTF:BUY={mtf_b}/SELL={mtf_s}',
+        f'M5={regime_m5}(ADX{adx_m5:.0f} DI+{dip_m5:.0f}/DI-{dim_m5:.0f})'
+        f'  SMA20:${sma20_m5:,.0f}({_sma20_dist:+.0f})  slope:BUY={sma20_buy}/SELL={sma20_sel}'
+        + _sma20_m1_info,
         f'アクション: {act_str}' + (f'  skip={skip}' if skip else ''),
     ]
 
@@ -131,7 +158,7 @@ def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
         lines.append(f'マクロ: {mb:+.0f}[{mb_label}]')
 
     # ポジション・取引回数
-    lines.append(f'ポジション: {total_p}/{max_p}本(空き{avail})  今日: {today}回')
+    lines.append(f'ポジション: {total_p}/{max_p}本(空き{avail})  今日: {today}回  CD:{cd_cycle}/{cd_trades}')
 
     return '\n'.join(lines)
 

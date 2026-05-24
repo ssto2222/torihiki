@@ -170,6 +170,20 @@ def print_poll_status(
     mtf_buy   = data.get('mtf_buy_ok',  False)
     mtf_sell  = data.get('mtf_sell_ok', False)
 
+    adx_h1      = data.get('adx_h1', 0.0)
+    adx_m5      = data.get('adx_m5', 0.0)
+    di_plus_h1  = data.get('di_plus_h1',  0.0)
+    di_minus_h1 = data.get('di_minus_h1', 0.0)
+    di_plus_m5  = data.get('di_plus_m5',  0.0)
+    di_minus_m5 = data.get('di_minus_m5', 0.0)
+    sma20_m5    = data.get('sma20_m5', 0.0)
+    sma20_m1    = data.get('sma20_m1', 0.0)
+    sma20_slope_buy  = data.get('sma20_slope_buy_ok',  True)
+    sma20_slope_sell = data.get('sma20_slope_sell_ok', True)
+    cd_cycle    = data.get('trades_cd_cycle', 0)
+    cd_trades   = data.get('cooldown_trades', 3)
+    cd_rem      = data.get('scalp_cooldown_rem', 0)
+
     ws_blocked = data.get('ws_blocked', False)
     ws_ratio   = data.get('ws_ratio',   0.0)
     ext_os     = data.get('extreme_oversold',  False)
@@ -191,28 +205,37 @@ def print_poll_status(
     rsi1_col  = _rsi_color(rsi_m1)
     rsi5_str  = _c(f'{rsi_m5:.1f}', rsi5_col)
     rsi1_str  = _c(f'{rsi_m1:.1f}', rsi1_col)
-    print(f" {price_str}  {atr_str}  │  RSI_M5 {rsi5_str}  RSI_M1 {rsi1_str}")
+    # RVOL 色付き（< 1.5: dim、1.5-3.0: yellow、≥ 3.0: red bold）
+    _rvol_col = (_RED + _BOLD if rvol >= 3.0 else
+                 _YELLOW       if rvol >= 1.5 else _DIM)
+    _rvol_str = _c(f'RVOL {rvol:.1f}', _rvol_col)
+    print(f" {price_str}  {atr_str}  │  RSI_M5 {rsi5_str}  RSI_M1 {rsi1_str}  {_rvol_str}")
 
     # ── レジーム行 ─────────────────────────────────────────────────────────
     h1_str = _c(regime_h1, _regime_color(regime_h1))
     m5_str = _c(regime_m5, _regime_color(regime_m5))
     if is_scalp:
-        print(f" H1 {h1_str}  M5 {m5_str}  │  MTF BUY {_ok(mtf_buy)}  SELL {_ok(mtf_sell)}")
+        _h1_di = _c(f"ADX{adx_h1:.0f} DI+{di_plus_h1:.0f}/DI-{di_minus_h1:.0f}", _DIM)
+        print(f" H1 {h1_str}  {_h1_di}  │  MTF BUY {_ok(mtf_buy)}  SELL {_ok(mtf_sell)}")
+        _m5_di = _c(f"ADX{adx_m5:.0f} DI+{di_plus_m5:.0f}/DI-{di_minus_m5:.0f}", _DIM)
+        _sma20_dist = close - sma20_m5 if sma20_m5 > 0 else 0.0
+        _sma20_str = _c(f'SMA20_M5 ${sma20_m5:,.0f}({_sma20_dist:+,.0f})', _DIM)
+        _slope_str  = f'slope BUY{_ok(sma20_slope_buy)} SELL{_ok(sma20_slope_sell)}'
+        print(f" M5 {m5_str}  {_m5_di}  │  {_sma20_str}  {_slope_str}")
+        if sma20_m1 > 0:
+            _sma20_m1_dist = close - sma20_m1
+            _sma20_m1_str  = _c(f'SMA20_M1 ${sma20_m1:,.0f}({_sma20_m1_dist:+,.0f})', _DIM)
+            print(f" M1 RSI {rsi1_str}  {_sma20_m1_str}")
     else:
         rsi_h1_str = _c(f'{rsi_h1:.1f}', _rsi_color(rsi_h1))
-        adx_h1 = data.get('adx_h1', 0.0)
         print(f" H1 {h1_str}(ADX {adx_h1:.0f}) RSI {rsi_h1_str}  M5 {m5_str}")
 
-    # ── 特殊状態行（WS・ExtRSI・RVOL・EW2・VolBO） ──────────────────────
+    # ── 特殊状態行（WS・ExtRSI・EW2・VolBO） ─────────────────────────────
     flags: list[str] = []
     if ws_blocked:
         flags.append(_c(f'WS ブロック (ratio={ws_ratio:.1f})', _YELLOW, _BOLD))
     elif ws_ratio >= 1.5:
         flags.append(_c(f'WS ratio={ws_ratio:.1f}', _YELLOW))
-    if rvol >= 3.0:
-        flags.append(_c(f'⚡ RVOL={rvol:.1f}', _RED, _BOLD))
-    elif rvol >= 1.5:
-        flags.append(_c(f'RVOL={rvol:.1f}', _YELLOW))
     if ext_os:
         rsi_str = _c(f'RSI={rsi_m5:.1f}', _RED, _BOLD)
         flags.append(_c('⚠ 極端売られすぎ ', _RED, _BOLD) + rsi_str)
@@ -348,7 +371,12 @@ def print_poll_status(
     pos_str = _c(f'{total_p}/{max_p}', _GREEN if avail > 0 else _RED)
     consec_str = (_c(str(consec_losses), _RED, _BOLD)
                   if consec_losses > 0 else _c('0', _DIM))
-    trade_str = f'{today}/{max_day}回  ' if max_day is not None else ''
+    if max_day is not None:
+        _cd_prog = _c(f'CD:{cd_cycle}/{cd_trades}', _YELLOW if cd_rem > 0 else _DIM)
+        _cd_rem_str = _c(f'(残{cd_rem}分)', _YELLOW) if cd_rem > 0 else ''
+        trade_str = f'{today}/{max_day}回  {_cd_prog}{_cd_rem_str}  '
+    else:
+        trade_str = ''
     print(f" 今日 {trade_str}ポジ {pos_str}(空き{avail})"
           f"  残高 {bal_str}  連続損失 {consec_str}回")
 
