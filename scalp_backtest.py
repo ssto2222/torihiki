@@ -22,7 +22,10 @@ from core.data       import (connect_mt5, fetch_ohlcv, fetch_ohlcv_range,
                               generate_m5_from_h1, generate_m1_from_h1, generate_h1)
 from core.indicators import add_m1_indicators, add_m5_indicators, add_h1_indicators
 from core.patterns   import detect_all_patterns
-from mt5_ea_bridge   import _detect_regime
+from core.strategy   import (detect_whipsaw,
+                              detect_elliott_w2_buy, detect_elliott_w2_sell,
+                              detect_volume_breakout)
+from bridge.utils    import _detect_regime
 
 
 # ──────────────────────────────────────────────────────────────
@@ -177,6 +180,45 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
     timeout_m1  = 30   # バー数 = 分
     hold_max_m1 = 60 * 8
 
+    # ── SMA20 バイパス設定 ──────────────────────────────────────
+    buy_bypass  = scalp.get('buy_sma_bypass_atr',  2.0)
+    sell_bypass = scalp.get('sell_sma_bypass_atr', 2.0)
+
+    # ── Elliott Wave 2 設定 ─────────────────────────────────────
+    ew_cfg          = cfg.get('ELLIOTT', {})
+    _ew_enabled     = ew_cfg.get('enabled', True)
+    _ew_lb          = ew_cfg.get('lookback_bars', 40)
+    _ew_sw          = ew_cfg.get('sw_window', 3)
+    _ew_fm          = ew_cfg.get('fib_min', 0.382)
+    _ew_fmx         = ew_cfg.get('fib_max', 0.786)
+    _ew_w1a         = ew_cfg.get('min_wave1_atr', 1.5)
+    _ew_div         = ew_cfg.get('rsi_div_min', 3.0)
+    _ew_bago        = ew_cfg.get('w2_bars_ago_max', 5)
+    _ew_ext         = ew_cfg.get('fib_tp_ext', 1.618)
+    _ew_slb         = ew_cfg.get('sl_buffer_atr', 0.3)
+    _ew2_buy_rsi_max  = ew_cfg.get('w2_buy_rsi_max', 45.0)
+    _ew2_sell_rsi_min = ew_cfg.get('w2_sell_rsi_min', 55.0)
+    _ew_slice_len   = _ew_lb + _ew_sw + 10   # EW2 検出に必要なスライス長
+
+    # ── ウィップソー設定 ────────────────────────────────────────
+    ws_cfg  = cfg.get('WHIPSAW', {})
+    _ws_n   = ws_cfg.get('ratio_n',  20)
+    _ws_thr = ws_cfg.get('ratio_thr', 2.0)
+
+    # ── 極端 RSI 反発・反落設定 ─────────────────────────────────
+    ext_os_rsi   = scalp.get('extreme_oversold_rsi',   25.0)
+    ext_ob_rsi   = scalp.get('extreme_overbought_rsi', 75.0)
+    ext_buy_thr  = scalp.get('extreme_os_buy_thr',  33.0)
+    ext_sell_thr = scalp.get('extreme_ob_sell_thr', 67.0)
+
+    # ── ボリュームブレイクアウト設定 ────────────────────────────
+    _vb_enabled      = scalp.get('vol_bo_enabled', True)
+    _vb_tp_m         = scalp.get('vol_bo_tp_multi', 1.8)
+    _vb_sl_m         = scalp.get('vol_bo_sl_multi', 0.8)
+    _vb_rsi_buy_min  = scalp.get('vol_bo_rsi_buy_min', 52.0)
+    _vb_rsi_sell_max = scalp.get('vol_bo_rsi_sell_max', 48.0)
+    _has_rvol        = 'RVOL' in df_m5.columns
+
     # numpy 配列（高速アクセス用）
     m1_t   = df_m1.index.to_numpy()
     m1_cl  = df_m1['Close'].to_numpy(dtype=float)
@@ -282,10 +324,15 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
             s20 = m1_s20[j]; cl = m1_cl[j]
             if np.isnan(s20) or np.isnan(cl):
                 continue
-            if abs(cl - s20) > touch_margin:
+            # SMA20 バイパス: 価格が大きく乖離している場合はタッチ不要
+            _bypass = (
+                (direction == 'buy'  and buy_bypass  > 0 and cl > s20 + atr_v * buy_bypass) or
+                (direction == 'sell' and sell_bypass > 0 and cl < s20 - atr_v * sell_bypass)
+            )
+            if not _bypass and abs(cl - s20) > touch_margin:
                 continue
-            # SMA20 傾き確認
-            if j >= slope_bars:
+            # SMA20 傾き確認（バイパス時はスキップ）
+            if not _bypass and j >= slope_bars:
                 atr_j  = m1_atr[j]
                 s20_prv = m1_s20[j - slope_bars]
                 if not (np.isnan(atr_j) or np.isnan(s20_prv)):
@@ -348,6 +395,30 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
             'signal_source': 'pattern_nl',
         }
 
+    def find_direct_entry(direction: str, m5_i: int,
+                          custom_tp: float | None, custom_sl: float | None,
+                          src: str) -> dict | None:
+        """SMA20 タッチ待ち不要のダイレクトエントリー（EW2 / vol_bo / extreme OS/OB 共用）。"""
+        atr_v = m5_atr[m5_i]
+        if np.isnan(atr_v) or atr_v <= 0:
+            return None
+        base_tp = atr_v * tp_frac
+        tp_m = custom_tp if (custom_tp is not None and custom_tp > 0) else base_tp
+        sl_m = custom_sl if (custom_sl is not None and custom_sl > 0) else tp_m * sl_ratio
+        j0 = m1_idx_at(m5_t[m5_i])
+        if j0 >= len(m1_cl):
+            return None
+        ep = float(m1_cl[j0])
+        return {
+            'direction':     direction,
+            'entry_time':    m5_t[m5_i],
+            'entry_price':   ep,
+            'confirm_bar':   j0,
+            'tp_move':       tp_m,
+            'sl_move':       sl_m,
+            'signal_source': src,
+        }
+
     def simulate_exit(info: dict) -> tuple[float, str, object]:
         d  = info['direction']
         ep = info['entry_price']
@@ -378,6 +449,11 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
     crossing_ptr: int  = 0
     _crossings = list(h1_crossings or [])
 
+    # 追加シグナル用ステート
+    extreme_oversold:   bool = False
+    extreme_overbought: bool = False
+    ew2_traded: set = set()         # (direction, round(w2_price, 0), bars_ago) 重複防止
+
     for i in range(15, len(m5_t)):
         rsi_cur  = m5_rsi[i]
         rsi_prev = m5_rsi_prev
@@ -386,6 +462,16 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
             continue
 
         ts = pd.Timestamp(m5_t[i])
+
+        # ── 極端 RSI 状態の追跡 ──────────────────────────────────
+        if rsi_cur <= ext_os_rsi:
+            extreme_oversold = True
+        elif rsi_cur > 50.0:
+            extreme_oversold = False
+        if rsi_cur >= ext_ob_rsi:
+            extreme_overbought = True
+        elif rsi_cur < 50.0:
+            extreme_overbought = False
 
         # クールダウン
         if (last_entry_ts is not None and
@@ -400,7 +486,13 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
         # レジーム
         regime = _regime(df_m5, i, regime_cfg)
 
-        # ── パターン ネックライン突破 (優先) ──────────────────────
+        # ── ウィップソー検出 ─────────────────────────────────────
+        _ws_block = False
+        if _ws_n > 0 and i >= _ws_n:
+            _ws_block, _ = detect_whipsaw(
+                df_m5.iloc[max(0, i - _ws_n): i + 1], _ws_n, _ws_thr)
+
+        # ── H1 パターン ネックライン突破 (優先) ──────────────────────
         info = None; signal = None; crossed = 0.0
         if crossing_ptr < len(_crossings):
             e_ts, e_dir, e_nl, e_tgt = _crossings[crossing_ptr]
@@ -413,13 +505,116 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
                     signal  = e_dir
                     crossed = e_nl
 
+        # ── Elliott Wave 2 エントリー ─────────────────────────────
+        if info is None and _ew_enabled and not _ws_block:
+            atr_i    = m5_atr[i]
+            ew_start = max(0, i - _ew_slice_len)
+            df_ew    = df_m5.iloc[ew_start: i + 1]
+            _lb      = min(_ew_lb, len(df_ew) - 1)
+
+            if buy_en and regime != 'trend_down' and _mtf_ok(m5_t[i], i, 'buy'):
+                _ew2b = detect_elliott_w2_buy(
+                    df_ew, lookback=_lb, sw_window=_ew_sw,
+                    fib_min=_ew_fm, fib_max=_ew_fmx,
+                    min_wave1_atr=_ew_w1a, rsi_div_min=_ew_div,
+                    w2_rsi_max=_ew2_buy_rsi_max, w2_bars_ago_max=_ew_bago,
+                )
+                if _ew2b is not None:
+                    _fp = ('ew2_buy', round(_ew2b['w2_low'], 0), _ew2b['w2_bars_ago'])
+                    if _fp not in ew2_traded:
+                        if len(ew2_traded) > 120:
+                            ew2_traded.clear()
+                        ew2_traded.add(_fp)
+                        _ew2_tp = _ew2b['w2_low'] + _ew2b['wave1_size'] * _ew_ext
+                        _ew2_sl = _ew2b['w2_low'] - atr_i * _ew_slb
+                        j0 = m1_idx_at(m5_t[i])
+                        if j0 < len(m1_cl):
+                            ep = float(m1_cl[j0])
+                            _tp_move = max(atr_i * 0.1, _ew2_tp - ep) if _ew2_tp > ep else atr_i * tp_frac
+                            _sl_move = max(atr_i * 0.1, ep - _ew2_sl) if _ew2_sl < ep else atr_i * tp_frac * sl_ratio
+                            info   = find_direct_entry('buy', i, _tp_move, _sl_move,
+                                                       f'ew2_buy_fib{_ew2b["fib_level"]:.2f}')
+                            signal = 'buy'
+                            crossed = _ew2b['w2_low']
+
+            if info is None and sell_en and regime != 'trend_up' and _mtf_ok(m5_t[i], i, 'sell'):
+                _ew2s = detect_elliott_w2_sell(
+                    df_ew, lookback=_lb, sw_window=_ew_sw,
+                    fib_min=_ew_fm, fib_max=_ew_fmx,
+                    min_wave1_atr=_ew_w1a, rsi_div_min=_ew_div,
+                    w2_rsi_min=_ew2_sell_rsi_min, w2_bars_ago_max=_ew_bago,
+                )
+                if _ew2s is not None:
+                    _fp = ('ew2_sell', round(_ew2s['w2_high'], 0), _ew2s['w2_bars_ago'])
+                    if _fp not in ew2_traded:
+                        if len(ew2_traded) > 120:
+                            ew2_traded.clear()
+                        ew2_traded.add(_fp)
+                        _ew2_tp = _ew2s['w2_high'] - _ew2s['wave1_size'] * _ew_ext
+                        _ew2_sl = _ew2s['w2_high'] + atr_i * _ew_slb
+                        j0 = m1_idx_at(m5_t[i])
+                        if j0 < len(m1_cl):
+                            ep = float(m1_cl[j0])
+                            _tp_move = max(atr_i * 0.1, ep - _ew2_tp) if _ew2_tp < ep else atr_i * tp_frac
+                            _sl_move = max(atr_i * 0.1, _ew2_sl - ep) if _ew2_sl > ep else atr_i * tp_frac * sl_ratio
+                            info   = find_direct_entry('sell', i, _tp_move, _sl_move,
+                                                       f'ew2_sell_fib{_ew2s["fib_level"]:.2f}')
+                            signal = 'sell'
+                            crossed = _ew2s['w2_high']
+
+        # ── 極端 OS/OB 反発・反落 ─────────────────────────────────
+        if info is None and not _ws_block:
+            atr_i   = m5_atr[i]
+            _tp_ext = atr_i * tp_frac
+            _sl_ext = _tp_ext * sl_ratio
+            if (extreme_oversold and buy_en and regime != 'trend_down'
+                    and _mtf_ok(m5_t[i], i, 'buy')
+                    and rsi_prev <= ext_buy_thr < rsi_cur):
+                extreme_oversold = False
+                info   = find_direct_entry('buy', i, _tp_ext, _sl_ext,
+                                           f'extreme_os_bounce_{int(ext_buy_thr)}')
+                signal = 'buy'
+                crossed = ext_buy_thr
+            elif (extreme_overbought and sell_en and regime != 'trend_up'
+                    and _mtf_ok(m5_t[i], i, 'sell')
+                    and rsi_prev >= ext_sell_thr > rsi_cur):
+                extreme_overbought = False
+                info   = find_direct_entry('sell', i, _tp_ext, _sl_ext,
+                                           f'extreme_ob_bounce_{int(ext_sell_thr)}')
+                signal = 'sell'
+                crossed = ext_sell_thr
+
+        # ── ボリュームブレイクアウト ──────────────────────────────
+        if info is None and _vb_enabled and _has_rvol and not _ws_block:
+            _vol_bo = detect_volume_breakout(df_m5.iloc[max(0, i - 4): i + 1], cfg)
+            if _vol_bo['direction'] != 'none':
+                atr_i    = m5_atr[i]
+                _tp_base = atr_i * tp_frac
+                _sl_base = _tp_base * sl_ratio
+                if (_vol_bo['direction'] == 'up' and buy_en
+                        and rsi_cur >= _vb_rsi_buy_min and regime != 'trend_down'
+                        and _mtf_ok(m5_t[i], i, 'buy')):
+                    info   = find_direct_entry('buy', i,
+                                               _tp_base * _vb_tp_m, _sl_base * _vb_sl_m,
+                                               f'vol_bo_up_rvol{_vol_bo["rvol"]:.1f}')
+                    signal = 'buy'
+                    crossed = rsi_cur
+                elif (_vol_bo['direction'] == 'down' and sell_en
+                        and rsi_cur <= _vb_rsi_sell_max and regime != 'trend_up'
+                        and _mtf_ok(m5_t[i], i, 'sell')):
+                    info   = find_direct_entry('sell', i,
+                                               _tp_base * _vb_tp_m, _sl_base * _vb_sl_m,
+                                               f'vol_bo_down_rvol{_vol_bo["rvol"]:.1f}')
+                    signal = 'sell'
+                    crossed = rsi_cur
+
         # ── RSI クロス検出 ─────────────────────────────────────────
         if info is None:
-            if buy_en and regime != 'trend_down':
+            if buy_en and regime != 'trend_down' and not _ws_block:
                 for thr in buy_thrs:
                     if rsi_cur > thr and rsi_prev <= thr:
                         signal = 'buy'; crossed = thr; break
-            if signal is None and sell_en and regime != 'trend_up':
+            if signal is None and sell_en and regime != 'trend_up' and not _ws_block:
                 for thr in sell_thrs:
                     if rsi_cur < thr and rsi_prev >= thr:
                         signal = 'sell'; crossed = thr; break
@@ -622,7 +817,8 @@ def main():
 
     cfg = {k: getattr(C, k) for k in
            ['MT5', 'INDICATOR', 'SIGNAL', 'EXECUTION', 'SL', 'RULES',
-            'OPTIMIZE', 'LOCAL', 'PLOT', 'BRIDGE', 'SCALP', 'REGIME', 'TIME_BIAS']}
+            'OPTIMIZE', 'LOCAL', 'PLOT', 'BRIDGE', 'SCALP', 'REGIME',
+            'TIME_BIAS', 'ELLIOTT', 'WHIPSAW']}
     cfg['MT5'] = {**cfg['MT5'], 'symbol': args.symbol,
                   'h1_bars': h1_bars, 'm1_bars': m1_bars, 'm5_bars': m5_bars}
 
