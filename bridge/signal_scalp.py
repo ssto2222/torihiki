@@ -47,8 +47,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         sell_thrs  = sorted(scalp.get('rsi_sell_thrs', [45.0, 40.0, 35.0]), reverse=True)
         buy_enabled  = bool(scalp.get('buy_enabled',  True))
         sell_enabled = bool(scalp.get('sell_enabled', True))
-        max_day    = scalp.get('max_trades_day',  20)
-        cooldown   = scalp.get('cooldown_min',    30)
+        max_day         = scalp.get('max_trades_day',  20)
+        cooldown        = scalp.get('cooldown_min',    15)
+        cooldown_trades = int(scalp.get('cooldown_trades', 3))
 
         # buy/sell が無効になった場合は対応する pending 状態をクリア
         if not buy_enabled and state.buy_sma_pending:
@@ -274,14 +275,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             return None
 
         # ── クールダウン中は通常モードに切換え ─────────────────────
+        # cooldown_trades 回トレードするごとに cooldown_min 分間のクールダウン
         in_cooldown = (
-            state.last_at is not None and
-            now < state.last_at + timedelta(minutes=cooldown)
+            state.cooldown_start_at is not None and
+            now < state.cooldown_start_at + timedelta(minutes=cooldown)
         )
         if in_cooldown:
             normal_data = compute_signal(symbol, cfg, sig_state, jpy_cache, mt5=mt5)
             if normal_data is not None:
-                rem = int((state.last_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
+                rem = int((state.cooldown_start_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
                 normal_data['scalp_cooldown_rem'] = rem
                 normal_data['scalp_mode']         = False
                 return normal_data
@@ -823,10 +825,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = f'forbidden_hour={eff_hour}'
             elif state.count >= max_day:
                 skip = f'daily_limit={state.count}/{max_day}'
-            elif (state.last_at is not None and
-                  now < state.last_at + timedelta(minutes=cooldown)):
-                rem  = int((state.last_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
-                skip = f'cooldown残{rem}分'
+            elif (state.cooldown_start_at is not None and
+                  now < state.cooldown_start_at + timedelta(minutes=cooldown)):
+                rem  = int((state.cooldown_start_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
+                skip = f'cooldown残{rem}分({cooldown_trades}回毎)'
             elif pos_st['available_slots'] <= 0:
                 opp_dir = 'sell' if new_cross == 'buy' else 'buy'
                 if _has_positions_in_direction(symbol, magic_id, opp_dir, mt5=mt5):
@@ -835,6 +837,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.last_action = new_cross
                     state.count      += 1
                     state.last_at     = now
+                    if state.count % cooldown_trades == 0:
+                        state.cooldown_start_at = now
                 else:
                     skip = (f"max_positions={pos_st['max_positions']}に到達"
                             f"（全{pos_st['total_positions']}本）")
@@ -843,6 +847,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.last_action = new_cross
                 state.count    += 1
                 state.last_at   = now
+                if state.count % cooldown_trades == 0:
+                    state.cooldown_start_at = now
 
         if action == 'buy':
             sl_price = close_v - sl_move

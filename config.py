@@ -146,7 +146,8 @@ SCALP = dict(
     buy_enabled       = True,     # scalp buy を有効化 / 無効化
     sell_enabled      = True,     # scalp sell を有効化 / 無効化
     max_trades_day    = 20,      # 1日の最大エントリー回数
-    cooldown_min      = 15,      # 前回エントリーからのクールダウン（分）
+    cooldown_min      = 15,      # クールダウン時間（分）
+    cooldown_trades   = 3,       # この回数トレードするごとにクールダウンを発動
     big_move_lookback  = 12,     # 大変動判定: 過去 N 本（12本=60分）
     big_move_atr_multi = 5.0,   # 大変動判定: 価格変動 > ATR × N で切換え
     m1_early_margin    = 2.0,   # M5 RSI が閾値からこの値以内に接近 + M1 先行クロスで早期執行

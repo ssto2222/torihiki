@@ -49,6 +49,7 @@ class ScalpState:
     prev_rsi: Optional[float] = None
     last_bar_time: Optional[datetime] = None
     last_at: Optional[datetime] = None
+    cooldown_start_at: Optional[datetime] = None  # N回ごとクールダウン開始時刻
     count: int = 0
     date: object = None
     last_action: str = 'none'
