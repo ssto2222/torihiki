@@ -99,11 +99,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # M1 データ取得
         df_m1_raw = fetch_ohlcv(symbol, 'M1', 50)
         df_m1 = None
-        rsi_m1_cur = float('nan')
+        rsi_m1_cur   = float('nan')
+        sma20_m1_val = float('nan')
         if df_m1_raw is not None:
             df_m1 = add_m1_indicators(df_m1_raw, cfg)
             if not df_m1.empty:
-                rsi_m1_cur = float(df_m1['RSI'].iloc[-1])
+                rsi_m1_cur   = float(df_m1['RSI'].iloc[-1])
+                sma20_m1_val = (float(df_m1['SMA20'].iloc[-1])
+                                if 'SMA20' in df_m1.columns else float('nan'))
 
         # M1 RSI 追跡（BUY過熱: >65 / SELL過熱: <35）
         if not np.isnan(rsi_m1_cur):
@@ -118,14 +121,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # レジーム判定（M5 ADX）
         regime_cfg = cfg.get('REGIME', {})
-        adx_m5_sv  = float(df['ADX'].iloc[-1])     if 'ADX'      in df.columns else float('nan')
-        dip_m5_sv  = float(df['DI_plus'].iloc[-1]) if 'DI_plus'  in df.columns else float('nan')
-        dim_m5_sv  = float(df['DI_minus'].iloc[-1])if 'DI_minus' in df.columns else float('nan')
-        regime_m5s = _detect_regime(adx_m5_sv, dip_m5_sv, dim_m5_sv, regime_cfg)
+        adx_m5_sv    = float(df['ADX'].iloc[-1])     if 'ADX'      in df.columns else float('nan')
+        dip_m5_sv    = float(df['DI_plus'].iloc[-1]) if 'DI_plus'  in df.columns else float('nan')
+        dim_m5_sv    = float(df['DI_minus'].iloc[-1])if 'DI_minus' in df.columns else float('nan')
+        sma20_m5_val = float(df['SMA20'].iloc[-1])   if 'SMA20'    in df.columns else float('nan')
+        regime_m5s   = _detect_regime(adx_m5_sv, dip_m5_sv, dim_m5_sv, regime_cfg)
         r_multi_s  = _regime_lot_multi('weak_trend', regime_m5s, regime_cfg)
 
         # H1 レジーム取得
         regime_h1s = 'weak_trend'
+        adx_h1s    = float('nan')
         dip_h1s    = float('nan')
         dim_h1s    = float('nan')
         # H1 パターン検知用に多めに取得 (200本 ≈ 8日)
@@ -180,13 +185,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # スキャルプはレンジ相場でも有効 → 'range' も許可
         # h1_di_filter=False(デフォルト): H1レジームのみで判断（DI不要）
         # h1_di_filter=True(厳格): DI方向も必須
-        _use_di_filter = scalp.get('h1_di_filter', False)
+        _use_di_filter       = scalp.get('h1_di_filter', False)
+        _sma20_slope_buy_ok  = _sma20_ok(df, 'buy')
+        _sma20_slope_sell_ok = _sma20_ok(df, 'sell')
         mtf_buy_ok  = (regime_h1s != 'trend_down' and
                        (not _use_di_filter or _h1_di_buy) and
-                       _sma20_ok(df, 'buy'))
+                       _sma20_slope_buy_ok)
         mtf_sell_ok = (regime_h1s != 'trend_up' and
                        (not _use_di_filter or _h1_di_sell) and
-                       _sma20_ok(df, 'sell'))
+                       _sma20_slope_sell_ok)
         # EW2 専用: W2底/天井形成中はM5 SMA20がまだ逆向きのため、スロープチェックを外す
         mtf_ew2_buy_ok  = (regime_h1s != 'trend_down' and (not _use_di_filter or _h1_di_buy))
         mtf_ew2_sell_ok = (regime_h1s != 'trend_up'   and (not _use_di_filter or _h1_di_sell))
@@ -934,12 +941,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'rsi_h1':             0.0,
             'rsi_d1':             0.0,
             'rsi_m5':             round(rsi_cur, 1),
-            'rsi_m5_prev':        0.0,
+            'rsi_m5_prev':        round(rsi_prev_bar, 1),
             'rsi_m1':             round(rsi_m1_cur, 1) if not np.isnan(rsi_m1_cur) else 0.0,
             'm5_filter_ok':       False,
             'm5_surge':           'none',
             'scalp_type':         'none',
-            'sma20':              0.0,
+            'sma20':              round(sma20_m5_val, 2) if not np.isnan(sma20_m5_val) else 0.0,
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
             'signal_type':        (_ew2_signal_type if (_ew2_signal_type and action != 'none')
@@ -983,14 +990,24 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'max_positions':      pos_st['max_positions'],
             'total_positions':    pos_st['total_positions'],
             'available_slots':    pos_st['available_slots'],
-            'adx_h1':             0.0,
+            'adx_h1':             round(adx_h1s, 1) if not np.isnan(adx_h1s) else 0.0,
             'adx_m5':             round(adx_m5_sv, 1) if not np.isnan(adx_m5_sv) else 0.0,
+            'di_plus_h1':         round(dip_h1s, 1) if not np.isnan(dip_h1s) else 0.0,
+            'di_minus_h1':        round(dim_h1s, 1) if not np.isnan(dim_h1s) else 0.0,
+            'di_plus_m5':         round(dip_m5_sv, 1) if not np.isnan(dip_m5_sv) else 0.0,
+            'di_minus_m5':        round(dim_m5_sv, 1) if not np.isnan(dim_m5_sv) else 0.0,
+            'sma20_m5':           round(sma20_m5_val, 0) if not np.isnan(sma20_m5_val) else 0.0,
+            'sma20_m1':           round(sma20_m1_val, 0) if not np.isnan(sma20_m1_val) else 0.0,
+            'sma20_slope_buy_ok': _sma20_slope_buy_ok,
+            'sma20_slope_sell_ok': _sma20_slope_sell_ok,
             'regime_h1':          regime_h1s,
             'regime_m5':          regime_m5s,
             'regime_lot_multi':   round(r_multi_s, 2),
             'entry_in_window':    0,
             'mtf_buy_ok':         mtf_buy_ok,
             'mtf_sell_ok':        mtf_sell_ok,
+            'cooldown_trades':    cooldown_trades,
+            'trades_cd_cycle':    state.count % max(1, cooldown_trades),
             'h1_patterns':        h1_pattern_bars,
             'pattern_tp_target':  state.pattern_tp_target,
             # ダッシュボード表示用
