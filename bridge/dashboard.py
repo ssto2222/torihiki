@@ -186,8 +186,6 @@ def print_poll_status(
 
     ws_blocked = data.get('ws_blocked', False)
     ws_ratio   = data.get('ws_ratio',   0.0)
-    ext_os     = data.get('extreme_oversold',  False)
-    ext_ob     = data.get('extreme_overbought', False)
     rvol       = data.get('rvol', 0.0)
 
     mode_tag = _c(f'[{mode.upper()}]', _CYAN, _BOLD)
@@ -260,12 +258,6 @@ def print_poll_status(
         flags.append(_c(f'WS ブロック (ratio={ws_ratio:.1f})', _YELLOW, _BOLD))
     elif ws_ratio >= 1.5:
         flags.append(_c(f'WS ratio={ws_ratio:.1f}', _YELLOW))
-    if ext_os:
-        rsi_str = _c(f'RSI={rsi_m5:.1f}', _RED, _BOLD)
-        flags.append(_c('⚠ 極端売られすぎ ', _RED, _BOLD) + rsi_str)
-    if ext_ob:
-        rsi_str = _c(f'RSI={rsi_m5:.1f}', _RED, _BOLD)
-        flags.append(_c('⚠ 極端買われすぎ ', _RED, _BOLD) + rsi_str)
     sig_type = data.get('signal_type', '')
     if 'EW2' in sig_type:
         flags.append(_c(f'EW2 {sig_type}', _MAGENTA))

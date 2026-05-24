@@ -91,10 +91,6 @@ class ScalpState:
     ew2_last_buy:  dict | None = field(default=None)
     ew2_last_sell: dict | None = field(default=None)
 
-    # 極端RSI状態（急落後反発BUY / 急騰後反落SELL 用）
-    extreme_oversold: bool   = False
-    extreme_overbought: bool = False
-
     # ボリュームブレイクアウト重複防止（同バーで2回発火しない）
     vol_breakout_bar: object = None  # 直前ブレイクアウト発火の M5 バー時刻
     vol_breakout_dir: str    = 'none'

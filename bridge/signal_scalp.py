@@ -247,18 +247,6 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _is_whipsaw   = False
         _is_bidir     = False
 
-        # ── 極端 RSI 状態の追跡（急落後反発BUY / 急騰後反落SELL） ─────────────
-        _ext_os_rsi  = scalp.get('extreme_oversold_rsi',   25.0)
-        _ext_ob_rsi  = scalp.get('extreme_overbought_rsi', 75.0)
-        if rsi_cur <= _ext_os_rsi:
-            state.extreme_oversold = True
-        elif rsi_cur > 50.0:
-            state.extreme_oversold = False      # RSI 正常圏復帰でクリア
-        if rsi_cur >= _ext_ob_rsi:
-            state.extreme_overbought = True
-        elif rsi_cur < 50.0:
-            state.extreme_overbought = False
-
         # 確定トレンド転換時に逆方向の待機状態をキャンセル
         # M5（短期）ではなく H1（中期）確定トレンドのみでキャンセル
         # → M5 一時的押し目で pending が消えるのを防ぐ
@@ -360,7 +348,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         confirmed_signal  = None
         candidate_signal  = None
         crossed_level     = 0.0
-        _direct_confirmed = False  # EW2/極端RSI/H1パターン由来: M5レジームチェックをスキップ
+        _direct_confirmed = False  # EW2/H1パターン由来: 一部ゲートをスキップ
         _is_ew2_signal    = False  # EW2専用フラグ: RSIゲートをバイパスする
 
         # ── H1 パターン ネックライン突破: スキャルプ直接エントリー ─────────────
@@ -500,34 +488,6 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                      f'TP={_s_tp:,.2f} SL={_s_sl:,.2f}')
                 else:
                     state.ew2_last_sell = None
-
-        # ── 極端売られすぎ/買われすぎ 反発・反落シグナル ───────────────────────
-        # 急落でRSI≤25まで下落後、RSIが回復閾値を上抜けた瞬間に直接BUYエントリー
-        # SMA20タッチ不要（価格がSMA20から大きく乖離しているため）
-        _ext_buy_thr  = scalp.get('extreme_os_buy_thr',  33.0)
-        _ext_sell_thr = scalp.get('extreme_ob_sell_thr', 67.0)
-        if (confirmed_signal is None and not _ws_block
-                and state.extreme_oversold and buy_enabled and not avoid_buy_surge
-                and not (state.buy_sma_pending or state.buy_confirm_pending)):
-            if rsi_prev_bar <= _ext_buy_thr < rsi_cur and regime_h1s != 'trend_down':
-                confirmed_signal       = 'buy'
-                crossed_level          = _ext_buy_thr
-                _direct_confirmed      = True
-                _ew2_signal_type       = f'extreme_os_bounce_{int(_ext_buy_thr)}'
-                state.extreme_oversold = False
-                print(f"[極端売られすぎ反発BUY] RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}  閾値={_ext_buy_thr}")
-                _logger.info(f'[ExtOS-BUY] {symbol} RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}')
-        if (confirmed_signal is None and not _ws_block
-                and state.extreme_overbought and sell_enabled and not avoid_sell_surge
-                and not (state.sell_sma_pending or state.sell_confirm_pending)):
-            if rsi_prev_bar >= _ext_sell_thr > rsi_cur and regime_h1s != 'trend_up':
-                confirmed_signal         = 'sell'
-                crossed_level            = _ext_sell_thr
-                _direct_confirmed        = True
-                _ew2_signal_type         = f'extreme_ob_bounce_{int(_ext_sell_thr)}'
-                state.extreme_overbought = False
-                print(f"[極端買われすぎ反落SELL] RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}  閾値={_ext_sell_thr}")
-                _logger.info(f'[ExtOB-SELL] {symbol} RSI {rsi_prev_bar:.1f}→{rsi_cur:.1f}')
 
         # ── SMA20 タッチマージン事前計算 ─────────────────────────────────────────
         # キャッシュあり → キャッシュ値、なし → M5 ATR × 0.15 (BTCで約$150、動的に適正化)
@@ -876,7 +836,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
             # M5 SMA20 価格位置ゲート: EW2 + _direct_confirmed 免除
-            # （extreme_os_bounce / H1パターンはSMA20を跨ぐ形で発動するため）
+            # （H1パターンはネックライン突破時にSMA20を跨ぐ形で発動するため）
             elif (new_cross == 'buy' and not _is_ew2_signal and not _direct_confirmed
                   and not np.isnan(sma20_m5_val) and sma20_m5_val > 0
                   and close_v < sma20_m5_val):
@@ -1134,9 +1094,6 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'trades_cd_cycle':    state.count % max(1, cooldown_trades),
             'h1_patterns':        h1_pattern_bars,
             'pattern_tp_target':  state.pattern_tp_target,
-            # ダッシュボード表示用
-            'extreme_oversold':   state.extreme_oversold,
-            'extreme_overbought': state.extreme_overbought,
             'ws_blocked':         _ws_block,
             'ws_ratio':           round(_ws_ratio, 2),
             'rvol': (round(float(df['RVOL'].iloc[-1]), 2)
