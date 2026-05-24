@@ -925,6 +925,48 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         elif action == 'sell':
             sl_price = max(sl_price, close_v + _min_sl_dist)
 
+        # ── 証拠金維持率チェック: lot を上限調整 ────────────────────────
+        _min_ml     = scalp.get('min_margin_level', 200.0)
+        _acc_equity = 0.0
+        _acc_margin = 0.0
+        _acc_ml     = 0.0   # 現在の維持率（表示用）
+        try:
+            _acc = mt5.account_info()
+            if _acc is not None:
+                _acc_equity = float(_acc.equity)
+                _acc_margin = float(_acc.margin)
+                _acc_ml     = (_acc_equity / _acc_margin * 100.0
+                               if _acc_margin > 0 else 999.9)
+        except Exception as _ml_err:
+            _logger.warning(f'[証拠金] account_info 失敗: {_ml_err}')
+
+        if action in ('buy', 'sell') and _min_ml > 0 and _acc_equity > 0:
+            try:
+                _order_type = (mt5.ORDER_TYPE_BUY if action == 'buy'
+                               else mt5.ORDER_TYPE_SELL)
+                _req_margin = mt5.order_calc_margin(_order_type, symbol, lot, close_v)
+                if _req_margin is not None and _req_margin > 0:
+                    _ml_after = _acc_equity / (_acc_margin + _req_margin) * 100.0
+                    if _ml_after < _min_ml:
+                        _max_new = _acc_equity * 100.0 / _min_ml - _acc_margin
+                        if _max_new > 0:
+                            _margin_per_lot = _req_margin / lot
+                            _lot_adj = _max_new / _margin_per_lot
+                            lot      = max(l_min, round(_lot_adj / l_step) * l_step)
+                            _acc_ml  = _acc_equity / (_acc_margin + _margin_per_lot * lot) * 100.0
+                            expected_profit_usd = tp_move * contract_size * lot
+                            expected_profit_jpy = expected_profit_usd * jpy_rate
+                            print(f"  [証拠金] lot縮小→{lot} (ML推定{_acc_ml:.0f}%≥{_min_ml:.0f}%)")
+                            _logger.info(f'[証拠金] lot縮小={lot} ML={_acc_ml:.0f}%')
+                        else:
+                            skip   = (f'証拠金不足(ML現在{_acc_ml:.0f}%'
+                                      f'→追加後{_ml_after:.0f}%<{_min_ml:.0f}%)')
+                            action = 'none'
+                            print(f"  [証拠金] {skip}")
+                            _logger.warning(f'[証拠金] {skip}')
+            except Exception as _ml_err:
+                _logger.warning(f'[証拠金チェック] 失敗: {_ml_err}')
+
         # sl_dist / tp_dist: 約定価格からの距離として EA に渡す
         # EA はこれを使って actual_sl = fill - sl_dist (buy) と再計算できる
         _sl_dist_out = round(abs(close_v - sl_price), 2)
@@ -1023,6 +1065,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'macro_summary':      macro_state.summary    if macro_state else '',
             'ew2_last_buy':       state.ew2_last_buy,
             'ew2_last_sell':      state.ew2_last_sell,
+            # 証拠金情報
+            'margin_level':       round(_acc_ml, 1),
+            'account_equity':     round(_acc_equity, 2),
+            'account_margin':     round(_acc_margin, 2),
+            'min_margin_level':   _min_ml,
         }
 
     except Exception:

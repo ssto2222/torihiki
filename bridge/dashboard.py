@@ -380,6 +380,21 @@ def print_poll_status(
     print(f" 今日 {trade_str}ポジ {pos_str}(空き{avail})"
           f"  残高 {bal_str}  連続損失 {consec_str}回")
 
+    # ── 証拠金行 ───────────────────────────────────────────────────────────
+    ml      = data.get('margin_level',   0.0)
+    ml_min  = data.get('min_margin_level', 200.0)
+    equity  = data.get('account_equity', 0.0)
+    margin  = data.get('account_margin', 0.0)
+    if equity > 0:
+        _ml_col = (_RED + _BOLD if ml < ml_min else
+                   _YELLOW      if ml < ml_min * 1.5 else
+                   _GREEN)
+        _ml_str    = _c(f'{ml:.0f}%', _ml_col)
+        _eq_str    = _c(f'${equity:,.2f}', _DIM)
+        _margin_str = _c(f'${margin:,.2f}', _DIM)
+        _warn = _c(' ⚠ 維持率警告', _RED, _BOLD) if ml < ml_min else ''
+        print(f" 証拠金維持率 {_ml_str}  有効 {_eq_str}  使用中 {_margin_str}{_warn}")
+
     print(_sep(64, '━'))
 
     # ── 直近ログ（ダッシュボードモード専用） ──────────────────────────────
