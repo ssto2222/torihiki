@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import io
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone, timedelta
@@ -420,6 +421,29 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
             sys.exit(1)  # mt5_monitor.py が検知して再起動する
 
 
+def _is_bridge_duplicate(symbol: str) -> bool:
+    """同一シンボルのブリッジが既に動いているか確認する"""
+    try:
+        import psutil
+        my_pid  = os.getpid()
+        my_ppid = os.getppid()
+        script  = 'mt5_ea_bridge.py'
+        for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+            if p.pid in (my_pid, my_ppid):
+                continue
+            try:
+                if 'python' not in (p.info.get('name') or '').lower():
+                    continue
+                cl = ' '.join(p.info.get('cmdline') or [])
+                if script in cl and symbol in cl and p.is_running():
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        pass
+    return False
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description='MT5 EA リアルタイムブリッジ')
     ap.add_argument('--once',   action='store_true', help='1回だけ計算して終了')
@@ -438,6 +462,11 @@ def main() -> None:
     args = ap.parse_args()
 
     CFG['MT5']['symbol'] = args.symbol
+
+    if _is_bridge_duplicate(args.symbol):
+        print(f"[Bridge] シンボル {args.symbol} のブリッジは既に起動中です → 終了します。")
+        sys.exit(1)
+
     if args.lot    is not None:
         CFG['BRIDGE']['lot_size']         = args.lot
     if args.target is not None:
