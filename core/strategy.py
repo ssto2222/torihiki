@@ -794,11 +794,13 @@ def run_backtest(df_h1: pd.DataFrame, df_m1: pd.DataFrame,
     """
     sl_c     = cfg.get('SL', {})
     exe      = cfg.get('EXECUTION', {})
+    symbol   = cfg.get('MT5', {}).get('symbol', 'XAUUSD')
     spread   = sl_c.get('spread_usd',    0.30)
     hold_max = sl_c.get('hold_max_h1',   48)
     rsi_exit = sl_c.get('rsi_exit_thr',  75.0)
     trail_m  = sl_c.get('trail_multi',   1.5)
-    tp_m     = sl_c.get('tp_atr_multi',  3.0)
+    _tp_raw  = sl_c.get('tp_atr_multi',  3.0)
+    tp_m     = float(_tp_raw.get(symbol, next(iter(_tp_raw.values()))) if isinstance(_tp_raw, dict) else _tp_raw)
     rsi_off  = exe.get('m1_rsi_offset',  20.0)
 
     crash_bars = crash_bar_set or set()
