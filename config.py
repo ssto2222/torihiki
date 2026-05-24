@@ -165,8 +165,11 @@ SCALP = dict(
     # 極端RSI後の反発・反落シグナル
     extreme_oversold_rsi  = 28.0,  # この値以下で「極端売られすぎ」フラグをセット
     extreme_overbought_rsi = 72.0, # この値以上で「極端買われすぎ」フラグをセット
-    extreme_os_buy_thr    = 33.0,  # 極端売られすぎ後、RSIがこの値を上抜けで直接BUYエントリー
-    extreme_ob_sell_thr   = 67.0,  # 極端買われすぎ後、RSIがこの値を下抜けで直接SELLエントリー
+    extreme_os_buy_thr    = 40.0,  # 極端売られすぎ後、RSIがこの値を上抜けで直接BUYエントリー（旧33→40）
+    extreme_ob_sell_thr   = 60.0,  # 極端買われすぎ後、RSIがこの値を下抜けで直接SELLエントリー（旧67→60）
+    # RSI ハードゲート: 全BUY/SELLシグナルに適用する絶対下限/上限
+    rsi_buy_gate_min      = 40.0,  # BUY: M5 RSIがこの値未満なら全シグナルをブロック
+    rsi_sell_gate_max     = 60.0,  # SELL: M5 RSIがこの値超なら全シグナルをブロック
     # ── ボリュームブレイクアウト（大変動予兆を検知しSMA20タッチをスキップ） ──────────
     vol_bo_enabled        = True,  # ボリュームブレイクアウト有効/無効
     vol_bo_rvol_thr       = 2.0,   # RVOL ≥ この値でブレイクアウト候補

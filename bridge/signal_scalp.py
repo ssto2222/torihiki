@@ -847,6 +847,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'SMA20下落(M1/M5/M15全て負) BUY禁止'
             elif new_cross == 'sell' and not _sma20_consensus_sell:
                 skip = 'SMA20上昇(M1/M5/M15全て正) SELL禁止'
+            elif new_cross == 'buy' and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
+                skip = f'RSI{rsi_cur:.1f}<BUY最低閾値{scalp.get("rsi_buy_gate_min", 40.0):.0f} 禁止'
+            elif new_cross == 'sell' and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
+                skip = f'RSI{rsi_cur:.1f}>SELL最高閾値{scalp.get("rsi_sell_gate_max", 60.0):.0f} 禁止'
             elif (not _direct_confirmed and
                   ((regime_m5s == 'trend_up'   and new_cross == 'sell') or
                    (regime_m5s == 'trend_down' and new_cross == 'buy'))):
