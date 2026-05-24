@@ -390,8 +390,8 @@ def print_poll_status(
                    _YELLOW      if ml < ml_min * 1.5 else
                    _GREEN)
         _ml_str    = _c(f'{ml:.0f}%', _ml_col)
-        _eq_str    = _c(f'${equity:,.2f}', _DIM)
-        _margin_str = _c(f'${margin:,.2f}', _DIM)
+        _eq_str    = _c(f'¥{equity:,.0f}', _DIM)
+        _margin_str = _c(f'¥{margin:,.0f}', _DIM)
         _warn = _c(' ⚠ 維持率警告', _RED, _BOLD) if ml < ml_min else ''
         print(f" 証拠金維持率 {_ml_str}  有効 {_eq_str}  使用中 {_margin_str}{_warn}")
 
