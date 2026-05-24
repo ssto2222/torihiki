@@ -108,6 +108,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 sma20_m1_val = (float(df_m1['SMA20'].iloc[-1])
                                 if 'SMA20' in df_m1.columns else float('nan'))
 
+        # M15 データ取得（マルチTF SMA20 傾きチェック用）
+        df_m15_raw    = fetch_ohlcv(symbol, 'M15', 30)
+        df_m15        = None
+        sma20_m15_val = float('nan')
+        if df_m15_raw is not None:
+            df_m15 = add_m5_indicators(df_m15_raw, cfg)  # SMA20/ATR 計算
+            if df_m15.empty:
+                df_m15 = None
+            elif 'SMA20' in df_m15.columns:
+                sma20_m15_val = float(df_m15['SMA20'].iloc[-1])
+
         # M1 RSI 追跡（BUY過熱: >65 / SELL過熱: <35）
         if not np.isnan(rsi_m1_cur):
             state.m1_rsi_above_65 = rsi_m1_cur > 65
@@ -186,8 +197,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # h1_di_filter=False(デフォルト): H1レジームのみで判断（DI不要）
         # h1_di_filter=True(厳格): DI方向も必須
         _use_di_filter       = scalp.get('h1_di_filter', False)
-        _sma20_slope_buy_ok  = _sma20_ok(df, 'buy')
-        _sma20_slope_sell_ok = _sma20_ok(df, 'sell')
+        _sma20_slope_buy_ok  = _sma20_ok(df,    'buy')   # M5
+        _sma20_slope_sell_ok = _sma20_ok(df,    'sell')
+        _sma20_m1_buy_ok     = _sma20_ok(df_m1, 'buy')   # M1
+        _sma20_m1_sell_ok    = _sma20_ok(df_m1, 'sell')
+        _sma20_m15_buy_ok    = _sma20_ok(df_m15, 'buy')  # M15
+        _sma20_m15_sell_ok   = _sma20_ok(df_m15, 'sell')
+        # M1 は絶対ゲート（エントリーゲートで別途チェック）
+        # M5/M15 が両方とも逆向き → BUY/SELL禁止（M1クリア後の二次フィルター）
+        _sma20_consensus_buy  = (_sma20_slope_buy_ok  or _sma20_m15_buy_ok)
+        _sma20_consensus_sell = (_sma20_slope_sell_ok or _sma20_m15_sell_ok)
         mtf_buy_ok  = (regime_h1s != 'trend_down' and
                        (not _use_di_filter or _h1_di_buy) and
                        _sma20_slope_buy_ok)
@@ -319,6 +338,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         candidate_signal  = None
         crossed_level     = 0.0
         _direct_confirmed = False  # EW2/極端RSI/H1パターン由来: M5レジームチェックをスキップ
+        _is_ew2_signal    = False  # EW2専用フラグ: RSIゲートをバイパスする
 
         # ── H1 パターン ネックライン突破: スキャルプ直接エントリー ─────────────
         if df_h1_raw is not None and len(df_h1_raw) >= 2 and _h1_pats_raw:
@@ -402,6 +422,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         confirmed_signal  = 'buy'
                         crossed_level     = _ew2b['w2_low']
                         _direct_confirmed = True
+                        _is_ew2_signal    = True
                         _ew2_signal_type  = (f"EW2_buy_fib{_ew2b['fib_level']:.2f}"
                                              f"_div{_ew2b['rsi_div']:.1f}")
                         _ew2_tp_price = _b_tp
@@ -444,6 +465,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         confirmed_signal  = 'sell'
                         crossed_level     = _ew2s['w2_high']
                         _direct_confirmed = True
+                        _is_ew2_signal    = True
                         _ew2_signal_type  = (f"EW2_sell_fib{_ew2s['fib_level']:.2f}"
                                              f"_div{_ew2s['rsi_div']:.1f}")
                         _ew2_tp_price = _s_tp
@@ -824,6 +846,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
+            elif new_cross == 'buy' and not _sma20_m1_buy_ok:
+                skip = 'M1 SMA20下落中 BUY絶対禁止'
+            elif new_cross == 'sell' and not _sma20_m1_sell_ok:
+                skip = 'M1 SMA20上昇中 SELL絶対禁止'
+            elif new_cross == 'buy' and not _sma20_consensus_buy:
+                skip = 'SMA20下落(M5/M15両方負) BUY禁止'
+            elif new_cross == 'sell' and not _sma20_consensus_sell:
+                skip = 'SMA20上昇(M5/M15両方正) SELL禁止'
+            elif new_cross == 'buy' and not _is_ew2_signal and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
+                skip = f'RSI{rsi_cur:.1f}<BUY最低閾値{scalp.get("rsi_buy_gate_min", 40.0):.0f} 禁止'
+            elif new_cross == 'sell' and not _is_ew2_signal and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
+                skip = f'RSI{rsi_cur:.1f}>SELL最高閾値{scalp.get("rsi_sell_gate_max", 60.0):.0f} 禁止'
             elif (not _direct_confirmed and
                   ((regime_m5s == 'trend_up'   and new_cross == 'sell') or
                    (regime_m5s == 'trend_down' and new_cross == 'buy'))):
@@ -1038,10 +1072,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'di_minus_h1':        round(dim_h1s, 1) if not np.isnan(dim_h1s) else 0.0,
             'di_plus_m5':         round(dip_m5_sv, 1) if not np.isnan(dip_m5_sv) else 0.0,
             'di_minus_m5':        round(dim_m5_sv, 1) if not np.isnan(dim_m5_sv) else 0.0,
-            'sma20_m5':           round(sma20_m5_val, 0) if not np.isnan(sma20_m5_val) else 0.0,
-            'sma20_m1':           round(sma20_m1_val, 0) if not np.isnan(sma20_m1_val) else 0.0,
-            'sma20_slope_buy_ok': _sma20_slope_buy_ok,
+            'sma20_m5':            round(sma20_m5_val,  0) if not np.isnan(sma20_m5_val)  else 0.0,
+            'sma20_m1':            round(sma20_m1_val,  0) if not np.isnan(sma20_m1_val)  else 0.0,
+            'sma20_m15':           round(sma20_m15_val, 0) if not np.isnan(sma20_m15_val) else 0.0,
+            'sma20_slope_buy_ok':  _sma20_slope_buy_ok,
             'sma20_slope_sell_ok': _sma20_slope_sell_ok,
+            'sma20_m1_buy_ok':     _sma20_m1_buy_ok,
+            'sma20_m1_sell_ok':    _sma20_m1_sell_ok,
+            'sma20_m15_buy_ok':    _sma20_m15_buy_ok,
+            'sma20_m15_sell_ok':   _sma20_m15_sell_ok,
             'regime_h1':          regime_h1s,
             'regime_m5':          regime_m5s,
             'regime_lot_multi':   round(r_multi_s, 2),
