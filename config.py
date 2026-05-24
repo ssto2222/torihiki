@@ -184,7 +184,7 @@ SCALP = dict(
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────
 ELLIOTT = dict(
     enabled          = True,
-    lookback_bars    = 40,    # スイング探索バー数
+    lookback_bars    = 100,   # スイング探索バー数（M5足: 100本=500分≈8時間）
     sw_window        = 3,     # スイングポイント確定ウィンドウ（両側 N 本）
     fib_min          = 0.382, # Fibonacci 押し戻し下限
     fib_max          = 0.786, # Fibonacci 押し戻し上限

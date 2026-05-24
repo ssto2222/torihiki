@@ -119,6 +119,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif 'SMA20' in df_m15.columns:
                 sma20_m15_val = float(df_m15['SMA20'].iloc[-1])
 
+        # EW2 専用 M5 データ（多めに取得してパターン探索精度を上げる）
+        # signal用 df は50本のみ → EW2は独立して200本のM5足を使用
+        _ew2_bars    = cfg.get('ELLIOTT', {}).get('lookback_bars', 100) + 30
+        df_m5_ew2_raw = fetch_ohlcv(symbol, 'M5', _ew2_bars)
+        df_m5_ew2     = None
+        if df_m5_ew2_raw is not None:
+            df_m5_ew2 = add_m5_indicators(df_m5_ew2_raw, cfg)
+            if df_m5_ew2.empty:
+                df_m5_ew2 = None
+
         # D1 データ取得（SMA20 方向チェック用: EW2以外は逆方向エントリー禁止）
         df_d1_raw    = fetch_ohlcv(symbol, 'D1', 30)
         df_d1        = None
@@ -396,16 +406,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 and not (state.buy_sma_pending or state.buy_confirm_pending
                          or state.sell_sma_pending or state.sell_confirm_pending)
                 and not _ws_block):
-            _ew_lb   = _ew_cfg.get('lookback_bars', 40)
+            _ew_lb   = _ew_cfg.get('lookback_bars', 100)
             _ew_sw   = _ew_cfg.get('sw_window', 3)
             _ew_fmin = _ew_cfg.get('fib_min', 0.382)
             _ew_fmax = _ew_cfg.get('fib_max', 0.786)
             _ew_w1at = _ew_cfg.get('min_wave1_atr', 1.5)
             _ew_div  = _ew_cfg.get('rsi_div_min', 3.0)
             _ew_bago = _ew_cfg.get('w2_bars_ago_max', 5)
+            _df_ew2  = df_m5_ew2 if df_m5_ew2 is not None else df  # M5専用df優先
             if buy_enabled and not avoid_buy_surge and mtf_ew2_buy_ok:
                 _ew2b = detect_elliott_w2_buy(
-                    df, lookback=_ew_lb, sw_window=_ew_sw,
+                    _df_ew2, lookback=_ew_lb, sw_window=_ew_sw,
                     fib_min=_ew_fmin, fib_max=_ew_fmax,
                     min_wave1_atr=_ew_w1at, rsi_div_min=_ew_div,
                     w2_rsi_max=_ew_cfg.get('w2_buy_rsi_max', 45.0),
@@ -448,7 +459,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.ew2_last_buy = None
             if confirmed_signal is None and sell_enabled and not avoid_sell_surge and mtf_ew2_sell_ok:
                 _ew2s = detect_elliott_w2_sell(
-                    df, lookback=_ew_lb, sw_window=_ew_sw,
+                    _df_ew2, lookback=_ew_lb, sw_window=_ew_sw,
                     fib_min=_ew_fmin, fib_max=_ew_fmax,
                     min_wave1_atr=_ew_w1at, rsi_div_min=_ew_div,
                     w2_rsi_min=_ew_cfg.get('w2_sell_rsi_min', 55.0),
