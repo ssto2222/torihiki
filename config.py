@@ -187,7 +187,7 @@ ELLIOTT = dict(
     rsi_div_min      = 3.0,   # 強気/弱気ダイバージェンス最小差分
     w2_buy_rsi_max   = 50.0,  # BUY: 第2底の RSI 上限（中立圏まで許容）
     w2_sell_rsi_min  = 50.0,  # SELL: 第2天井の RSI 下限（中立圏まで許容）
-    w2_bars_ago_max  = 5,     # 第2底/天井が直近 N 本以内であること
+    w2_bars_ago_max  = 8,     # 第2底/天井が直近 N 本以内であること
     fib_tp_ext       = 1.618, # TP = W2底 + Wave1_size × fib_tp_ext（Wave3 黄金比目標）
     sl_buffer_atr    = 0.3,   # SL = W2底 - ATR × sl_buffer_atr（波動失効ライン）
 )
