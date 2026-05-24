@@ -2,20 +2,19 @@
 
 ## 概要
 
-MT5 と Python を組み合わせた自動売買システムです。H1/M5 RSI・ATR・ADX によるシグナル生成、MT5 EA との JSON 連携、スキャルプモード、H1 テクニカルパターン認識、Discord によるリモートパラメータ制御を備えています。
+MT5 と Python を組み合わせた自動売買システムです。スキャルプモードを中心に、複数のシグナルパスとマルチタイムフレーム（MTF）フィルタを組み合わせてエントリーを判断します。
 
 ### 主な機能
 
-| カテゴリ | 機能 |
+| カテゴリ | 内容 |
 |---|---|
-| **通常モード** | H1 RSI クロス（DIP / モメンタム）+ M5/M15 MTF フィルタ |
-| **スキャルプモード** | M5 RSI クロス → SMA20 タッチ → M1 確認 2 本でエントリー |
-| **パターン認識** | Wボトム / ダブルトップ / 三尊 / 逆三尊をH1で検知しネックライン突破でエントリー |
-| **MTF フィルタ** | H1 レジーム（weak_trend + DI 方向） + M5/M15 SMA20 傾き |
-| **レジーム制御** | ADX によるロット倍率・分散エントリー・レンジ回避 |
-| **リスク管理** | BB2σ 圧縮 TP / スプリットエントリー / トレーリング SL |
-| **急騰対応** | RVOL 急騰初期検知・中段階回避・大変動時の通常モード自動切替 |
-| **Discord 制御** | Webhook 監視通知 + Bot コマンドによるリアルタイムパラメータ変更 |
+| **スキャルプモード** | M5 RSI クロス → SMA20 タッチ → M1 確認1本でエントリー |
+| **H1 パターン認識** | Wボトム / ダブルトップ / 三尊 / 逆三尊 をH1で検知しネックライン突破で直接エントリー |
+| **エリオット波動 Wave2** | M5足でW1+W2パターンを検知しWave3への参入（Fib 38.2〜78.6% 押し目/戻り） |
+| **ボリュームブレイクアウト** | RVOL急増 + ローソク実体比 + RSI方向確認で SMA20 待ちをスキップ |
+| **MTF フィルタ** | M1/M5/M15 SMA20 傾き + D1 SMA20 方向 + H1 レジームで多段階フィルタリング |
+| **リスク管理** | ATRベース TP/SL / 証拠金維持率チェック / ロット自動調整 / マクロバイアス補正 |
+| **Discord 制御** | Webhook 通知 + Bot コマンドによるリアルタイムパラメータ変更 |
 | **ウォッチドッグ** | 異常終了時の MT5 自動再起動・再起動回数管理 |
 
 ---
@@ -28,42 +27,35 @@ torihiki/
 ├── mt5_monitor.py          ウォッチドッグ / ヘルスチェック
 ├── config.py               全設定の一元管理
 ├── secret.py               認証情報（Git 管理外推奨）
-├── trading_rules.json      RulesEngine フィルタ設定
 │
-├── bridge/                 ブリッジ ロジックパッケージ
-│   ├── __init__.py         パブリック API まとめ
-│   ├── state.py            ポーリング間状態管理（データクラス）
+├── bridge/
+│   ├── runner.py           ポーリングループ・状態オーケストレーション
+│   ├── state.py            ポーリング間状態（データクラス）
+│   ├── signal_scalp.py     スキャルプシグナル計算（メインロジック）
+│   ├── signal_normal.py    通常モードシグナル計算（H1 クロス戦略）
 │   ├── io.py               signal.json アトミック書き込み / ea_state.json 読み込み
-│   ├── utils.py            ステートレスユーティリティ（ロット計算・レジーム判定など）
 │   ├── notify.py           Discord Webhook 通知・一時停止フラグ管理
+│   ├── dashboard.py        ターミナル UI 表示
+│   ├── discord_cmd.py      Discord コマンドボット（!set / !get / !status 等）
+│   ├── utils.py            ロット計算・レジーム判定・ポジション追跡
 │   ├── time_bias.py        時間帯バイアス分析・ロード
 │   ├── sma20.py            SMA20 タッチマージン分析・キャッシュ
-│   ├── signal_normal.py    compute_signal（H1 クロス戦略 + パターンエントリー）
-│   ├── signal_scalp.py     compute_scalp_signal（M5 スキャルプ + パターンエントリー）
-│   ├── param_override.py   ランタイムパラメータ上書き（JSON ベース）
-│   ├── discord_cmd.py      Discord コマンドボット（!set / !get / !reset）
-│   └── runner.py           run_bridge / main（ポーリングループ）
+│   └── param_override.py   ランタイムパラメータ上書き（JSON ベース）
 │
 ├── core/
 │   ├── data.py             MT5 データ取得・合成データ生成
-│   ├── indicators.py       テクニカル指標（RSI・ATR・ADX・RVOL・BB）
-│   ├── patterns.py         パターン検知（Wボトム / ダブルトップ / 三尊 / 逆三尊）
-│   ├── plot.py             可視化
-│   └── strategy.py         シグナル検出・SL戦略・パターンシグナル・バックテスト
+│   ├── indicators.py       RSI / ATR / ADX / RVOL / SMA20 / Bollinger
+│   ├── patterns.py         Wボトム / ダブルトップ / 三尊 / 逆三尊 検知
+│   └── strategy.py         EW2検知 / ボリュームブレイクアウト / ウィップソー検出
 │
 ├── mt5/
 │   └── XAUUSD_SL_Strategy.mq5   MT5 EA（MQL5）
 │
-├── mt5_backtest.py         MT5 実データ バックテスト（通常モード）
-├── scalp_backtest.py       スキャルプ + パターンエントリー バックテスト
-├── analyze_patterns.py     H1 パターン検知 & チャート出力（BTC/USD）
-├── btc_predict.py          BTC 価格予測（4 統計モデル）
+├── scalp_backtest.py       スキャルプバックテスト
+├── mt5_backtest.py         通常モードバックテスト
+├── analyze_patterns.py     H1 パターン検知 & チャート出力
 ├── analyze_time_bias.py    時間帯バイアス分析
-├── analyze_sma20_touch.py  SMA20 タッチマージン分析
-├── analyze_risk.py         リスク分析・評価
-├── local_analysis.py       ローカル分析（MT5不要）
-├── monitor_rvol.py         RVOL リアルタイム監視
-└── plot_rvol_analysis.py   RVOL 分析プロット
+└── analyze_sma20_touch.py  SMA20 タッチマージン分析
 ```
 
 ---
@@ -75,8 +67,6 @@ pip install pandas numpy matplotlib scipy
 pip install MetaTrader5       # Windows のみ（MT5 接続が必要な場合）
 pip install requests          # Discord Webhook 通知用
 pip install discord.py        # Discord コマンドボット用（任意）
-pip install yfinance          # analyze_patterns.py / btc_predict.py 用（任意）
-pip install prophet           # btc_predict.py Prophet モデル用（任意）
 ```
 
 ---
@@ -85,22 +75,16 @@ pip install prophet           # btc_predict.py Prophet モデル用（任意）
 
 ```python
 # secret.py（Git 管理外推奨）
-
-# ウォッチドッグの監視通知用（Webhook）
 DISCORD_WEBHOOK_URL    = "https://discord.com/api/webhooks/xxxx/yyyy"
-
-# パラメータ制御コマンドボット用（Bot Token）
 DISCORD_BOT_TOKEN      = "MTxxxxxxxxxxxxxxx.xxxxxx.xxxxxxxxxx"
 DISCORD_CMD_CHANNEL_ID = 123456789012345678  # int
 ```
 
-`DISCORD_BOT_TOKEN` と `DISCORD_CMD_CHANNEL_ID` がなければコマンドボットは無効化されます。`DISCORD_WEBHOOK_URL` がなければウォッチドッグ通知が無効になります。いずれかだけの設定でも動作します。
+`DISCORD_BOT_TOKEN` / `DISCORD_CMD_CHANNEL_ID` がなければコマンドボットは無効。`DISCORD_WEBHOOK_URL` がなければ Webhook 通知が無効。いずれかだけでも動作します。
 
 ---
 
 ## 実行方法
-
-### 1. 通常起動（ブリッジ単体）
 
 ```bash
 # スキャルプモード（推奨）
@@ -112,290 +96,309 @@ python mt5_ea_bridge.py --mode scalp --symbol BTCUSD --target 1000 --jpy 150
 # 通常モード（H1 クロス戦略）
 python mt5_ea_bridge.py --mode normal
 
-# 1回だけ計算して終了（動作確認用）
-python mt5_ea_bridge.py --once
-
-# 連続損失カウンタをリセット
-python mt5_ea_bridge.py --reset-losses
-```
-
-### 2. ウォッチドッグモード（推奨）
-
-異常終了時に MT5 端末を再起動してブリッジを自動再起動します。
-
-```bash
-# 基本
-python mt5_monitor.py --watch
-
-# オプション指定
+# ウォッチドッグモード（異常終了時に自動再起動）
 python mt5_monitor.py --watch --mode scalp --symbol BTCUSD
-python mt5_monitor.py --watch --target 1500 --lot 0.05
 
-# ヘルスチェックのみ（タスクスケジューラ等で定期実行）
-python mt5_monitor.py
-```
-
-**ウォッチドッグの動作フロー**
-
-```
-mt5_monitor.py --watch 起動
-  │
-  ├─ Webhook 通知「監視開始」→ Discord
-  ├─ mt5_ea_bridge.py をサブプロセスとして起動
-  │     └─ bridge/runner.py → start_discord_bot() → コマンドボット起動
-  │
-  ├─ 終了コード 0（正常・Ctrl+C）→ 再起動しない
-  └─ 終了コード ≠ 0（連続失敗など）→ MT5 再起動 → ブリッジ再起動
-```
-
-ウォッチドッグ稼働中でも Discord コマンドボットは同時に使えます（ブリッジのサブプロセス内で起動するため）。
-
-### 3. バックテスト
-
-#### スキャルプ + パターンエントリー
-
-```bash
-# 合成データ（MT5不要）
-python scalp_backtest.py --synthetic
-
-# MT5 実データ
+# バックテスト
 python scalp_backtest.py --symbol BTCUSD
-
-# 全履歴
-python scalp_backtest.py --full-data
-
-# 期間指定
-python scalp_backtest.py --from 2024-01-01 --to 2024-06-30
-
-# タッチマージン指定
-python scalp_backtest.py --touch-margin 10.0
-```
-
-バックテストは以下を含みます：
-- MTF フィルタ（H1 weak_trend + DI + M5/M15 SMA20 傾き）
-- H1 パターン ネックライン突破エントリー（事前計算・ルックアヘッドなし）
-- シグナル種別ごとの統計（`rsi_cross` / `pattern_nl`）
-
-#### 通常モード（H1 クロス戦略 + パターン）
-
-```bash
-python mt5_backtest.py
-python mt5_backtest.py --symbol XAUUSD --h1 3000 --m1 50000
-```
-
-### 4. パターン検知 & チャート出力
-
-```bash
-python analyze_patterns.py
-python analyze_patterns.py --bars 400 --window 6 --top 5
-python analyze_patterns.py --out ./output/my_patterns.png
-```
-
-BTC/USD H1 データ（yfinance → 組み込みアンカーにフォールバック）でパターンを検知し `./output/patterns.png` に出力します。
-
-### 5. BTC 価格予測
-
-```bash
-python btc_predict.py
-```
-
-4 つの統計モデルで BTC の将来価格を予測します：
-- **ARIMA(1,0,1)** — 自己回帰モデル
-- **Prophet** — Facebook 製トレンド分解モデル
-- **LogLinear** — 対数線形トレンド外挿
-- **Monte Carlo GBM** — 幾何ブラウン運動シミュレーション（n=3000）
-
-出力: `./output/btc_predict.png`
-
-### 6. その他の分析ツール
-
-```bash
-# 時間帯バイアス分析（output/time_bias.json を更新）
-python analyze_time_bias.py
-
-# SMA20 タッチマージン分析（output/sma20_touch_margins.json を更新）
-python analyze_sma20_touch.py
-
-# RVOL リアルタイム監視
-python monitor_rvol.py --symbol BTCUSD --minutes 60 --interval 10
+python scalp_backtest.py --synthetic     # MT5 不要（合成データ）
 ```
 
 ---
 
-## Discord コマンドボット
+## スキャルプモード シグナルパス
 
-ブリッジ稼働中にリアルタイムでパラメータを変更できます。
+シグナルは以下の 5 つのパスで生成されます。優先度は上から順。
 
-### セットアップ
+### パス 1：H1 パターン ネックライン突破（直接エントリー）
 
-1. [Discord Developer Portal](https://discord.com/developers/applications) でアプリを作成
-2. **Bot** → **Add Bot** → Token をコピー
-3. **Privileged Gateway Intents** → **Message Content Intent** を ON
-4. **OAuth2 → URL Generator** → Scopes: `bot`、Permissions: `Send Messages / Read Messages` → URL でサーバーに招待
-5. コマンド用チャンネルを右クリック → **ID をコピー**（開発者モードが必要）
-6. `secret.py` に `DISCORD_BOT_TOKEN` と `DISCORD_CMD_CHANNEL_ID` を記入
+H1 足でテクニカルパターンを検知し、ネックライン突破で即エントリー。SMA20 タッチ待ちをスキップ。
 
-### コマンド一覧
+```
+検知対象:  Wボトム（強気）/ ダブルトップ（弱気）/ 逆三尊（強気）/ 三尊（弱気）
+信頼度:    ≥ 0.45（対称性40% + 高さ比率30% + 新しさ30%）
+トリガー:  H1 前足終値 ≤ ネックライン < H1 現足終値（BUY）
+           H1 前足終値 ≥ ネックライン > H1 現足終値（SELL）
+TP:        パターン測定値（ネックライン + パターン高さ）に自動上書き
+重複防止:  (パターン名, round(neckline, 0)) をフィンガープリントとして記録（最大120件）
+フラグ:    _direct_confirmed = True
+```
 
-| コマンド | 例 | 説明 |
-|---|---|---|
-| `!params` | `!params` | 全パラメータの現在値を表示 |
-| `!get <param>` | `!get target` | 指定パラメータの値を確認 |
-| `!set <param> <value>` | `!set target 1500` | パラメータを変更（次のポーリングから反映） |
-| `!reset` | `!reset` | 全オーバーライドを削除して config に戻す |
-| `!help` | `!help` | コマンド一覧と全パラメータの説明 |
+### パス 2：Elliott Wave 2 エントリー（直接エントリー）
 
-### 変更可能なパラメータ
+M5 足専用データ（130本以上）でエリオット波動 Wave1 + Wave2 を検知し Wave3 を狙うエントリー。
 
-| パラメータ | 型 | 説明 | 例 |
-|---|---|---|---|
-| `target` | 整数 | スキャルプ目標利益（JPY） | `!set target 2000` |
-| `sl_ratio` | 小数 | SL/TP 比率 | `!set sl_ratio 2.0` |
-| `tp_frac` | 小数 | TP = M5 ATR × frac | `!set tp_frac 0.6` |
-| `buy` | on/off | BUY エントリー有効化 | `!set buy off` |
-| `sell` | on/off | SELL エントリー有効化 | `!set sell on` |
-| `max_trades` | 整数 | 1日の最大取引数 | `!set max_trades 15` |
-| `cooldown` | 整数 | クールダウン（分） | `!set cooldown 60` |
-| `jpy_rate` | 小数 | JPY/USD レート | `!set jpy_rate 155.0` |
-| `lot` | 小数 | ロットサイズ上限 | `!set lot 0.1` |
-| `risk` | 小数 | リスク割合（0.01 = 1%） | `!set risk 0.02` |
-| `sl_multi` | 小数 | SL 倍率（ATR×） | `!set sl_multi 1.5` |
-| `tp_multi` | 小数 | TP 倍率（ATR×） | `!set tp_multi 3.0` |
-| `rsi_buy` | 小数 | BUY RSI 閾値 | `!set rsi_buy 38.0` |
+```
+検知条件（BUY）:
+  - Wave1 = W1_high - W1_low ≥ ATR × 1.5
+  - Wave2 が Wave1 の 38.2%〜78.6% を押し目として形成
+  - Wave2 RSI ≤ 50.0（中立圏以下）
+  - Wave2 が直近 8 本以内
+  - RSI ダイバージェンス: RSI_W1 - RSI_W2 ≥ 3.0（強気ダイバージェンス）
+
+TP:  Wave2底 + Wave1_size × 1.618（フィボナッチ Wave3 黄金比目標）
+SL:  Wave2底 - ATR × 0.3（波動失効ライン）
+重複防止: ('ew2_buy', round(w2_low, 0)) をフィンガープリントとして記録
+フラグ:   _direct_confirmed = True、_is_ew2_signal = True
+```
+
+EW2 は多くのフィルターを免除されます（[エントリーゲート](#エントリーゲート) を参照）。
+
+### パス 3：ボリュームブレイクアウト（直接エントリー）
+
+出来高急増と方向性の組み合わせでブレイクアウトを検知。SMA20 タッチ待ちをスキップ。
+
+```
+条件:
+  - RVOL ≥ 2.0（相対出来高）
+  - ローソク実体/レンジ比率 ≥ 0.45（騙しフィルター）
+  - 同バー内価格変動 ≥ ATR × 0.3（動き確認）
+  - BUY: RSI ≥ 52.0 / SELL: RSI ≤ 48.0
+  - 同バーで既に発火済みでないこと
+
+TP: 通常 TP × 1.8（ブレイクアウトは勢いが続くため）
+SL: 通常 SL × 0.8（根拠明確なのでタイト）
+```
+
+### パス 4：M1 早期実行（SMA20 タッチ待ち開始）
+
+M5 RSI が閾値の 2.0 以内に近づいた状態で M1 足が先にクロスした場合、SMA20 タッチ待ちを先行開始します。
+
+```
+条件: M5 RSI が閾値（50/55/60/65）まで 2.0 以内かつ M1 RSI が先にクロス
+→ buy/sell_sma_pending = True を直接セット（M5 クロス待ちをスキップ）
+```
+
+### パス 5：M5 RSI クロス → SMA20 タッチ → M1 確認
+
+通常のスキャルプエントリーフロー。最も保守的で最も多くのフィルターを経由します。
+
+```
+[Step 1] M5 RSI クロス検出
+  BUY:  RSI が 50/55/60/65 のいずれかを下から上に抜ける
+  SELL: RSI が 50/45/40/35 のいずれかを上から下に抜ける
+
+[Step 2] MTF チェック → SMA20 タッチ待ち開始
+  H1 レジームが trend_down でない（BUY）/ trend_up でない（SELL）
+  M5 SMA20 傾きが逆方向に急傾斜でない
+  → buy/sell_sma_pending = True（30分タイムアウト）
+
+[Step 3] SMA20 タッチ待ち（M1 足で確認）
+  タッチ条件: |close_M1 - SMA20_M1| ≤ touch_margin
+  バイパス条件:
+    BUY:  close > SMA20 + ATR × 1.2（急騰でSMA20から大きく上離れ）
+    SELL: close < SMA20 - ATR × 1.2（急落でSMA20から大きく下離れ）
+  → sell/buy_confirm_pending = True、confirm_count = 0（30分タイムアウト）
+
+[Step 4] M1 確認バー（1本）
+  BUY:  close_M1 > prev_close かつ close_M1 ≥ SMA20_M1
+  SELL: close_M1 < prev_close かつ close_M1 ≤ SMA20_M1
+  カウントが同一バーで重複しない
+  → confirmed_signal = 'buy'/'sell'
+```
+
+---
+
+## エントリーゲート
+
+`confirmed_signal` がセットされた後、以下の条件を上から順に評価します。いずれかが失敗すると `action = 'none'`（スキップ）。
+
+| # | ゲート | ブロック条件 | EW2 | _direct_confirmed |
+|---|--------|------------|:---:|:-----------------:|
+| 1 | ウィップソーブロック | 直近2時間に双方向損失 | 適用 | 適用 |
+| 2 | M1 RSI 過熱抑制 | RSI>65 で追加 BUY（既存ポジあり） | 適用 | 適用 |
+| 3 | M1 RSI 売られすぎ抑制 | RSI<35 で追加 SELL（既存ポジあり） | 適用 | 適用 |
+| 4 | **M1 SMA20 絶対ゲート** | M1 SMA20 下落中 → BUY禁止（逆も対称） | **免除** | 適用 |
+| 5 | **M5 SMA20 価格位置** | close < SMA20_M5 → BUY禁止（逆も対称） | **免除** | **免除** |
+| 6 | **D1 SMA20 方向** | D1 SMA20 下落中 → BUY禁止（逆も対称） | **免除** | 適用 |
+| 7 | M5/M15 コンセンサス | M5 と M15 が両方とも逆方向傾斜 | **免除** | 適用 |
+| 8 | RSI ハードゲート | RSI < 40.0 → BUY禁止 / RSI > 60.0 → SELL禁止 | **免除** | 適用 |
+| 9 | M5 レジーム逆張り禁止 | M5 trend_up で SELL / trend_down で BUY | **免除** | **免除** |
+| 10 | 禁止時間帯 | UTC 21 時台 | 適用 | 適用 |
+| 11 | 日次上限 | trades_today ≥ max_trades_day | 適用 | 適用 |
+| 12 | クールダウン | N 回ごとに cooldown_min 分待機 | 適用 | 適用 |
+| 13 | ポジション上限 | available_slots ≤ 0（反対方向があればヘッジ許可） | 適用 | 適用 |
+
+**EW2 免除の理由**: Wave2 形成中は M1/M5 SMA20 が逆方向・RSI が低水準であることが構造的に正常なため、これらのゲートを通過できなければ EW2 シグナルが永続的に死路になります。
+
+**`_direct_confirmed` 免除の理由**: H1 パターンのネックライン突破はSMA20を跨いで発動するため、M5 価格位置ゲートとM5レジームゲートを免除します。
+
+---
+
+## SMA20 コンセンサスロジック
+
+M1 / M5 / M15 / D1 の各 SMA20 傾きを独立して評価します。
+
+```
+_sma20_ok(df, direction):
+  slope = SMA20[now] - SMA20[5本前]
+  threshold = ATR × 0.10
+  BUY:  slope > -threshold（明確な下落でなければ OK、フラットは許容）
+  SELL: slope < +threshold（明確な上昇でなければ OK、フラットは許容）
+  ※ データ不足 / NaN → True（許容）
+```
+
+| ゲート | ブロック条件 |
+|---|---|
+| M1 SMA20 絶対ゲート | M1 が明確に下落中は BUY 禁止（例外なし、EW2除く） |
+| M5 SMA20 価格位置 | close < SMA20_M5 は BUY 禁止（EW2・直接確認シグナル除く） |
+| D1 SMA20 方向ゲート | D1 が明確に下落中は BUY 禁止（EW2 除く） |
+| M5/M15 コンセンサス | M5 と M15 が**両方とも**逆傾斜の場合のみブロック（片方 OK なら通過） |
+
+---
+
+## リスク管理
+
+### ロットサイズ計算
+
+```
+target_usd = target_profit_jpy / jpy_per_usd
+tp_move    = ATR_M5 × tp_atr_fraction
+sl_move    = tp_move × sl_ratio
+lot_raw    = target_usd / (tp_move × contract_size)
+lot        = clamp(lot_raw × regime_multiplier, lot_min, lot_max)
+```
+
+レジーム別ロット倍率: `trend=1.5 / weak_trend=1.0 / range=0.6`
+
+### 証拠金維持率チェック（毎ポーリング）
+
+```
+追加後維持率 = equity / (現在証拠金 + 追加証拠金) × 100
+維持率 < min_margin_level(200%)の場合:
+  → ロットを維持率が200%を維持できる最大値に削減
+  → 削減後ロット < lot_min の場合: action = 'none'（スキップ）
+```
+
+### SL/TP 上書き優先度
+
+```
+[1] 通常計算: TP = close ± (ATR × tp_atr_fraction)、SL = close ∓ (ATR × tp_atr_fraction × sl_ratio)
+[2] EW2 上書き: TP = Fib 1.618 延長目標、SL = Wave2 失効ライン
+[3] パターン上書き: TP = パターン測定値ターゲット（H1 パターン）
+[4] ボリュームBO 上書き: TP × 1.8、SL × 0.8
+[5] マクロバイアス補正: D1/W1/MN1 パターンに基づく TP/SL 倍率調整
+SL 下限: max(sl_price, close ∓ ATR × 0.5)（EA 執行ギャップ対策）
+```
+
+### クールダウン（カウントベース）
+
+毎 N 回（`cooldown_trades=3`）エントリーするごとに `cooldown_min=15` 分の待機を挟みます。時間ベースではなくトレード回数ベース。
+
+---
+
+## エリオット波動 Wave2 検知詳細
+
+M5 専用データ（lookback 100本 + バッファ 30本 = 合計 130本取得）でスイングポイントを探索します。
+
+```
+スイング確定ウィンドウ: 両側 3 本（sw_window=3）
+Wave1 条件: W1_high - W1_low ≥ ATR × 1.5（min_wave1_atr）
+Wave2 押し目: (W1_high - W2_low) / Wave1_size ∈ [38.2%, 78.6%]
+Wave2 RSI:   ≤ 50.0（BUY）/ ≥ 50.0（SELL）
+直近性:       Wave2 が直近 8 本以内（w2_bars_ago_max）
+ダイバージェンス: RSI_W1 - RSI_W2 ≥ 3.0（rsi_div_min）
+
+TP: Wave2底 + Wave1_size × 1.618
+SL: Wave2底 - ATR × 0.3
+```
+
+EW2 シグナルは `_is_ew2_signal = True` フラグを持ち、M1 SMA20・M5 価格位置・D1 SMA20・コンセンサス・RSI ゲートをすべて免除されます（Wave2 形成中はこれらのゲートが逆方向を示すことが正常なため）。
+
+---
+
+## 状態管理（bridge/state.py）
+
+| クラス | 主なフィールド |
+|---|---|
+| `ScalpState` | SMA20 タッチ待ち(BUY/SELL) / M1 確認バー追跡 / EW2 執行済みセット / ボリュームBO 直前バー |
+| `SignalState` | H1 RSI 前回値 / BUY・SELL シグナルウィンドウ / 分散エントリー追跡 |
+| `MacroBiasState` | D1/W1/MN1 マクロバイアス / TP・SL 倍率 / 最終更新時刻 |
+| `JpyRateCache` | USDJPY レート（1時間キャッシュ） |
+| `Sma20TouchCache` | シンボル別 SMA20 タッチマージン |
+
+`ScalpState` の主な状態遷移ルール:
+- H1 が `trend_up` に転換 → SELL 系 pending を全クリア
+- H1 が `trend_down` に転換 → BUY 系 pending を全クリア
+- `buy_enabled/sell_enabled = False` の場合は即座に対応 pending をクリア
+
+---
+
+## Discord 通知・コマンド
+
+### Webhook 通知（notify.py）
+
+| タイミング | 内容 |
+|---|---|
+| シグナル変化時 | 🟢 BUY / 🔴 SELL / ⬜ 消灯 + RSI・SMA20・証拠金維持率 |
+| 1時間おき | 全指標サマリー（RSI/ATR/RVOL/ADX/DI/SMA20 M5-D1/EW2スキャン結果/ポジション/証拠金） |
+| スマホ一時停止 | Magic=0 の Buy Stop 注文を検知して自動停止 / 削除で再開 |
+
+### コマンドボット（discord_cmd.py）
+
+| コマンド | 説明 |
+|---|---|
+| `!status` | 現在の全指標・シグナル状態を即時表示 |
+| `!params` | 全パラメータの現在値を表示 |
+| `!get <param>` | 指定パラメータの値を確認 |
+| `!set <param> <value>` | パラメータをリアルタイム変更（次ポーリングから反映） |
+| `!reset` | 全オーバーライドを削除して config.py の値に戻す |
+| `!help` | コマンド一覧と全パラメータの説明 |
+
+変更可能なパラメータ: `target` / `sl_ratio` / `tp_frac` / `buy` / `sell` / `max_trades` / `cooldown` / `jpy_rate` / `lot` / `risk` / `sl_multi` / `tp_multi` / `rsi_buy`
 
 オーバーライドは `./output/runtime_params.json` に保存され、ブリッジ再起動後も維持されます。
 
 ---
 
-## テクニカルパターン認識
-
-### 検知対象パターン
-
-| パターン | 方向 | 説明 |
-|---|---|---|
-| **Wボトム（ダブルボトム）** | 強気 | 2 つの安値がほぼ同水準 |
-| **ダブルトップ** | 弱気 | 2 つの高値がほぼ同水準 |
-| **三尊（ヘッドアンドショルダー）** | 弱気 | 中央の高値が左右より高い |
-| **逆三尊（逆ヘッドアンドショルダー）** | 強気 | 中央の安値が左右より低い |
-
-### 信頼度スコア（0〜1）
-
-```
-信頼度 = 対称性（40%） + 高さ比率（30%） + 新しさ（30%）
-```
-
-閾値 0.45 以上でエントリーシグナルとして使用します。
-
-### ネックライン突破エントリー
-
-```
-H1 前足終値 ≤ ネックライン < H1 現足終値（Wボトム等 強気）
-  → new_buy_type = 'pattern_double_bottom' など
-  → シグナルウィンドウ開始（valid_min 分間有効）
-  → TP を測定値ターゲット（ネックライン + パターン高さ）に上書き
-
-H1 前足終値 ≥ ネックライン > H1 現足終値（ダブルトップ等 弱気）
-  → new_sell_type = 'pattern_double_top' など
-```
-
-**スキャルプモード**: ネックライン突破で `confirmed_signal` を直接セット → SMA20 タッチ待ちをスキップしてエントリー。クールダウン・日次上限は引き続き適用。
-
-**同一パターンの重複エントリー防止**: `(パターン名, round(neckline, 0))` をフィンガープリントとして `state.pattern_traded` に記録（最大 120 件、超えたら自動クリア）。
-
----
-
-## エントリーフロー
-
-### 通常モード（H1 クロス戦略）
-
-```
-H1 RSI クロス（DIP / モメンタム）
-  または
-H1 ネックライン突破（Wボトム / ダブルトップ等）
-  ↓
-シグナルウィンドウ開始（valid_min 分間）
-  ↓
-M5 RSI フィルタ / M5 SMA20 方向 / H1 SMA20 方向 / M1 RSI ピーク確認
-  ↓
-SL/TP 計算（ATR ベース、パターン TP があれば上書き）
-  ↓
-BB2σ 圧縮 / スプリットエントリー / 分散エントリーゲート
-  ↓
-エントリー
-```
-
-### スキャルプモード（M5 クロス戦略）
-
-```
-H1 ネックライン突破                     M5 RSI クロス（閾値超え）
-  → confirmed_signal（直接）              ↓
-                                        MTF 条件チェック:
-                                          H1 (weak_trend/trend) + DI 方向
-                                          M5 SMA20 傾き
-                                        SMA20 タッチ待ち（30分タイムアウト）
-                                          ↓  傾き確認（ATR×0.10 以上）
-                                        M1 確認バー 2 本待ち（30分タイムアウト）
-                                          ↓
-                              クールダウン / 日次上限 / ポジション数チェック
-                                          ↓
-                                        エントリー
-```
-
-大変動検知時（`detect_big_move` が `up`/`down`）: スキャルプを中断して通常モードシグナルにフォールバック。クールダウン中も同様。
-
----
-
-## config.py の主要設定
-
-### MT5（接続設定）
-
-```python
-MT5 = dict(
-    symbol    = "BTCUSD",
-    h1_bars   = 5000,
-    m5_bars   = 20_000,
-    m1_bars   = 100_000,
-    magic     = 20240101,
-    deviation = 10,
-    login     = 0,      # 0 = ターミナルが既にログイン済み
-    password  = "",
-    server    = "",
-)
-```
-
-### BRIDGE（ブリッジ設定）
-
-```python
-BRIDGE = dict(
-    signal_file      = "C:/.../Common/Files/signal.json",
-    status_file      = "C:/.../Common/Files/ea_state.json",
-    poll_sec         = 5,
-    lot_size         = 0.05,
-    risk_pct         = 0.03,
-    fallback_balance = 15_000,
-    log_dir          = r"G:\マイドライブ\mt5_log",
-)
-```
-
-`log_dir` を設定すると `bridge_SYMBOL.log`（5MB × 5世代ローテーション）が出力されます。
+## config.py 主要パラメータ
 
 ### SCALP（スキャルプ設定）
 
 ```python
 SCALP = dict(
-    jpy_per_usd        = 150.0,
-    target_profit_jpy  = 1000,     # 目標利益（円）
-    sl_ratio           = 3,        # SL幅 = TP幅 × sl_ratio
-    tp_atr_fraction    = 0.5,      # TP幅 = M5 ATR × tp_atr_fraction
-    signal_tf          = 'M5',
-    rsi_buy_thrs       = [55.0, 60.0, 65.0],
-    rsi_sell_thrs      = [45.0, 40.0, 35.0],
-    max_trades_day     = 20,
-    cooldown_min       = 15,
-    big_move_lookback  = 12,       # 大変動判定: 過去 N 本
-    big_move_atr_multi = 5.0,      # 大変動判定: ATR × N 以上
-    sma20_slope_bars   = 5,        # MTF SMA20 傾き計算バー数
-    sma20_slope_atr_thr = 0.10,    # MTF SMA20 傾き閾値（ATR比）
+    target_profit_jpy  = 1000,        # 1トレードあたりの目標利益（円）
+    sl_ratio           = 3,           # SL幅 = TP幅 × sl_ratio（リスクリワード 1:0.33）
+    tp_atr_fraction    = {'BTCUSD': 0.5},  # TP幅 = M5 ATR × fraction
+    rsi_buy_thrs       = [50.0, 55.0, 60.0, 65.0],   # M5 RSI クロス閾値（BUY）
+    rsi_sell_thrs      = [50.0, 45.0, 40.0, 35.0],   # M5 RSI クロス閾値（SELL）
+    rsi_buy_gate_min   = 40.0,        # RSI ハードゲート BUY 最低値
+    rsi_sell_gate_max  = 60.0,        # RSI ハードゲート SELL 最高値
+    cooldown_trades    = 3,           # N 回ごとにクールダウン発動
+    cooldown_min       = 15,          # クールダウン時間（分）
+    max_trades_day     = 20,          # 1日の最大取引数
+    min_margin_level   = 200.0,       # 証拠金維持率の最低ライン（%）
+    lot_max            = {'BTCUSD': 0.10},  # シンボル別最大ロット
+    sma20_slope_bars   = 5,           # SMA20 傾き計算バー数
+    sma20_slope_atr_thr = 0.10,       # 傾き閾値 = ATR × 0.10
+    buy_sma_bypass_atr  = 1.2,        # BUY SMA20タッチバイパス（close > SMA20 + ATR×1.2）
+    sell_sma_bypass_atr = 1.2,        # SELL SMA20タッチバイパス
+    h1_di_filter        = False,      # False=H1レジームのみ / True=DI方向も必須
+    vol_bo_enabled      = True,       # ボリュームブレイクアウト有効化
+    vol_bo_rvol_thr     = 2.0,        # ブレイクアウト RVOL 閾値
+    vol_bo_rsi_buy_min  = 52.0,       # ブレイクアウト BUY の最低 RSI
+    vol_bo_rsi_sell_max = 48.0,       # ブレイクアウト SELL の最高 RSI
+    vol_bo_tp_multi     = 1.8,        # ブレイクアウト TP 倍率
+    vol_bo_sl_multi     = 0.8,        # ブレイクアウト SL 倍率
+)
+```
+
+### ELLIOTT（エリオット波動設定）
+
+```python
+ELLIOTT = dict(
+    enabled          = True,
+    lookback_bars    = 100,    # M5 スイング探索バー数（約8時間）
+    sw_window        = 3,      # スイング確定ウィンドウ（両側 N 本）
+    fib_min          = 0.382,  # 押し目 Fibonacci 下限
+    fib_max          = 0.786,  # 押し目 Fibonacci 上限
+    min_wave1_atr    = 1.5,    # Wave1 最小サイズ（ATR 倍）
+    rsi_div_min      = 3.0,    # RSI ダイバージェンス最小値
+    w2_buy_rsi_max   = 50.0,   # BUY Wave2 の RSI 上限
+    w2_sell_rsi_min  = 50.0,   # SELL Wave2 の RSI 下限
+    w2_bars_ago_max  = 8,      # Wave2 の直近性（M5 バー数）
+    fib_tp_ext       = 1.618,  # Wave3 TP = W2 + Wave1 × 1.618
+    sl_buffer_atr    = 0.3,    # SL = W2 - ATR × 0.3
 )
 ```
 
@@ -405,37 +408,9 @@ SCALP = dict(
 REGIME = dict(
     trend_thr            = 25.0,   # ADX ≥ 25 → トレンド
     range_thr            = 20.0,   # ADX < 20 → レンジ
-    lot_multi_trend      = 1.5,
-    lot_multi_weak       = 1.0,
-    lot_multi_range      = 0.6,
-    max_entry_per_signal = 3,
-    entry_spacing_atr    = 0.5,
-    scalp_reserve_slots  = 1,
-)
-```
-
-**MTF フィルタ（スキャルプ）の判定ロジック**
-
-```python
-# H1 ADX に関わらず DI 方向が合致していればエントリー許可（案A）
-mtf_buy_ok  = (regime_h1 in ('trend_up', 'weak_trend') and DI+ > DI-)
-mtf_sell_ok = (regime_h1 in ('trend_down', 'weak_trend') and DI- > DI+)
-```
-
-ADX < 25（weak_trend）でも DI 方向が一致していればエントリーを許可します。以前の `trend_up` 限定より約2倍のシグナル頻度になります。
-
-### TIME_BIAS（時間帯バイアス設定）
-
-```python
-TIME_BIAS = dict(
-    enabled              = True,
-    danger_win_rate_thr  = 0.40,
-    danger_avg_pnl       = 0.0,
-    min_trades_per_hour  = 5,
-    skip_before_min      = 30,
-    skip_after_min       = 0,
-    rebias_interval_hours = 24,
-    bias_file            = "./output/time_bias.json",
+    lot_multi_trend      = 1.5,    # トレンド時のロット倍率
+    lot_multi_weak       = 1.0,    # weak_trend 時
+    lot_multi_range      = 0.6,    # レンジ時
 )
 ```
 
@@ -445,72 +420,27 @@ TIME_BIAS = dict(
 
 ```
 mt5_monitor.py（ウォッチドッグ）
-  │  Webhook 通知（監視開始・再起動・停止）
   └─ subprocess 起動
-        │
         ▼
-mt5_ea_bridge.py（後方互換シム）
-        │
-        ▼
-bridge/runner.py（ポーリングループ）
+mt5_ea_bridge.py → bridge/runner.py（ポーリングループ）
   │
-  ├─ start_discord_bot()        Discord コマンドボット（バックグラウンドスレッド）
-  ├─ apply_overrides(cfg)       runtime_params.json からオーバーライドを適用
+  ├─ start_discord_bot()          コマンドボット（バックグラウンドスレッド）
+  ├─ apply_overrides(cfg)         runtime_params.json 適用
+  ├─ update_macro_bias()          D1/W1/MN1 マクロバイアス（4時間ごと）
   │
-  ├─ [normal mode]
-  │    └─ signal_normal.py
-  │         ├─ compute_signal()
-  │         ├─ core/patterns.py → detect_all_patterns()   H1 パターン検知
-  │         └─ ネックライン突破 → new_buy/sell_type        パターン TP 上書き
+  ├─ [scalp mode] compute_scalp_signal()
+  │    ├─ fetch M1/M5/M15/H1/D1/EW2専用M5
+  │    ├─ H1 パターン検知（信頼度 ≥ 0.45）
+  │    ├─ EW2 検知（M5 専用データ 130本）
+  │    ├─ ボリュームブレイクアウト検知
+  │    ├─ SMA20 タッチ → M1 確認 フロー
+  │    └─ エントリーゲート（13段階）
   │
-  └─ [scalp mode]
-       └─ signal_scalp.py
-            ├─ compute_scalp_signal()
-            ├─ core/patterns.py → detect_all_patterns()   H1 パターン検知
-            ├─ ネックライン突破 → confirmed_signal（直接）  SMA20 待ち省略
-            └─ big_move / cooldown → compute_signal() フォールバック
-```
+  └─ [big_move / normal mode] compute_signal()
+       └─ H1 RSI クロス + パターンエントリー
 
----
-
-## 状態管理（bridge/state.py）
-
-ポーリング間の状態はすべてデータクラスで管理されます。
-
-| クラス | 主なフィールド |
-|---|---|
-| `SignalState` | RSI 前回値 / BUY・SELL シグナルウィンドウ / 分散エントリー追跡 / BB2σ タッチ状態 / **pattern_traded / pattern_tp_target** |
-| `ScalpState` | RSI 前回値 / SMA20 タッチ待ち / M1 確認バー追跡 / **pattern_traded / pattern_tp_target** |
-| `TimeBiasState` | 危険時間帯セット / 直前クローズフラグ |
-| `JpyRateCache` | USDJPY レート（1時間キャッシュ） |
-| `Sma20TouchCache` | シンボル別 SMA20 タッチマージン |
-
----
-
-## バックテスト詳細
-
-### scalp_backtest.py
-
-```
-[1] データ取得（MT5 または合成）
-[2] 指標計算（M5 / M1 / M15 / H1）
-[2.5] H1 パターン先行計算
-    └─ _precompute_h1_crossings()
-       ・150 本ローリングウィンドウ（12 本ステップ）
-       ・ルックアヘッドなし（bar k のパターンは bar k-1 までのデータで検知）
-       ・信頼度 ≥ 0.45 のみ採用
-[3] バックテスト実行
-    ├─ パターンエントリー（優先）: 直接 M5 バーでエントリー
-    └─ RSI クロスエントリー: SMA20 タッチ → M1 確認 2 本
-[4] 統計表示（WR / PF / Sharpe / 月次 / シグナル種別）
-[5] JSON 保存（./output/scalp_bt.json）
-```
-
-出力される統計例:
-```
-  シグナル種別:
-    pattern_nl        N件  WR=XX%  累計=+XXX,XXX JPY
-    rsi_cross         N件  WR=XX%  累計=+XXX,XXX JPY
+signal.json（Python → EA）
+ea_state.json（EA → Python）
 ```
 
 ---
@@ -524,16 +454,36 @@ bridge/runner.py（ポーリングループ）
 **通信プロトコル**
 
 ```
-Python → MT5 EA : signal_SYMBOL.json  （毎ポーリング更新）
+Python → MT5 EA : signal_SYMBOL.json（毎ポーリング更新、アトミック書き込み）
 MT5 EA → Python : ea_state_SYMBOL.json（EA が書き込む）
 ```
 
 ---
 
+## バックテスト（scalp_backtest.py）
+
+```bash
+python scalp_backtest.py --symbol BTCUSD
+python scalp_backtest.py --synthetic          # MT5 不要
+python scalp_backtest.py --from 2024-01-01 --to 2024-06-30
+```
+
+バックテストが再現する内容:
+- H1 パターン先行計算（150本ローリングウィンドウ、ルックアヘッドなし）
+- EW2 検知（M5 100本ルックバック）
+- ボリュームブレイクアウト
+- MTF SMA20 コンセンサスフィルタ（M1/M5/M15/D1）
+- RSI ハードゲート（40/60）
+- M5 SMA20 価格位置チェック
+- M5 RSI クロス → SMA20 タッチ → M1 確認1本
+
+出力される統計: シグナル種別ごとの勝率・PF・Sharpe・累積損益
+
+---
+
 ## 注意事項
 
-- `secret.py` は `.gitignore` に追加して Git 管理外にすることを推奨します
-- `MetaTrader5` パッケージは Windows 専用。Linux/macOS では合成データのみ動作します
-- `trading_rules.json` がある場合、`RulesEngine` によるフィルタが適用されます
-- `output/` フォルダに分析結果・バックテスト結果・ランタイムオーバーライドが保存されます
-- `output/runtime_params.json` を削除すると全オーバーライドがリセットされます（`!reset` と同等）
+- `secret.py` は `.gitignore` に追加して Git 管理外にすること
+- `MetaTrader5` パッケージは Windows 専用。Linux/macOS では合成データのみ動作
+- `output/runtime_params.json` を削除すると全オーバーライドがリセット（`!reset` と同等）
+- `output/time_bias.json` / `output/sma20_touch_margins.json` は分析スクリプトで事前生成推奨
