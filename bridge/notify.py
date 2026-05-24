@@ -60,6 +60,13 @@ def _build_discord_signal_msg(data: dict, mode: str) -> str:
         tgt    = data.get('target_profit_jpy', 0)
         lines.append(f'期待利益=+${ep_usd:.2f}(¥{ep_jpy})  target=¥{tgt}')
 
+    ml     = data.get('margin_level', 0.0)
+    ml_min = data.get('min_margin_level', 200.0)
+    equity = data.get('account_equity', 0.0)
+    if equity > 0:
+        _ml_warn = ' ⚠' if ml < ml_min else ''
+        lines.append(f'証拠金維持率: {ml:.0f}%{_ml_warn}  有効: ${equity:,.2f}')
+
     lines.append(f'H1={h1}')
 
     if data.get('scalp_buy_sma_pending'):
@@ -159,6 +166,15 @@ def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
 
     # ポジション・取引回数
     lines.append(f'ポジション: {total_p}/{max_p}本(空き{avail})  今日: {today}回  CD:{cd_cycle}/{cd_trades}')
+
+    # 証拠金情報
+    ml     = data.get('margin_level',   0.0)
+    ml_min = data.get('min_margin_level', 200.0)
+    equity = data.get('account_equity', 0.0)
+    margin = data.get('account_margin', 0.0)
+    if equity > 0:
+        _ml_warn = ' ⚠' if ml < ml_min else ''
+        lines.append(f'証拠金維持率: {ml:.0f}%{_ml_warn}  有効: ${equity:,.2f}  使用中: ${margin:,.2f}')
 
     return '\n'.join(lines)
 
