@@ -359,7 +359,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     w2_bars_ago_max=_ew_bago,
                 )
                 if _ew2b is not None:
-                    _fp_ew2 = ('ew2_buy', round(_ew2b['w2_low'], 0), _ew2b['w2_bars_ago'])
+                    _fp_ew2 = ('ew2_buy', round(_ew2b['w2_low'], 0))
                     if len(state.ew2_traded) > 120:
                         state.ew2_traded.clear()
                     if _fp_ew2 not in state.ew2_traded:
@@ -385,7 +385,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     w2_bars_ago_max=_ew_bago,
                 )
                 if _ew2s is not None:
-                    _fp_ew2 = ('ew2_sell', round(_ew2s['w2_high'], 0), _ew2s['w2_bars_ago'])
+                    _fp_ew2 = ('ew2_sell', round(_ew2s['w2_high'], 0))
                     if len(state.ew2_traded) > 120:
                         state.ew2_traded.clear()
                     if _fp_ew2 not in state.ew2_traded:
@@ -686,7 +686,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # M5 新規クロス検出（既存の待機状態がない場合のみ）
         if confirmed_signal is None and state.prev_rsi is not None:
-            if not (state.buy_sma_pending or state.buy_confirm_pending) and not avoid_buy_surge:
+            if (buy_enabled
+                    and not (state.buy_sma_pending or state.buy_confirm_pending)
+                    and not avoid_buy_surge):
                 for thr in buy_thrs:
                     if rsi_cur > thr and rsi_prev_bar <= thr:
                         candidate_signal = 'buy'
