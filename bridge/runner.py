@@ -101,7 +101,9 @@ from core.data import connect_mt5
 
 from bridge.state        import SignalState, ScalpState, TimeBiasState, JpyRateCache, Sma20TouchCache, MacroBiasState
 from bridge.io           import write_signal, read_ea_state
-from bridge.notify       import send_discord, check_pause_signal, _build_discord_signal_msg, _build_discord_hourly_msg
+from bridge.notify       import (send_discord, check_pause_signal,
+                                 _build_discord_signal_msg, _build_discord_hourly_msg,
+                                 check_discord_query)
 from bridge.utils        import (_setup_file_logging, _is_in_danger_skip_window,
                                  _close_profitable_positions, _reset_entry_windows)
 from bridge.time_bias    import _build_time_bias, _load_time_bias
@@ -249,6 +251,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     _fail_count           = 0
     _restart              = False
     _last_hourly_discord  = 0.0   # 1時間ごと Discord タイマー（epoch 秒）
+    _last_query_check     = 0.0   # Discord 照会ポーリング間隔タイマー
+    _discord_last_msg_id  = ['']  # 最後に処理したメッセージ ID（可変参照）
     try:
         itr = 0
         while True:
@@ -389,6 +393,18 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                     except Exception as _de:
                         print(f"  [Discord hourly] 通知失敗: {_de}")
                     _last_hourly_discord = _now_ts
+
+                # Discord 照会: 10 秒ごとにチャンネルを確認し、コマンドに即応答
+                if _now_ts - _last_query_check >= 10:
+                    try:
+                        if check_discord_query(_discord_last_msg_id):
+                            _qmsg = _build_discord_hourly_msg(data, macro_state)
+                            _qmsg += '\n*(照会応答)*'
+                            send_discord(_qmsg)
+                            print(f"  [Discord] 照会コマンドを検知 → ステータス送信")
+                    except Exception as _de:
+                        print(f"  [Discord query] 照会確認失敗: {_de}")
+                    _last_query_check = _now_ts
             else:
                 _fail_count += 1
                 msg = (f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}"
