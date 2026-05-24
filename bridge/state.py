@@ -86,6 +86,10 @@ class ScalpState:
     # Elliott Wave2 執行管理（指紋の重複エントリー防止）
     ew2_traded: set = field(default_factory=set)
 
+    # Elliott Wave2 スキャン結果（ダッシュボード表示用、None はスキャン未検出）
+    ew2_last_buy:  dict | None = field(default=None)
+    ew2_last_sell: dict | None = field(default=None)
+
     # 極端RSI状態（急落後反発BUY / 急騰後反落SELL 用）
     extreme_oversold: bool   = False
     extreme_overbought: bool = False
