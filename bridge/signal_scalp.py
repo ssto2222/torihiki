@@ -874,6 +874,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
             elif new_cross == 'sell' and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
+            elif (new_cross == 'buy' and not _is_ew2_signal
+                  and not np.isnan(sma20_m5_val) and sma20_m5_val > 0
+                  and close_v < sma20_m5_val):
+                skip = f'M5 SMA20下({close_v:,.0f}<{sma20_m5_val:,.0f}) BUY禁止'
+            elif (new_cross == 'sell' and not _is_ew2_signal
+                  and not np.isnan(sma20_m5_val) and sma20_m5_val > 0
+                  and close_v > sma20_m5_val):
+                skip = f'M5 SMA20上({close_v:,.0f}>{sma20_m5_val:,.0f}) SELL禁止'
             elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_d1_buy_ok:
                 skip = 'D1 SMA20下落中 BUY禁止(EW2除外)'
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_d1_sell_ok:
