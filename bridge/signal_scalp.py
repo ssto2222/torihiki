@@ -633,7 +633,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.sell_confirm_count    = 0
                     state.sell_confirm_bar_time = None
 
-                if state.sell_confirm_count >= 2:
+                if state.sell_confirm_count >= 1:
                     confirmed_signal            = 'sell'
                     crossed_level               = state.sell_confirm_level
                     state.sell_confirm_pending  = False
@@ -721,7 +721,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.buy_confirm_count    = 0
                     state.buy_confirm_bar_time = None
 
-                if state.buy_confirm_count >= 2:
+                if state.buy_confirm_count >= 1:
                     confirmed_signal           = 'buy'
                     crossed_level              = state.buy_confirm_level
                     state.buy_confirm_pending  = False

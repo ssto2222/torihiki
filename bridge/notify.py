@@ -57,11 +57,11 @@ def _build_discord_signal_msg(data: dict, mode: str) -> str:
     if data.get('scalp_buy_sma_pending'):
         status = '[BUY] SMA20タッチ待ち'
     elif data.get('scalp_buy_confirm_pending'):
-        status = f"[BUY] 確認 {data.get('scalp_buy_confirm_count', 0)}/2本"
+        status = f"[BUY] 確認 {data.get('scalp_buy_confirm_count', 0)}/1本"
     elif data.get('scalp_sell_sma_pending'):
         status = '[SELL] SMA20タッチ待ち'
     elif data.get('scalp_sell_confirm_pending'):
-        status = f"[SELL] 確認 {data.get('scalp_sell_confirm_count', 0)}/2本"
+        status = f"[SELL] 確認 {data.get('scalp_sell_confirm_count', 0)}/1本"
     elif data.get('skip_reason'):
         status = f"skip={data['skip_reason']}"
     else:
@@ -117,11 +117,11 @@ def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
     if data.get('scalp_buy_sma_pending'):
         lines.append('[BUY] SMA20タッチ待ち')
     elif data.get('scalp_buy_confirm_pending'):
-        lines.append(f"[BUY] M1確認 {data.get('scalp_buy_confirm_count',0)}/2本")
+        lines.append(f"[BUY] M1確認 {data.get('scalp_buy_confirm_count',0)}/1本")
     elif data.get('scalp_sell_sma_pending'):
         lines.append('[SELL] SMA20タッチ待ち')
     elif data.get('scalp_sell_confirm_pending'):
-        lines.append(f"[SELL] M1確認 {data.get('scalp_sell_confirm_count',0)}/2本")
+        lines.append(f"[SELL] M1確認 {data.get('scalp_sell_confirm_count',0)}/1本")
 
     # マクロバイアス
     if macro_state is not None and macro_state.last_updated_at > 0:
