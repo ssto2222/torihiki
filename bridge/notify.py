@@ -107,8 +107,11 @@ def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
     dim_m5    = data.get('di_minus_m5', 0.0)
     sma20_m5  = data.get('sma20_m5', 0.0)
     sma20_m1  = data.get('sma20_m1', 0.0)
-    sma20_buy = '✓' if data.get('sma20_slope_buy_ok',  True) else '✗'
-    sma20_sel = '✓' if data.get('sma20_slope_sell_ok', True) else '✗'
+    sma20_buy   = '✓' if data.get('sma20_slope_buy_ok',  True) else '✗'
+    sma20_sel   = '✓' if data.get('sma20_slope_sell_ok', True) else '✗'
+    d1_buy_ok   = data.get('sma20_d1_buy_ok',  True)
+    d1_sell_ok  = data.get('sma20_d1_sell_ok', True)
+    _d1_slope   = f"D1 SMA20:BUY={'✓' if d1_buy_ok else '✗'}/SELL={'✓' if d1_sell_ok else '✗'}"
     action    = data.get('action', 'none')
     total_p   = data.get('total_positions', 0)
     max_p     = data.get('max_positions',   3)
@@ -132,6 +135,7 @@ def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
         f'M5={regime_m5}(ADX{adx_m5:.0f} DI+{dip_m5:.0f}/DI-{dim_m5:.0f})'
         f'  SMA20:${sma20_m5:,.0f}({_sma20_dist:+.0f})  slope:BUY={sma20_buy}/SELL={sma20_sel}'
         + _sma20_m1_info,
+        _d1_slope,
         f'アクション: {act_str}' + (f'  skip={skip}' if skip else ''),
     ]
 

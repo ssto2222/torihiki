@@ -119,6 +119,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif 'SMA20' in df_m15.columns:
                 sma20_m15_val = float(df_m15['SMA20'].iloc[-1])
 
+        # D1 データ取得（SMA20 方向チェック用: EW2以外は逆方向エントリー禁止）
+        df_d1_raw    = fetch_ohlcv(symbol, 'D1', 30)
+        df_d1        = None
+        sma20_d1_val = float('nan')
+        if df_d1_raw is not None:
+            df_d1 = add_m5_indicators(df_d1_raw, cfg)
+            if df_d1.empty:
+                df_d1 = None
+            elif 'SMA20' in df_d1.columns:
+                sma20_d1_val = float(df_d1['SMA20'].iloc[-1])
+
         # M1 RSI 追跡（BUY過熱: >65 / SELL過熱: <35）
         if not np.isnan(rsi_m1_cur):
             state.m1_rsi_above_65 = rsi_m1_cur > 65
@@ -203,6 +214,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _sma20_m1_sell_ok    = _sma20_ok(df_m1, 'sell')
         _sma20_m15_buy_ok    = _sma20_ok(df_m15, 'buy')  # M15
         _sma20_m15_sell_ok   = _sma20_ok(df_m15, 'sell')
+        _sma20_d1_buy_ok     = _sma20_ok(df_d1,  'buy')  # D1
+        _sma20_d1_sell_ok    = _sma20_ok(df_d1,  'sell')
         # M1 は絶対ゲート（エントリーゲートで別途チェック）
         # M5/M15 が両方とも逆向き → BUY/SELL禁止（M1クリア後の二次フィルター）
         _sma20_consensus_buy  = (_sma20_slope_buy_ok  or _sma20_m15_buy_ok)
@@ -850,6 +863,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
             elif new_cross == 'sell' and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
+            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_d1_buy_ok:
+                skip = 'D1 SMA20下落中 BUY禁止(EW2除外)'
+            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_d1_sell_ok:
+                skip = 'D1 SMA20上昇中 SELL禁止(EW2除外)'
             elif new_cross == 'buy' and not _sma20_consensus_buy:
                 skip = 'SMA20下落(M5/M15両方負) BUY禁止'
             elif new_cross == 'sell' and not _sma20_consensus_sell:
@@ -1075,12 +1092,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sma20_m5':            round(sma20_m5_val,  0) if not np.isnan(sma20_m5_val)  else 0.0,
             'sma20_m1':            round(sma20_m1_val,  0) if not np.isnan(sma20_m1_val)  else 0.0,
             'sma20_m15':           round(sma20_m15_val, 0) if not np.isnan(sma20_m15_val) else 0.0,
+            'sma20_d1':            round(sma20_d1_val,  0) if not np.isnan(sma20_d1_val)  else 0.0,
             'sma20_slope_buy_ok':  _sma20_slope_buy_ok,
             'sma20_slope_sell_ok': _sma20_slope_sell_ok,
             'sma20_m1_buy_ok':     _sma20_m1_buy_ok,
             'sma20_m1_sell_ok':    _sma20_m1_sell_ok,
             'sma20_m15_buy_ok':    _sma20_m15_buy_ok,
             'sma20_m15_sell_ok':   _sma20_m15_sell_ok,
+            'sma20_d1_buy_ok':     _sma20_d1_buy_ok,
+            'sma20_d1_sell_ok':    _sma20_d1_sell_ok,
             'regime_h1':          regime_h1s,
             'regime_m5':          regime_m5s,
             'regime_lot_multi':   round(r_multi_s, 2),
