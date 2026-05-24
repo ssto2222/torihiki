@@ -64,6 +64,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             state.sell_sma_pending = False
             state.sell_sma_at      = None
             state.sell_sma_level   = 0.0
+        if not sell_enabled and state.sell_confirm_pending:
+            state.sell_confirm_pending  = False
+            state.sell_confirm_at       = None
+            state.sell_confirm_count    = 0
+            state.sell_confirm_bar_time = None
 
         now   = datetime.now(timezone.utc)
         today = now.date()
