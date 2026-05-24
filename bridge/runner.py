@@ -101,7 +101,7 @@ from core.data import connect_mt5
 
 from bridge.state        import SignalState, ScalpState, TimeBiasState, JpyRateCache, Sma20TouchCache, MacroBiasState
 from bridge.io           import write_signal, read_ea_state
-from bridge.notify       import send_discord, check_pause_signal, _build_discord_signal_msg
+from bridge.notify       import send_discord, check_pause_signal, _build_discord_signal_msg, _build_discord_hourly_msg
 from bridge.utils        import (_setup_file_logging, _is_in_danger_skip_window,
                                  _close_profitable_positions, _reset_entry_windows)
 from bridge.time_bias    import _build_time_bias, _load_time_bias
@@ -246,8 +246,9 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
         if m is not None:
             print(f"  SMA20タッチマージン: {symbol} = {m:.2f} USD")
 
-    _fail_count = 0
-    _restart    = False
+    _fail_count           = 0
+    _restart              = False
+    _last_hourly_discord  = 0.0   # 1時間ごと Discord タイマー（epoch 秒）
     try:
         itr = 0
         while True:
@@ -379,6 +380,15 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                     except Exception as _de:
                         print(f"  [Discord] 通知失敗: {_de}")
                     last_discord_action[0] = curr_action
+
+                # Discord 通知: 1時間ごとのステータスサマリー
+                _now_ts = time.time()
+                if _now_ts - _last_hourly_discord >= 3600:
+                    try:
+                        send_discord(_build_discord_hourly_msg(data, macro_state))
+                    except Exception as _de:
+                        print(f"  [Discord hourly] 通知失敗: {_de}")
+                    _last_hourly_discord = _now_ts
             else:
                 _fail_count += 1
                 msg = (f"[{datetime.now().strftime('%H:%M:%S')}] #{itr}"

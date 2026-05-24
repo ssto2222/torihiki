@@ -373,21 +373,36 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     _fp_ew2 = ('ew2_buy', round(_ew2b['w2_low'], 0))
                     if len(state.ew2_traded) > 120:
                         state.ew2_traded.clear()
-                    if _fp_ew2 not in state.ew2_traded:
+                    _ew2_already = _fp_ew2 in state.ew2_traded
+                    _ew2_fib_ext = _ew_cfg.get('fib_tp_ext', 1.618)
+                    _ew2_sl_buf  = _ew_cfg.get('sl_buffer_atr', 0.3)
+                    _b_tp = _ew2b['w2_low'] + _ew2b['wave1_size'] * _ew2_fib_ext
+                    _b_sl = _ew2b['w2_low'] - atr_v * _ew2_sl_buf
+                    state.ew2_last_buy = {
+                        'w2_price': _ew2b['w2_low'],
+                        'fib':      _ew2b['fib_level'],
+                        'div':      _ew2b['rsi_div'],
+                        'wave1':    _ew2b['wave1_size'],
+                        'bars_ago': _ew2b['w2_bars_ago'],
+                        'tp':       _b_tp,
+                        'sl':       _b_sl,
+                        'traded':   _ew2_already,
+                    }
+                    if not _ew2_already:
                         state.ew2_traded.add(_fp_ew2)
                         confirmed_signal  = 'buy'
                         crossed_level     = _ew2b['w2_low']
                         _direct_confirmed = True
                         _ew2_signal_type  = (f"EW2_buy_fib{_ew2b['fib_level']:.2f}"
                                              f"_div{_ew2b['rsi_div']:.1f}")
-                        _ew2_fib_ext  = _ew_cfg.get('fib_tp_ext', 1.618)
-                        _ew2_sl_buf   = _ew_cfg.get('sl_buffer_atr', 0.3)
-                        _ew2_tp_price = _ew2b['w2_low'] + _ew2b['wave1_size'] * _ew2_fib_ext
-                        _ew2_sl_price = _ew2b['w2_low'] - atr_v * _ew2_sl_buf
+                        _ew2_tp_price = _b_tp
+                        _ew2_sl_price = _b_sl
                         _logger.info(f'[EW2-BUY] {symbol} W2底={_ew2b["w2_low"]:,.2f} '
                                      f'Fib={_ew2b["fib_level"]:.1%} '
                                      f'RSI_div={_ew2b["rsi_div"]:.1f} '
-                                     f'TP={_ew2_tp_price:,.2f} SL={_ew2_sl_price:,.2f}')
+                                     f'TP={_b_tp:,.2f} SL={_b_sl:,.2f}')
+                else:
+                    state.ew2_last_buy = None
             if confirmed_signal is None and sell_enabled and not avoid_sell_surge and mtf_ew2_sell_ok:
                 _ew2s = detect_elliott_w2_sell(
                     df, lookback=_ew_lb, sw_window=_ew_sw,
@@ -400,21 +415,36 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     _fp_ew2 = ('ew2_sell', round(_ew2s['w2_high'], 0))
                     if len(state.ew2_traded) > 120:
                         state.ew2_traded.clear()
-                    if _fp_ew2 not in state.ew2_traded:
+                    _ew2_already = _fp_ew2 in state.ew2_traded
+                    _ew2_fib_ext = _ew_cfg.get('fib_tp_ext', 1.618)
+                    _ew2_sl_buf  = _ew_cfg.get('sl_buffer_atr', 0.3)
+                    _s_tp = _ew2s['w2_high'] - _ew2s['wave1_size'] * _ew2_fib_ext
+                    _s_sl = _ew2s['w2_high'] + atr_v * _ew2_sl_buf
+                    state.ew2_last_sell = {
+                        'w2_price': _ew2s['w2_high'],
+                        'fib':      _ew2s['fib_level'],
+                        'div':      _ew2s['rsi_div'],
+                        'wave1':    _ew2s['wave1_size'],
+                        'bars_ago': _ew2s['w2_bars_ago'],
+                        'tp':       _s_tp,
+                        'sl':       _s_sl,
+                        'traded':   _ew2_already,
+                    }
+                    if not _ew2_already:
                         state.ew2_traded.add(_fp_ew2)
                         confirmed_signal  = 'sell'
                         crossed_level     = _ew2s['w2_high']
                         _direct_confirmed = True
                         _ew2_signal_type  = (f"EW2_sell_fib{_ew2s['fib_level']:.2f}"
                                              f"_div{_ew2s['rsi_div']:.1f}")
-                        _ew2_fib_ext  = _ew_cfg.get('fib_tp_ext', 1.618)
-                        _ew2_sl_buf   = _ew_cfg.get('sl_buffer_atr', 0.3)
-                        _ew2_tp_price = _ew2s['w2_high'] - _ew2s['wave1_size'] * _ew2_fib_ext
-                        _ew2_sl_price = _ew2s['w2_high'] + atr_v * _ew2_sl_buf
+                        _ew2_tp_price = _s_tp
+                        _ew2_sl_price = _s_sl
                         _logger.info(f'[EW2-SELL] {symbol} W2天井={_ew2s["w2_high"]:,.2f} '
                                      f'Fib={_ew2s["fib_level"]:.1%} '
                                      f'RSI_div={_ew2s["rsi_div"]:.1f} '
-                                     f'TP={_ew2_tp_price:,.2f} SL={_ew2_sl_price:,.2f}')
+                                     f'TP={_s_tp:,.2f} SL={_s_sl:,.2f}')
+                else:
+                    state.ew2_last_sell = None
 
         # ── 極端売られすぎ/買われすぎ 反発・反落シグナル ───────────────────────
         # 急落でRSI≤25まで下落後、RSIが回復閾値を上抜けた瞬間に直接BUYエントリー
@@ -968,6 +998,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'macro_bias':         macro_state.bias       if macro_state else 0.0,
             'macro_bias_label':   macro_state.bias_label if macro_state else 'neutral',
             'macro_summary':      macro_state.summary    if macro_state else '',
+            'ew2_last_buy':       state.ew2_last_buy,
+            'ew2_last_sell':      state.ew2_last_sell,
         }
 
     except Exception:

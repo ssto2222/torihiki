@@ -236,6 +236,35 @@ def print_poll_status(
               f"  TP=${pat['target']:,.0f}"
               f"  ({pat['bars_ago']}本前)")
 
+    # ── Elliott Wave 2 スキャン結果 ─────────────────────────────────────────
+    def _ew2_line(label: str, e: dict | None, is_buy: bool) -> str:
+        if e is None:
+            return f" {_c('EW2', _MAGENTA)} {label} {_c('未検出', _DIM)}"
+        w2   = e['w2_price']
+        fib  = e['fib']
+        wav  = e['wave1']
+        div  = e['div']
+        tp   = e['tp']
+        sl   = e['sl']
+        bago = e['bars_ago']
+        traded_str = _c(' [済]', _DIM) if e.get('traded') else _c(' [新規]', _GREEN if is_buy else _RED)
+        arrow = '▼' if is_buy else '▲'
+        col   = _GREEN if is_buy else _RED
+        w2_lbl = 'W2底' if is_buy else 'W2天'
+        tp_lbl = 'TP↑' if is_buy else 'TP↓'
+        sl_lbl = 'SL↓' if is_buy else 'SL↑'
+        return (f" {_c('EW2', _MAGENTA)} {_c(arrow + label, col)}"
+                f"  {w2_lbl}=${w2:,.0f}  Fib={fib:.1%}  Wave1=${wav:,.0f}"
+                f"  div{div:+.1f}  {tp_lbl}=${tp:,.0f}  {sl_lbl}=${sl:,.0f}"
+                f"  ({bago}本前){traded_str}")
+    _ew2b_data = data.get('ew2_last_buy')
+    _ew2s_data = data.get('ew2_last_sell')
+    if _ew2b_data is not None or _ew2s_data is not None:
+        print(_ew2_line('BUY',  _ew2b_data, True))
+        print(_ew2_line('SELL', _ew2s_data, False))
+    elif data.get('scalp_mode'):
+        print(f" {_c('EW2', _MAGENTA)} {_c('BUY/SELL 未検出', _DIM)}")
+
     # ── マクロバイアス ──────────────────────────────────────────────────────
     _macro_min = (effective_cfg or {}).get('MACRO', {}).get('min_bias_to_show', 15)
     _mb_bias   = data.get('macro_bias', 0.0)

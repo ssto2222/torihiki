@@ -73,6 +73,68 @@ def _build_discord_signal_msg(data: dict, mode: str) -> str:
     return '\n'.join(lines)
 
 
+def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
+    """1時間ごとのステータスサマリーを Discord メッセージとして組み立てる"""
+    symbol    = data.get('symbol', '')
+    close     = data.get('close',   0)
+    atr       = data.get('atr',     0)
+    rsi_m5    = data.get('rsi_m5',  0)
+    rsi_m1    = data.get('rsi_m1',  0)
+    regime_h1 = data.get('regime_h1', '?')
+    regime_m5 = data.get('regime_m5', '?')
+    action    = data.get('action', 'none')
+    total_p   = data.get('total_positions', 0)
+    max_p     = data.get('max_positions',   3)
+    avail     = data.get('available_slots', max_p)
+    today     = data.get('trades_today',    0)
+    max_day   = data.get('cooldown_min',    20)
+    skip      = data.get('skip_reason', '')
+    mtf_b     = 'OK' if data.get('mtf_buy_ok',  False) else 'NG'
+    mtf_s     = 'OK' if data.get('mtf_sell_ok', False) else 'NG'
+
+    act_str = {'buy': '🟢 BUY', 'sell': '🔴 SELL'}.get(action, '⬜ 待機')
+    lines = [
+        f'📊 **[{symbol}] 1時間ステータス**',
+        f'close=${close:,.2f}  RSI M5:{rsi_m5:.1f}  M1:{rsi_m1:.1f}  ATR:${atr:.2f}',
+        f'レジーム: H1={regime_h1}  M5={regime_m5}  MTF:BUY={mtf_b}/SELL={mtf_s}',
+        f'アクション: {act_str}' + (f'  skip={skip}' if skip else ''),
+    ]
+
+    # EW2 スキャン結果
+    def _ew2_str(e: dict | None, direction: str) -> str:
+        if e is None:
+            return f'EW2 {direction}: 未検出'
+        traded = '済' if e.get('traded') else '新規'
+        return (f'EW2 {direction}: W2=${e["w2_price"]:,.0f}'
+                f'  Fib={e["fib"]:.1%}  Wave1=${e["wave1"]:,.0f}'
+                f'  div{e["div"]:+.1f}'
+                f'  TP→${e["tp"]:,.0f}  SL→${e["sl"]:,.0f}'
+                f'  ({e["bars_ago"]}本前)[{traded}]')
+    lines.append(_ew2_str(data.get('ew2_last_buy'),  'BUY ▼'))
+    lines.append(_ew2_str(data.get('ew2_last_sell'), 'SELL▲'))
+
+    # ペンディング状態
+    if data.get('scalp_buy_sma_pending'):
+        lines.append('[BUY] SMA20タッチ待ち')
+    elif data.get('scalp_buy_confirm_pending'):
+        lines.append(f"[BUY] M1確認 {data.get('scalp_buy_confirm_count',0)}/2本")
+    elif data.get('scalp_sell_sma_pending'):
+        lines.append('[SELL] SMA20タッチ待ち')
+    elif data.get('scalp_sell_confirm_pending'):
+        lines.append(f"[SELL] M1確認 {data.get('scalp_sell_confirm_count',0)}/2本")
+
+    # マクロバイアス
+    if macro_state is not None and macro_state.last_updated_at > 0:
+        mb = macro_state.bias
+        mb_label = macro_state.bias_label
+        lines.append(f'マクロ: {mb:+.0f}[{mb_label}]')
+
+    # ポジション・取引回数
+    lines.append(f'ポジション: {total_p}/{max_p}本(空き{avail})  今日: {today}回')
+
+    return '\n'.join(lines)
+
+
 def check_pause_signal(symbol: str, flag_file: str, *, mt5) -> bool:
     """毎ループ実行：スマホからの Buy Stop (Magic=0) を確認して一時停止フラグを管理する"""
     orders = mt5.orders_get(symbol=symbol)
