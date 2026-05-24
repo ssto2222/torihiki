@@ -197,14 +197,23 @@ def _kill_bridge_procs(symbol: str) -> None:
 def _is_watch_duplicate(symbol: str) -> bool:
     """同一シンボルの --watch ウォッチドッグが既に動いているか確認する"""
     my_pid    = os.getpid()
+    my_ppid   = os.getppid()                    # バッチ起動の cmd.exe を除外
     my_script = os.path.basename(__file__)      # 'mt5_monitor.py'
     try:
-        for p in psutil.process_iter(['pid', 'cmdline']):
-            if p.pid == my_pid:
+        for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+            if p.pid in (my_pid, my_ppid):
                 continue
-            cl = ' '.join(p.info.get('cmdline') or [])
-            if my_script in cl and '--watch' in cl and symbol in cl:
-                return True
+            try:
+                # Python プロセスのみ対象（cmd.exe などバッチ呼び出し元を除外）
+                name = (p.info.get('name') or '').lower()
+                if 'python' not in name:
+                    continue
+                cl = ' '.join(p.info.get('cmdline') or [])
+                if my_script in cl and '--watch' in cl and symbol in cl:
+                    if p.is_running():
+                        return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
     except Exception:
         pass
     return False
