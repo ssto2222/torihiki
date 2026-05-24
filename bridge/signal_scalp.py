@@ -825,6 +825,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # パターンTP目標で tp_price を上書き（最低 1ATR 確保）
         if state.pattern_tp_target is not None and action in ('buy', 'sell'):
             _pt_s = state.pattern_tp_target
+            state.pattern_tp_target = None  # 消費後クリア（次トレードへの汚染防止）
             if action == 'buy':
                 tp_price = max(close_v + tp_move, min(close_v + tp_move * 8, _pt_s))
             else:
