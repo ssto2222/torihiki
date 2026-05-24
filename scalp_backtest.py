@@ -205,12 +205,6 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
     _ws_n   = ws_cfg.get('ratio_n',  20)
     _ws_thr = ws_cfg.get('ratio_thr', 2.0)
 
-    # ── 極端 RSI 反発・反落設定 ─────────────────────────────────
-    ext_os_rsi   = scalp.get('extreme_oversold_rsi',   25.0)
-    ext_ob_rsi   = scalp.get('extreme_overbought_rsi', 75.0)
-    ext_buy_thr  = scalp.get('extreme_os_buy_thr',  33.0)
-    ext_sell_thr = scalp.get('extreme_ob_sell_thr', 67.0)
-
     # ── ボリュームブレイクアウト設定 ────────────────────────────
     _vb_enabled      = scalp.get('vol_bo_enabled', True)
     _vb_tp_m         = scalp.get('vol_bo_tp_multi', 1.8)
@@ -450,8 +444,6 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
     _crossings = list(h1_crossings or [])
 
     # 追加シグナル用ステート
-    extreme_oversold:   bool = False
-    extreme_overbought: bool = False
     ew2_traded: set = set()         # (direction, round(w2_price, 0), bars_ago) 重複防止
 
     for i in range(15, len(m5_t)):
@@ -462,16 +454,6 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
             continue
 
         ts = pd.Timestamp(m5_t[i])
-
-        # ── 極端 RSI 状態の追跡 ──────────────────────────────────
-        if rsi_cur <= ext_os_rsi:
-            extreme_oversold = True
-        elif rsi_cur > 50.0:
-            extreme_oversold = False
-        if rsi_cur >= ext_ob_rsi:
-            extreme_overbought = True
-        elif rsi_cur < 50.0:
-            extreme_overbought = False
 
         # クールダウン
         if (last_entry_ts is not None and
@@ -561,28 +543,6 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
                                                        f'ew2_sell_fib{_ew2s["fib_level"]:.2f}')
                             signal = 'sell'
                             crossed = _ew2s['w2_high']
-
-        # ── 極端 OS/OB 反発・反落 ─────────────────────────────────
-        if info is None and not _ws_block:
-            atr_i   = m5_atr[i]
-            _tp_ext = atr_i * tp_frac
-            _sl_ext = _tp_ext * sl_ratio
-            if (extreme_oversold and buy_en and regime != 'trend_down'
-                    and _mtf_ok(m5_t[i], i, 'buy')
-                    and rsi_prev <= ext_buy_thr < rsi_cur):
-                extreme_oversold = False
-                info   = find_direct_entry('buy', i, _tp_ext, _sl_ext,
-                                           f'extreme_os_bounce_{int(ext_buy_thr)}')
-                signal = 'buy'
-                crossed = ext_buy_thr
-            elif (extreme_overbought and sell_en and regime != 'trend_up'
-                    and _mtf_ok(m5_t[i], i, 'sell')
-                    and rsi_prev >= ext_sell_thr > rsi_cur):
-                extreme_overbought = False
-                info   = find_direct_entry('sell', i, _tp_ext, _sl_ext,
-                                           f'extreme_ob_bounce_{int(ext_sell_thr)}')
-                signal = 'sell'
-                crossed = ext_sell_thr
 
         # ── ボリュームブレイクアウト ──────────────────────────────
         if info is None and _vb_enabled and _has_rvol and not _ws_block:
