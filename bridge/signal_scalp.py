@@ -870,15 +870,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
-            elif new_cross == 'buy' and not _sma20_m1_buy_ok:
+            # M1 SMA20 絶対ゲート: EW2は免除（W2形成中はM1下落が正常）
+            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m1_buy_ok:
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
-            elif new_cross == 'sell' and not _sma20_m1_sell_ok:
+            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
-            elif (new_cross == 'buy' and not _is_ew2_signal
+            # M5 SMA20 価格位置ゲート: EW2 + _direct_confirmed 免除
+            # （extreme_os_bounce / H1パターンはSMA20を跨ぐ形で発動するため）
+            elif (new_cross == 'buy' and not _is_ew2_signal and not _direct_confirmed
                   and not np.isnan(sma20_m5_val) and sma20_m5_val > 0
                   and close_v < sma20_m5_val):
                 skip = f'M5 SMA20下({close_v:,.0f}<{sma20_m5_val:,.0f}) BUY禁止'
-            elif (new_cross == 'sell' and not _is_ew2_signal
+            elif (new_cross == 'sell' and not _is_ew2_signal and not _direct_confirmed
                   and not np.isnan(sma20_m5_val) and sma20_m5_val > 0
                   and close_v > sma20_m5_val):
                 skip = f'M5 SMA20上({close_v:,.0f}>{sma20_m5_val:,.0f}) SELL禁止'
@@ -886,9 +889,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'D1 SMA20下落中 BUY禁止(EW2除外)'
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_d1_sell_ok:
                 skip = 'D1 SMA20上昇中 SELL禁止(EW2除外)'
-            elif new_cross == 'buy' and not _sma20_consensus_buy:
+            # M5/M15 SMA20 コンセンサス: EW2は免除（W2押し目でM5下落は正常）
+            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_consensus_buy:
                 skip = 'SMA20下落(M5/M15両方負) BUY禁止'
-            elif new_cross == 'sell' and not _sma20_consensus_sell:
+            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_consensus_sell:
                 skip = 'SMA20上昇(M5/M15両方正) SELL禁止'
             elif new_cross == 'buy' and not _is_ew2_signal and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
                 skip = f'RSI{rsi_cur:.1f}<BUY最低閾値{scalp.get("rsi_buy_gate_min", 40.0):.0f} 禁止'
