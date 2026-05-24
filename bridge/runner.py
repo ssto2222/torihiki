@@ -48,7 +48,7 @@ class _TeeWriter(io.TextIOBase):
         """バッファ内容をファイルに上書き保存する"""
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(''.join(self._buf), encoding='utf-8')
+            path.write_text(''.join(self._buf), encoding='utf-8-sig')
         except OSError:
             pass
 
