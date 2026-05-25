@@ -210,6 +210,28 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             # SELL: 明確な上昇でなければOK
             return slope > -thr_v if direction == 'buy' else slope < thr_v
 
+        def _sma20_accel_ok(tfdf, direction: str) -> bool:
+            """SMA20 2階微分チェック: |傾き|がウィンドウ内で accel_tol 以上減少していれば False。
+            線形回帰で傾きのトレンドを計算し、相対減少率が閾値を超えたら減速と判定する。
+            """
+            _accel_n   = scalp.get('sma20_accel_bars', 4)
+            _accel_tol = scalp.get('sma20_accel_tol',  0.3)
+            if tfdf is None or tfdf.empty or 'SMA20' not in tfdf.columns:
+                return True
+            sma = tfdf['SMA20'].dropna()
+            if len(sma) < _accel_n + 2:
+                return True
+            slopes     = np.diff(sma.values[-(_accel_n + 1):])  # _accel_n 本の1階差分
+            abs_slopes = np.abs(slopes)
+            mean_abs   = float(abs_slopes.mean())
+            if mean_abs < 1e-10:
+                return True  # ほぼフラットなSMA20 → 減速チェック不要
+            x    = np.arange(len(abs_slopes), dtype=float)
+            coef = np.polyfit(x, abs_slopes, 1)
+            # ウィンドウ全体での相対減少率: (trend_per_bar × n_steps) / mean_abs
+            relative_decline = -float(coef[0]) * (len(abs_slopes) - 1) / mean_abs
+            return relative_decline < _accel_tol
+
         _di_valid    = not np.isnan(dip_h1s) and not np.isnan(dim_h1s)
         _h1_di_buy   = _di_valid and dip_h1s > dim_h1s   # DI+ > DI-
         _h1_di_sell  = _di_valid and dim_h1s > dip_h1s   # DI- > DI+
@@ -230,6 +252,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # M5/M15 が両方とも逆向き → BUY/SELL禁止（M1クリア後の二次フィルター）
         _sma20_consensus_buy  = (_sma20_slope_buy_ok  or _sma20_m15_buy_ok)
         _sma20_consensus_sell = (_sma20_slope_sell_ok or _sma20_m15_sell_ok)
+        # SMA20 2階微分フラグ: |傾き|が減少トレンドかどうか
+        # シグナル時はM5、執行時はM1でチェック（EW2はW2形成中に正常減速するため免除）
+        _sma20_m5_accel_buy_ok  = _sma20_accel_ok(df,    'buy')
+        _sma20_m5_accel_sell_ok = _sma20_accel_ok(df,    'sell')
+        _sma20_m1_accel_buy_ok  = _sma20_accel_ok(df_m1, 'buy')
+        _sma20_m1_accel_sell_ok = _sma20_accel_ok(df_m1, 'sell')
         mtf_buy_ok  = (regime_h1s != 'trend_down' and
                        (not _use_di_filter or _h1_di_buy) and
                        _sma20_slope_buy_ok)
@@ -835,6 +863,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
+            # M5 SMA20 2階微分ゲート（シグナル確認）: EW2免除（W2形成中の減速は正常）
+            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m5_accel_buy_ok:
+                skip = 'M5 SMA20傾き減速中 BUY禁止'
+            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m5_accel_sell_ok:
+                skip = 'M5 SMA20傾き減速中 SELL禁止'
+            # M1 SMA20 2階微分ゲート（執行確認）: EW2免除
+            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m1_accel_buy_ok:
+                skip = 'M1 SMA20傾き減速中 BUY禁止'
+            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_accel_sell_ok:
+                skip = 'M1 SMA20傾き減速中 SELL禁止'
             # M5 SMA20 価格位置ゲート: EW2 + _direct_confirmed 免除
             # （H1パターンはネックライン突破時にSMA20を跨ぐ形で発動するため）
             elif (new_cross == 'buy' and not _is_ew2_signal and not _direct_confirmed
@@ -1082,8 +1120,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sma20_m1_sell_ok':    _sma20_m1_sell_ok,
             'sma20_m15_buy_ok':    _sma20_m15_buy_ok,
             'sma20_m15_sell_ok':   _sma20_m15_sell_ok,
-            'sma20_d1_buy_ok':     _sma20_d1_buy_ok,
-            'sma20_d1_sell_ok':    _sma20_d1_sell_ok,
+            'sma20_d1_buy_ok':        _sma20_d1_buy_ok,
+            'sma20_d1_sell_ok':       _sma20_d1_sell_ok,
+            'sma20_m5_accel_buy_ok':  _sma20_m5_accel_buy_ok,
+            'sma20_m5_accel_sell_ok': _sma20_m5_accel_sell_ok,
+            'sma20_m1_accel_buy_ok':  _sma20_m1_accel_buy_ok,
+            'sma20_m1_accel_sell_ok': _sma20_m1_accel_sell_ok,
             'regime_h1':          regime_h1s,
             'regime_m5':          regime_m5s,
             'regime_lot_multi':   round(r_multi_s, 2),
