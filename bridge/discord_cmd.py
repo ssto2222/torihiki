@@ -82,6 +82,8 @@ def _build_command_help() -> str:
         '**torihiki パラメータ制御ボット**\n'
         '```\n'
         '!status                       現在のシグナル状態を照会\n'
+        '!mode [scalp|normal]          動作モード確認/切替\n'
+        '!symbol [SYMBOL]              シンボル確認/切替（MT5再接続・状態リセット）\n'
         '!set SECTION.KEY value        設定変更   例: !set SCALP.cooldown_min 10\n'
         '!set SECTION.KEY.SUB value    dict変更   例: !set SL.tp_atr_multi.BTCUSD 3.5\n'
         '!set shortname value          短縮名変更 例: !set target 1500 / !set buy off\n'
@@ -188,12 +190,15 @@ def _get_credentials() -> tuple[str, int] | tuple[None, None]:
 
 def start_discord_bot(cfg: dict[str, Any],
                       data_ref: list | None = None,
-                      macro_ref: list | None = None) -> threading.Thread | None:
+                      macro_ref: list | None = None,
+                      mode_ref: list | None = None,
+                      symbol_ref: list | None = None) -> threading.Thread | None:
     """
     バックグラウンドスレッドで Discord ボットを起動する。
     discord.py 未インストール / secret.py に認証情報がなければ何もしない。
     cfg は runner.py の元 cfg dict への参照（apply_overrides でポーリングごとに更新される）。
     data_ref / macro_ref は [None] のような 1 要素リスト（runner.py が最新値を書き込む）。
+    mode_ref / symbol_ref は ['scalp'] / ['BTCUSD'] のような 1 要素リスト（ボットが書き込む）。
     """
     token, chan_id = _get_credentials()
     if not token:
@@ -347,6 +352,37 @@ def start_discord_bot(cfg: dict[str, Any],
                 msg = reset_override_path(target if '.' in target else None)
                 _logger.info(f'Discord [reset] {target}')
                 return [msg]
+
+            # ── !mode ──────────────────────────────────────────────────
+            if cmd == 'mode':
+                current = mode_ref[0] if mode_ref else '不明'
+                if not args:
+                    return [f'現在のモード: `{current}`\n変更: `!mode scalp` または `!mode normal`']
+                new_mode = args[0].lower()
+                if new_mode not in ('scalp', 'normal'):
+                    return ['モードは `scalp` または `normal` を指定してください']
+                if mode_ref is None:
+                    return ['モード切替は利用できません（mode_ref 未設定）']
+                if new_mode == current:
+                    return [f'既にモード `{current}` です']
+                mode_ref[0] = new_mode
+                _logger.info(f'Discord [mode] {current} → {new_mode}')
+                return [f'モードを `{current}` → `{new_mode}` に切り替えます（次のポーリングから反映）']
+
+            # ── !symbol ────────────────────────────────────────────────
+            if cmd == 'symbol':
+                current = symbol_ref[0] if symbol_ref else '不明'
+                if not args:
+                    return [f'現在のシンボル: `{current}`\n変更例: `!symbol BTCUSD` / `!symbol XAUUSD`']
+                new_sym = args[0].upper()
+                if symbol_ref is None:
+                    return ['シンボル切替は利用できません（symbol_ref 未設定）']
+                if new_sym == current:
+                    return [f'既にシンボル `{current}` です']
+                symbol_ref[0] = new_sym
+                _logger.info(f'Discord [symbol] {current} → {new_sym}')
+                return [f'シンボルを `{current}` → `{new_sym}` に切り替えます\n'
+                        f'次のポーリングで MT5 再接続・状態リセットを実行します']
 
             return [f'不明なコマンド: `!{cmd}`\n`!help` でコマンド一覧']
 
