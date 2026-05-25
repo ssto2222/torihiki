@@ -236,8 +236,18 @@ def print_poll_status(
                        f" M15{_slope_icon(_slope_buy_m15)}/{_slope_icon(_slope_sell_m15)}"
                        f" D1{_slope_icon(_slope_buy_d1)}/{_slope_icon(_slope_sell_d1)}"
                        f"  (BUY/SELL方向)")
+        _accel_buy_m5   = data.get('sma20_m5_accel_buy_ok',  True)
+        _accel_sell_m5  = data.get('sma20_m5_accel_sell_ok', True)
+        _accel_buy_m1   = data.get('sma20_m1_accel_buy_ok',  True)
+        _accel_sell_m1  = data.get('sma20_m1_accel_sell_ok', True)
+        def _accel_icon(ok: bool) -> str:
+            return _c('▲', _GREEN) if ok else _c('▽', _RED)
+        _accel_line = (f"M5(BUY:{_accel_icon(_accel_buy_m5)} SELL:{_accel_icon(_accel_sell_m5)})"
+                       f"  M1(BUY:{_accel_icon(_accel_buy_m1)} SELL:{_accel_icon(_accel_sell_m1)})"
+                       f"  (▲加速/維持 ▽減速)")
         print(f" M5 {m5_str}  {_m5_di}  │  {_sma20_str}")
         print(f" SMA20傾き {_slope_line}")
+        print(f" SMA20加速 {_accel_line}")
         if sma20_m1 > 0 or sma20_m15 > 0 or sma20_d1 > 0:
             _parts = []
             if sma20_m1 > 0:

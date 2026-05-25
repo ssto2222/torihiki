@@ -155,6 +155,8 @@ SCALP = dict(
     lot_max            = {'XAUUSD': 0.05, 'BTCUSD': 0.10},  # シンボル別ロット上限。未設定 = 上限なし
     sma20_slope_bars   = 5,     # SELL SMA20タッチ判定: 傾き計算に使う M1 バー数
     sma20_slope_atr_thr = 0.10, # SELL SMA20タッチ判定: SMA20がATR×この値以上下落していること
+    sma20_accel_bars   = 4,     # SMA20 2階微分: 傾きサンプル数（n本の傾きでトレンド判定）
+    sma20_accel_tol    = 0.3,   # SMA20 2階微分: 減少率閾値（0.3=ウィンドウ内30%超縮小で禁止）
     # 急落・急騰時 SMA20 バイパス（大きく乖離している場合はタッチ不要）
     sell_sma_bypass_atr  = 1.2,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ
     buy_sma_bypass_atr   = 1.2,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ
