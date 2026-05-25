@@ -253,9 +253,12 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     _last_hourly_discord  = 0.0   # 1時間ごと Discord タイマー（epoch 秒）
 
     # Discord ボット: !status コマンドが参照できるよう最新 data / macro_state を共有する
-    _shared_data  = [None]   # type: list[dict | None]
-    _shared_macro = [None]   # type: list[MacroBiasState | None]
-    start_discord_bot(cfg, _shared_data, _shared_macro)
+    # !mode / !symbol コマンドで書き込まれる切り替えリクエストも同じ仕組みで受け取る
+    _shared_data   = [None]    # type: list[dict | None]
+    _shared_macro  = [None]    # type: list[MacroBiasState | None]
+    _mode_ref      = [mode]    # type: list[str]
+    _symbol_ref    = [symbol]  # type: list[str]
+    start_discord_bot(cfg, _shared_data, _shared_macro, _mode_ref, _symbol_ref)
 
     try:
         itr = 0
@@ -267,6 +270,62 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
             itr += 1
             t_s  = time.time()
             _tee.reset()  # 常にリセット（ダッシュボード用バッファを毎イテレーション更新）
+
+            # ── Discord からのモード/シンボル切り替えリクエストを処理 ───────────────
+            _req_mode = _mode_ref[0]
+            if _req_mode != mode:
+                _logger.info(f'[モード切替] {mode} → {_req_mode}')
+                print(f"  [モード切替] {mode.upper()} → {_req_mode.upper()}")
+                mode = _req_mode
+
+            _req_symbol = _symbol_ref[0]
+            if _req_symbol != symbol:
+                _old_sym = symbol
+                _logger.info(f'[シンボル切替] {_old_sym} → {_req_symbol}')
+                print(f"  [シンボル切替] {_old_sym} → {_req_symbol}  MT5再接続・状態リセット中...")
+                mt5.shutdown()
+                symbol               = _req_symbol
+                cfg['MT5']['symbol'] = symbol
+                # パス再計算（_sym_path クロージャは symbol 変数を参照するため再計算可能）
+                sig_path   = _sym_path(cfg['BRIDGE']['signal_file'])
+                state_path = _sym_path(cfg['BRIDGE']['status_file'])
+                log_sig    = str(Path(log_dir) / Path(sig_path).name) if log_dir else ''
+                Path(sig_path).parent.mkdir(parents=True, exist_ok=True)
+                # 状態リセット（新シンボル用に新インスタンスを生成）
+                sig_state              = SignalState()
+                sc_state               = ScalpState()
+                jpy_cache              = JpyRateCache()
+                sma20_cache            = Sma20TouchCache()
+                macro_state            = MacroBiasState()
+                last_discord_action[0] = 'none'
+                # MT5 再接続
+                _sym_ok = False
+                for _att in range(1, _MT5_CONNECT_RETRIES + 1):
+                    if connect_mt5(symbol, cfg['MT5']):
+                        _sym_ok = True
+                        break
+                    if _att < _MT5_CONNECT_RETRIES:
+                        print(f"  [MT5] 接続失敗 ({_att}/{_MT5_CONNECT_RETRIES})"
+                              f" → {_MT5_CONNECT_WAIT}秒後に再試行")
+                        time.sleep(_MT5_CONNECT_WAIT)
+                if not _sym_ok:
+                    print(f"  [シンボル切替] MT5 接続失敗: {symbol}"
+                          f" → 元のシンボル {_old_sym} に戻します")
+                    _logger.error(f'[シンボル切替] MT5 接続失敗: {symbol}')
+                    symbol               = _old_sym
+                    cfg['MT5']['symbol'] = symbol
+                    _symbol_ref[0]       = symbol
+                    sig_path   = _sym_path(cfg['BRIDGE']['signal_file'])
+                    state_path = _sym_path(cfg['BRIDGE']['status_file'])
+                    log_sig    = str(Path(log_dir) / Path(sig_path).name) if log_dir else ''
+                    for _att in range(1, _MT5_CONNECT_RETRIES + 1):
+                        if connect_mt5(symbol, cfg['MT5']):
+                            break
+                        time.sleep(_MT5_CONNECT_WAIT)
+                else:
+                    if mode == 'scalp':
+                        _load_sma20_touch_margins([symbol], sma20_cache, cfg)
+                    print(f"  [シンボル切替] {symbol} に切り替えました")
 
             effective_cfg = apply_overrides(cfg)
             _eff_scalp    = effective_cfg.get('SCALP', {})
