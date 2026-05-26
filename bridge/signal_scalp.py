@@ -858,6 +858,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
+            # M1 RSI 極端値ゲート: EW2免除（W2形成中はRSIが極端値になることが多い）
+            elif (not _is_ew2_signal and not np.isnan(rsi_m1_cur)
+                  and rsi_m1_cur >= scalp.get('m1_rsi_ob_gate', 70.0)):
+                skip = f'M1 RSI{rsi_m1_cur:.1f}≥{scalp.get("m1_rsi_ob_gate", 70.0):.0f} 過熱 エントリー禁止'
+            elif (not _is_ew2_signal and not np.isnan(rsi_m1_cur)
+                  and rsi_m1_cur <= scalp.get('m1_rsi_os_gate', 30.0)):
+                skip = f'M1 RSI{rsi_m1_cur:.1f}≤{scalp.get("m1_rsi_os_gate", 30.0):.0f} 売られすぎ エントリー禁止'
             # M1 SMA20 絶対ゲート: EW2は免除（W2形成中はM1下落が正常）
             elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m1_buy_ok:
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
