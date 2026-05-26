@@ -347,6 +347,77 @@ def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
                     ]
                 return ['⚠️ ブリッジは既に停止しています。']
 
+            # ── !restart ─────────────────────────────────────────────
+            if cmd == 'restart':
+                # 引数: [PID] [SYMBOL] [MODE]  順不同
+                #   数字のみ       → 対象 PID（省略時は shared['proc'].pid）
+                #   scalp/normal  → モード変更
+                #   それ以外      → シンボル変更
+                target_pid = None
+                new_sym    = None
+                new_mode   = None
+                for a in args:
+                    if a.isdigit():
+                        target_pid = int(a)
+                    elif a.lower() in ('scalp', 'normal'):
+                        new_mode = a.lower()
+                    else:
+                        new_sym = a.upper()
+
+                # shared['cmd'] を書き換え（次回起動コマンドに反映される）
+                change_log = []
+                if new_sym or new_mode:
+                    new_cmd = list(shared['cmd'])
+                    if new_sym:
+                        for i, c in enumerate(new_cmd):
+                            if c == '--symbol' and i + 1 < len(new_cmd):
+                                new_cmd[i + 1] = new_sym
+                                break
+                        else:
+                            new_cmd += ['--symbol', new_sym]
+                        shared['symbol'] = new_sym
+                        change_log.append(f'シンボル→`{new_sym}`')
+                    if new_mode:
+                        for i, c in enumerate(new_cmd):
+                            if c == '--mode' and i + 1 < len(new_cmd):
+                                new_cmd[i + 1] = new_mode
+                                break
+                        else:
+                            new_cmd += ['--mode', new_mode]
+                        change_log.append(f'モード→`{new_mode}`')
+                    shared['cmd'] = new_cmd
+
+                # 対象プロセスを終了
+                shared['paused'] = False   # 自動再起動を許可
+                proc = shared.get('proc')
+                if target_pid:
+                    import signal as _sig
+                    try:
+                        os.kill(target_pid, _sig.SIGTERM)
+                        term_msg = f'PID `{target_pid}` に終了シグナルを送信しました'
+                    except ProcessLookupError:
+                        return [f'PID `{target_pid}` が見つかりません']
+                    except PermissionError:
+                        return [f'PID `{target_pid}` への送信が拒否されました']
+                elif proc is not None and proc.poll() is None:
+                    try:
+                        proc.terminate()
+                        term_msg = f'ブリッジ (PID=`{proc.pid}`) を終了しました'
+                    except Exception as e:
+                        return [f'終了失敗: {e}']
+                else:
+                    # 停止中でも cmd が更新済みなので次回 !start で新設定が使われる
+                    reply = '⚠️ ブリッジは既に停止しています。`!start` で新設定で起動できます。'
+                    if change_log:
+                        reply += f'\n変更: {", ".join(change_log)}'
+                    return [reply]
+
+                reply = f'🔄 {term_msg} → ウォッチドッグが自動再起動します'
+                if change_log:
+                    reply += f'\n変更: {", ".join(change_log)}'
+                _logger.info(f'Discord [restart] {term_msg}  変更={change_log}')
+                return [reply]
+
             # ── !status ──────────────────────────────────────────────
             if cmd == 'status':
                 proc    = shared.get('proc')
@@ -368,9 +439,14 @@ def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
                 proc_help = (
                     '**プロセス管理コマンド**\n'
                     '```\n'
-                    '!start    ブリッジを起動（停止中のとき）\n'
-                    '!stop     ブリッジを停止（再起動しない）\n'
-                    '!status   現在の稼働状態を表示\n'
+                    '!start                          ブリッジを起動（停止中のとき）\n'
+                    '!stop                           ブリッジを停止（再起動しない）\n'
+                    '!restart [PID] [SYMBOL] [MODE]  再起動（シンボル/モード変更可）\n'
+                    '  例: !restart              → 現在のブリッジを再起動\n'
+                    '      !restart 12345        → PID 12345 を再起動\n'
+                    '      !restart XAUUSD       → シンボル変更して再起動\n'
+                    '      !restart 12345 BTCUSD scalp  → PID+シンボル+モード指定\n'
+                    '!status                         現在の稼働状態を表示\n'
                     '```\n'
                 )
                 if _has_param_cmds:

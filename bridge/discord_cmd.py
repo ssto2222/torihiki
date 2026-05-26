@@ -22,6 +22,8 @@ secret.py に以下が必要（なければ起動をスキップ）:
 from __future__ import annotations
 import asyncio
 import logging
+import os
+import signal as _signal
 import threading
 from pathlib import Path
 from typing import Any
@@ -82,8 +84,10 @@ def _build_command_help() -> str:
         '**torihiki パラメータ制御ボット**\n'
         '```\n'
         '!status                       現在のシグナル状態を照会\n'
-        '!mode [scalp|normal]          動作モード確認/切替\n'
-        '!symbol [SYMBOL]              シンボル確認/切替（MT5再接続・状態リセット）\n'
+        '!pid                          ブリッジ PID を表示\n'
+        '!restart [PID] [SYMBOL]       ブリッジ再起動（ウォッチドッグ経由で完全再起動）\n'
+        '!mode [scalp|normal]          動作モード確認/切替（再起動不要）\n'
+        '!symbol [SYMBOL]              シンボル確認/切替（再起動不要・MT5再接続）\n'
         '!set SECTION.KEY value        設定変更   例: !set SCALP.cooldown_min 10\n'
         '!set SECTION.KEY.SUB value    dict変更   例: !set SL.tp_atr_multi.BTCUSD 3.5\n'
         '!set shortname value          短縮名変更 例: !set target 1500 / !set buy off\n'
@@ -352,6 +356,43 @@ def start_discord_bot(cfg: dict[str, Any],
                 msg = reset_override_path(target if '.' in target else None)
                 _logger.info(f'Discord [reset] {target}')
                 return [msg]
+
+            # ── !pid ───────────────────────────────────────────────────
+            if cmd == 'pid':
+                return [f'ブリッジ PID: `{os.getpid()}`']
+
+            # ── !restart ───────────────────────────────────────────────
+            if cmd == 'restart':
+                # 引数: [PID] [SYMBOL]  順不同
+                # 数字のみ → PID、それ以外 → SYMBOL
+                target_pid = None
+                new_sym    = None
+                for a in args:
+                    if a.isdigit():
+                        target_pid = int(a)
+                    else:
+                        new_sym = a.upper()
+                if target_pid is None:
+                    target_pid = os.getpid()
+
+                # symbol_ref を更新して次ポーリングでも反映（ウォッチドッグなし時用）
+                if new_sym and symbol_ref is not None:
+                    symbol_ref[0] = new_sym
+
+                try:
+                    os.kill(target_pid, _signal.SIGTERM)
+                except ProcessLookupError:
+                    return [f'PID `{target_pid}` が見つかりません']
+                except PermissionError:
+                    return [f'PID `{target_pid}` への送信が拒否されました']
+
+                sym_msg = f' → シンボル: `{new_sym}`' if new_sym else ''
+                _logger.info(f'Discord [restart] PID={target_pid}{sym_msg}')
+                return [
+                    f'PID `{target_pid}` に終了シグナルを送信しました{sym_msg}\n'
+                    'ウォッチドッグが自動再起動します（シンボル変更は `!restart SYMBOL` を'
+                    ' ウォッチドッグの `!restart` で実行するとより確実です）'
+                ]
 
             # ── !mode ──────────────────────────────────────────────────
             if cmd == 'mode':
