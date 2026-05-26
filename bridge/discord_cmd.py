@@ -21,12 +21,14 @@ secret.py に以下が必要（なければ起動をスキップ）:
 """
 from __future__ import annotations
 import asyncio
+import json
 import logging
 import os
 import signal as _signal
 import subprocess
 import sys
 import threading
+from datetime import datetime, timezone as _tz
 from pathlib import Path
 from typing import Any
 
@@ -186,6 +188,7 @@ def _build_command_help() -> str:
         '!status                       現在のシグナル状態を照会\n'
         '!pid                          ブリッジ PID を表示\n'
         '!restart [PID] [SYMBOL]       ブリッジ再起動（ウォッチドッグ経由で完全再起動）\n'
+        '!resetlosses [SYMBOL]         連続損失カウントを 0 にリセット（ブリッジ停止不要）\n'
         '!mode [scalp|normal]          動作モード確認/切替（再起動不要）\n'
         '!symbol [SYMBOL]              シンボル確認/切替（再起動不要・MT5再接続）\n'
         '!set SECTION.KEY value        設定変更   例: !set SCALP.cooldown_min 10\n'
@@ -588,6 +591,41 @@ def start_discord_bot(cfg: dict[str, Any],
                 _logger.info(f'Discord [symbol] {current} → {new_sym}')
                 return [f'シンボルを `{current}` → `{new_sym}` に切り替えます\n'
                         f'次のポーリングで MT5 再接続・状態リセットを実行します']
+
+            # ── !resetlosses [SYMBOL] ──────────────────────────────────
+            if cmd == 'resetlosses':
+                sym = args[0].upper() if args else (symbol_ref[0] if symbol_ref else None)
+                if not sym:
+                    return ['シンボルを指定してください: `!resetlosses BTCUSD`']
+
+                base = Path(cfg.get('BRIDGE', {}).get('status_file',
+                    r'C:/Users/YK/AppData/Roaming/MetaQuotes/Terminal/Common/Files/ea_state.json'))
+                state_path = base.with_name(base.stem + f'_{sym}' + base.suffix)
+                reset_path = base.with_name(f'ea_reset_{sym}' + base.suffix)
+
+                try:
+                    try:
+                        ea = json.loads(state_path.read_text(encoding='ascii'))
+                    except Exception:
+                        ea = {}
+                    prev = ea.get('consecutive_losses', 0)
+                    reset_ts = int(datetime.now(_tz.utc).timestamp())
+                    ea['consecutive_losses'] = 0
+                    ea['reset_since'] = reset_ts
+                    state_path.write_text(
+                        json.dumps(ea, indent=2, ensure_ascii=False), encoding='ascii')
+                    reset_path.write_text(
+                        json.dumps({'reset_since': reset_ts, 'symbol': sym},
+                                   indent=2, ensure_ascii=False), encoding='ascii')
+                except Exception as e:
+                    return [f'❌ リセット失敗 ({sym}): {e}']
+
+                _logger.info(f'Discord [resetlosses] {sym} consecutive_losses: {prev} → 0')
+                return [
+                    f'✅ `{sym}` の連続損失カウントをリセットしました\n'
+                    f'`consecutive_losses`: {prev} → **0**\n'
+                    f'`{reset_path.name}` を作成しました'
+                ]
 
             return [f'不明なコマンド: `!{cmd}`\n`!help` でコマンド一覧']
 
