@@ -24,6 +24,7 @@ import asyncio
 import logging
 import os
 import signal as _signal
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,35 @@ _logger = logging.getLogger('torihiki')
 _PREFIX    = '!'
 _README    = Path(__file__).parent.parent / 'README.md'
 _CHUNK_LEN = 1800   # Discord 2000 char limit にバッファ
+
+
+def _terminate_pid(pid: int) -> str | None:
+    """プロセスを終了する。成功時 None、失敗時エラーメッセージを返す。
+    Windows: taskkill /PID /F を使用（os.kill は権限エラーになる場合がある）
+    Linux/Mac: SIGTERM を送信
+    """
+    if os.name == 'nt':
+        try:
+            r = subprocess.run(
+                ['taskkill', '/PID', str(pid), '/F'],
+                capture_output=True, timeout=10,
+            )
+            if r.returncode == 0:
+                return None
+            err = (r.stderr or r.stdout).decode('cp932', errors='replace').strip()
+            return err or f'taskkill failed (code={r.returncode})'
+        except FileNotFoundError:
+            return 'taskkill コマンドが見つかりません'
+        except Exception as e:
+            return str(e)
+    else:
+        try:
+            os.kill(pid, _signal.SIGTERM)
+            return None
+        except ProcessLookupError:
+            return f'PID {pid} が見つかりません'
+        except PermissionError:
+            return f'PID {pid} へのアクセスが拒否されました'
 
 
 # ── ページネーション ────────────────────────────────────────────────────────
@@ -379,19 +409,16 @@ def start_discord_bot(cfg: dict[str, Any],
                 if new_sym and symbol_ref is not None:
                     symbol_ref[0] = new_sym
 
-                try:
-                    os.kill(target_pid, _signal.SIGTERM)
-                except ProcessLookupError:
-                    return [f'PID `{target_pid}` が見つかりません']
-                except PermissionError:
-                    return [f'PID `{target_pid}` への送信が拒否されました']
+                err = _terminate_pid(target_pid)
+                if err:
+                    return [f'❌ PID `{target_pid}` の終了に失敗しました: {err}']
 
                 sym_msg = f' → シンボル: `{new_sym}`' if new_sym else ''
                 _logger.info(f'Discord [restart] PID={target_pid}{sym_msg}')
                 return [
-                    f'PID `{target_pid}` に終了シグナルを送信しました{sym_msg}\n'
-                    'ウォッチドッグが自動再起動します（シンボル変更は `!restart SYMBOL` を'
-                    ' ウォッチドッグの `!restart` で実行するとより確実です）'
+                    f'🔄 PID `{target_pid}` を終了しました{sym_msg}\n'
+                    'ウォッチドッグが自動再起動します（シンボル変更は ウォッチドッグの'
+                    ' `!restart SYMBOL` で実行するとより確実です）'
                 ]
 
             # ── !mode ──────────────────────────────────────────────────

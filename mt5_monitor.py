@@ -96,6 +96,36 @@ def _ts() -> str:
     return datetime.now().strftime('%H:%M:%S')
 
 
+def _kill_pid(pid: int) -> 'str | None':
+    """プロセスを終了する。成功時 None、失敗時エラーメッセージを返す。
+    Windows: taskkill /PID /F（os.kill は権限エラーになる場合がある）
+    Linux/Mac: SIGTERM
+    """
+    if os.name == 'nt':
+        try:
+            r = subprocess.run(
+                ['taskkill', '/PID', str(pid), '/F'],
+                capture_output=True, timeout=10,
+            )
+            if r.returncode == 0:
+                return None
+            err = (r.stderr or r.stdout).decode('cp932', errors='replace').strip()
+            return err or f'taskkill failed (code={r.returncode})'
+        except FileNotFoundError:
+            return 'taskkill コマンドが見つかりません'
+        except Exception as e:
+            return str(e)
+    else:
+        import signal as _sig
+        try:
+            os.kill(pid, _sig.SIGTERM)
+            return None
+        except ProcessLookupError:
+            return f'PID {pid} が見つかりません'
+        except PermissionError:
+            return f'PID {pid} へのアクセスが拒否されました'
+
+
 def send_discord(message: str) -> None:
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
@@ -391,14 +421,10 @@ def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
                 shared['paused'] = False   # 自動再起動を許可
                 proc = shared.get('proc')
                 if target_pid:
-                    import signal as _sig
-                    try:
-                        os.kill(target_pid, _sig.SIGTERM)
-                        term_msg = f'PID `{target_pid}` に終了シグナルを送信しました'
-                    except ProcessLookupError:
-                        return [f'PID `{target_pid}` が見つかりません']
-                    except PermissionError:
-                        return [f'PID `{target_pid}` への送信が拒否されました']
+                    err = _kill_pid(target_pid)
+                    if err:
+                        return [f'❌ PID `{target_pid}` の終了に失敗しました: {err}']
+                    term_msg = f'PID `{target_pid}` を終了しました'
                 elif proc is not None and proc.poll() is None:
                     try:
                         proc.terminate()
