@@ -152,41 +152,41 @@ def _make_restart_helper(pids: list, cmds: list) -> str:
     """
     return f'''\
 # Auto-generated restart helper — do not edit
-import time, subprocess, os, sys
+import time, subprocess, os, datetime
 
-pids   = {pids!r}
-cmds   = {cmds!r}
-cwd    = {_REPO_DIR!r}
-bridge = {MAIN_SCRIPT!r}
+pids = {pids!r}
+cmds = {cmds!r}
+cwd  = {_REPO_DIR!r}
+log  = os.path.join(cwd, '_restart_helper.log')
 
-# ブリッジプロセスを全て終了
-try:
-    import psutil
-    for p in psutil.process_iter(['pid', 'cmdline']):
-        try:
-            cl = ' '.join(p.info.get('cmdline') or [])
-            if bridge in cl:
-                subprocess.run(['taskkill', '/PID', str(p.pid), '/F'], capture_output=True)
-        except Exception:
-            pass
-except Exception:
-    pass
+def _log(msg):
+    try:
+        with open(log, 'a', encoding='utf-8') as f:
+            f.write(f'[{{datetime.datetime.now()}}] {{msg}}\\n')
+    except Exception:
+        pass
 
-# ウォッチドッグを終了
+_log('helper started')
+time.sleep(2)  # Discord 返信メッセージ送信の余裕
+
+# ウォッチドッグとその子プロセス（ブリッジ）をプロセスツリーごと終了 (/T)
 for pid in pids:
-    subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+    r = subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'], capture_output=True)
+    _log(f'taskkill /T PID={{pid}} rc={{r.returncode}}')
 
 time.sleep(3)
 
-# ウォッチドッグを再起動
+# ウォッチドッグを再起動（1秒間隔で順番に）
 CREATE_NEW_CONSOLE = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
 for cmd in cmds:
     try:
         subprocess.Popen(cmd, cwd=cwd, creationflags=CREATE_NEW_CONSOLE)
+        _log(f'started: {{cmd}}')
+        time.sleep(1)
     except Exception as e:
-        print(f'起動失敗: {{cmd}} -> {{e}}', file=sys.stderr)
+        _log(f'failed: {{cmd}} -> {{e}}')
 
-time.sleep(1)
+_log('helper done')
 try:
     os.unlink(__file__)
 except Exception:
