@@ -126,6 +126,74 @@ def _kill_pid(pid: int) -> 'str | None':
             return f'PID {pid} へのアクセスが拒否されました'
 
 
+def _find_all_watchdog_procs() -> list:
+    """実行中の mt5_monitor.py --watch プロセスを全て返す [(pid, cmdline), ...]"""
+    result = []
+    my_script = os.path.basename(__file__)  # 'mt5_monitor.py'
+    try:
+        for p in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if 'python' not in (p.info.get('name') or '').lower():
+                    continue
+                cl_list = p.info.get('cmdline') or []
+                cl_str  = ' '.join(cl_list)
+                if my_script in cl_str and '--watch' in cl_str:
+                    result.append((p.pid, cl_list))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        pass
+    return result
+
+
+def _make_restart_helper(pids: list, cmds: list) -> str:
+    """再起動ヘルパースクリプトの内容を文字列で返す（一時ファイルに書き出して使用）。
+    ヘルパーは DETACHED_PROCESS で起動され、親プロセス終了後も動作して自己削除する。
+    """
+    return f'''\
+# Auto-generated restart helper — do not edit
+import time, subprocess, os, sys
+
+pids   = {pids!r}
+cmds   = {cmds!r}
+cwd    = {_REPO_DIR!r}
+bridge = {MAIN_SCRIPT!r}
+
+# ブリッジプロセスを全て終了
+try:
+    import psutil
+    for p in psutil.process_iter(['pid', 'cmdline']):
+        try:
+            cl = ' '.join(p.info.get('cmdline') or [])
+            if bridge in cl:
+                subprocess.run(['taskkill', '/PID', str(p.pid), '/F'], capture_output=True)
+        except Exception:
+            pass
+except Exception:
+    pass
+
+# ウォッチドッグを終了
+for pid in pids:
+    subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+
+time.sleep(3)
+
+# ウォッチドッグを再起動
+CREATE_NEW_CONSOLE = getattr(subprocess, 'CREATE_NEW_CONSOLE', 0x00000010)
+for cmd in cmds:
+    try:
+        subprocess.Popen(cmd, cwd=cwd, creationflags=CREATE_NEW_CONSOLE)
+    except Exception as e:
+        print(f'起動失敗: {{cmd}} -> {{e}}', file=sys.stderr)
+
+time.sleep(1)
+try:
+    os.unlink(__file__)
+except Exception:
+    pass
+'''
+
+
 def send_discord(message: str) -> None:
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
@@ -444,6 +512,69 @@ def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
                 _logger.info(f'Discord [restart] {term_msg}  変更={change_log}')
                 return [reply]
 
+            # ── !pull ────────────────────────────────────────────────
+            if cmd == 'pull':
+                _logger.info('Discord [pull] git pull 開始')
+
+                # 1. git pull（stale ref エラー時は prune してリトライ）
+                def _do_pull():
+                    def _run(args):
+                        return subprocess.run(
+                            ['git'] + args, cwd=_REPO_DIR,
+                            capture_output=True, text=True, timeout=60,
+                        )
+                    r = _run(['pull', '--ff-only'])
+                    out = (r.stdout + r.stderr).strip()
+                    if r.returncode != 0 and (
+                            'incorrect old value provided' in out or 'fetching ref' in out):
+                        _run(['remote', 'prune', 'origin'])
+                        r2 = _run(['pull', '--ff-only'])
+                        return r2.returncode, (r2.stdout + r2.stderr).strip()
+                    return r.returncode, out
+
+                try:
+                    ret_code, pull_out = _do_pull()
+                except subprocess.TimeoutExpired:
+                    return ['❌ git pull タイムアウト (60秒)']
+                except Exception as e:
+                    return [f'❌ git pull エラー: {e}']
+
+                if ret_code != 0:
+                    return [f'❌ git pull 失敗:\n```\n{pull_out[:600]}\n```']
+
+                # 2. 全ウォッチドッグを検索
+                watchdog_procs = _find_all_watchdog_procs()
+                if not watchdog_procs:
+                    return [
+                        f'✅ git pull 完了:\n```\n{pull_out[:600]}\n```\n'
+                        '⚠️ 実行中のウォッチドッグが見つかりませんでした'
+                    ]
+
+                # 3. ヘルパースクリプトを書き出して DETACHED_PROCESS で起動
+                w_pids = [p for p, _ in watchdog_procs]
+                w_cmds = [c for _, c in watchdog_procs]
+                helper_path = os.path.join(_REPO_DIR, '_restart_helper.py')
+                try:
+                    with open(helper_path, 'w', encoding='utf-8') as _hf:
+                        _hf.write(_make_restart_helper(w_pids, w_cmds))
+                    _DETACHED = 0x00000008   # DETACHED_PROCESS
+                    _NEW_PG   = 0x00000200   # CREATE_NEW_PROCESS_GROUP
+                    flags = (_DETACHED | _NEW_PG) if os.name == 'nt' else 0
+                    subprocess.Popen(
+                        [sys.executable, helper_path],
+                        cwd=_REPO_DIR, creationflags=flags, close_fds=True,
+                    )
+                except Exception as e:
+                    return [f'❌ 再起動ヘルパーの起動に失敗しました: {e}']
+
+                pids_str = ', '.join(str(p) for p in w_pids)
+                _logger.info(f'Discord [pull] 再起動ヘルパー起動 PIDs={w_pids}')
+                return [
+                    f'✅ git pull 完了:\n```\n{pull_out[:500]}\n```\n'
+                    f'🔄 {len(watchdog_procs)} 個のウォッチドッグを再起動します '
+                    f'(PID: {pids_str})\n約3秒後に再起動されます'
+                ]
+
             # ── !status ──────────────────────────────────────────────
             if cmd == 'status':
                 proc    = shared.get('proc')
@@ -465,6 +596,7 @@ def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
                 proc_help = (
                     '**プロセス管理コマンド**\n'
                     '```\n'
+                    '!pull                           git pull して全ウォッチドッグを再起動\n'
                     '!start                          ブリッジを起動（停止中のとき）\n'
                     '!stop                           ブリッジを停止（再起動しない）\n'
                     '!restart [PID] [SYMBOL] [MODE]  再起動（シンボル/モード変更可）\n'
