@@ -663,11 +663,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 m1_bar_cur   = df_m1.index[-1]
                 close_m1_cur = float(df_m1['Close'].iloc[-1])
                 close_m1_prv = float(df_m1['Close'].iloc[-2])
+                open_m1_cur  = (float(df_m1['Open'].iloc[-1])
+                                if 'Open' in df_m1.columns else close_m1_prv)
                 sma20_m1_c   = (float(df_m1['SMA20'].iloc[-1])
                                 if 'SMA20' in df_m1.columns else float('nan'))
-                is_down_bar  = close_m1_cur < close_m1_prv
                 # M1 上昇トレンド中（close > SMA20）の下落バーはカウントしない
                 trend_ok     = np.isnan(sma20_m1_c) or close_m1_cur <= sma20_m1_c
+                # 半足モード: 現在バーが自身のオープンより下 → 早期検出
+                # 通常モード: 前バーの終値より下 → バー確定後に検出
+                _half_bar    = scalp.get('m1_confirm_half_bar', True)
+                is_down_bar  = (close_m1_cur < open_m1_cur) if _half_bar else (close_m1_cur < close_m1_prv)
 
                 if is_down_bar and trend_ok and m1_bar_cur != state.sell_confirm_bar_time:
                     state.sell_confirm_count   += 1
@@ -751,11 +756,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 m1_bar_cur   = df_m1.index[-1]
                 close_m1_cur = float(df_m1['Close'].iloc[-1])
                 close_m1_prv = float(df_m1['Close'].iloc[-2])
-                is_up_bar    = close_m1_cur > close_m1_prv
+                open_m1_cur  = (float(df_m1['Open'].iloc[-1])
+                                if 'Open' in df_m1.columns else close_m1_prv)
                 sma20_m1_c   = (float(df_m1['SMA20'].iloc[-1])
                                 if 'SMA20' in df_m1.columns else float('nan'))
                 # M1 下落トレンド中（close < SMA20）の上昇バーはカウントしない
                 trend_ok     = np.isnan(sma20_m1_c) or close_m1_cur >= sma20_m1_c
+                # 半足モード: 現在バーが自身のオープンより上 → 早期検出
+                # 通常モード: 前バーの終値より上 → バー確定後に検出
+                _half_bar    = scalp.get('m1_confirm_half_bar', True)
+                is_up_bar    = (close_m1_cur > open_m1_cur) if _half_bar else (close_m1_cur > close_m1_prv)
 
                 if is_up_bar and trend_ok and m1_bar_cur != state.buy_confirm_bar_time:
                     state.buy_confirm_count   += 1
