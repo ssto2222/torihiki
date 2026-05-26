@@ -525,11 +525,17 @@ def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
                         )
                     r = _run(['pull', '--ff-only'])
                     out = (r.stdout + r.stderr).strip()
-                    if r.returncode != 0 and (
-                            'incorrect old value provided' in out or 'fetching ref' in out):
-                        _run(['remote', 'prune', 'origin'])
-                        r2 = _run(['pull', '--ff-only'])
-                        return r2.returncode, (r2.stdout + r2.stderr).strip()
+                    if r.returncode != 0:
+                        if 'incorrect old value provided' in out or 'fetching ref' in out:
+                            _run(['remote', 'prune', 'origin'])
+                            r2 = _run(['pull', '--ff-only'])
+                            return r2.returncode, (r2.stdout + r2.stderr).strip()
+                        if 'Cannot fast-forward to multiple branches' in out:
+                            rf = _run(['fetch', 'origin'])
+                            if rf.returncode != 0:
+                                return rf.returncode, (rf.stdout + rf.stderr).strip()
+                            rm = _run(['merge', '--ff-only', 'FETCH_HEAD'])
+                            return rm.returncode, (rm.stdout + rm.stderr).strip()
                     return r.returncode, out
 
                 try:
