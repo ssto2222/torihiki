@@ -168,6 +168,9 @@ SCALP = dict(
     # RSI ハードゲート: 全BUY/SELLシグナルに適用する絶対下限/上限
     rsi_buy_gate_min      = 40.0,  # BUY: M5 RSIがこの値未満なら全シグナルをブロック
     rsi_sell_gate_max     = 60.0,  # SELL: M5 RSIがこの値超なら全シグナルをブロック
+    # M1 RSI 極端値ゲート: 過熱/売られすぎ時の無差別エントリー禁止（EW2免除）
+    m1_rsi_ob_gate        = 70.0,  # M1 RSI ≥ この値: 過熱、全方向エントリー禁止
+    m1_rsi_os_gate        = 30.0,  # M1 RSI ≤ この値: 売られすぎ、全方向エントリー禁止
     # ── ボリュームブレイクアウト（大変動予兆を検知しSMA20タッチをスキップ） ──────────
     vol_bo_enabled        = True,  # ボリュームブレイクアウト有効/無効
     vol_bo_rvol_thr       = 2.0,   # RVOL ≥ この値でブレイクアウト候補
