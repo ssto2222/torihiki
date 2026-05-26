@@ -2,6 +2,8 @@
   "SCALP": {
     "buy_enabled": true,
     "sell_enabled": true,
-    "target_profit_jpy": 1600
+    "target_profit_jpy": 1600,
+    "m1_rsi_ob_gate": 75.0,
+    "max_trades_day": 40
   }
 }
