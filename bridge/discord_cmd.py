@@ -187,7 +187,9 @@ def _build_command_help() -> str:
         '!pull                         git pull して全ウォッチドッグを再起動\n'
         '!status                       現在のシグナル状態を照会\n'
         '!pid                          ブリッジ PID を表示\n'
-        '!restart [PID] [SYMBOL]       ブリッジ再起動（ウォッチドッグ経由で完全再起動）\n'
+        '!restart                      全ウォッチドッグを再起動\n'
+        '!restart PID                  指定 PID のみ終了（ウォッチドッグが自動再起動）\n'
+        '!restart [SYMBOL] [MODE]      全ウォッチドッグをシンボル/モード変更して再起動\n'
         '!resetlosses [SYMBOL]         連続損失カウントを 0 にリセット（ブリッジ停止不要）\n'
         '!mode [scalp|normal]          動作モード確認/切替（再起動不要）\n'
         '!symbol [SYMBOL]              シンボル確認/切替（再起動不要・MT5再接続）\n'
@@ -533,32 +535,79 @@ def start_discord_bot(cfg: dict[str, Any],
 
             # ── !restart ───────────────────────────────────────────────
             if cmd == 'restart':
-                # 引数: [PID] [SYMBOL]  順不同
-                # 数字のみ → PID、それ以外 → SYMBOL
+                # 引数: [PID] [SYMBOL] [MODE]  順不同
+                #   数字のみ      → PID 指定（そのプロセスだけ終了）
+                #   scalp/normal → モード変更
+                #   それ以外     → シンボル変更
                 target_pid = None
                 new_sym    = None
+                new_mode   = None
                 for a in args:
                     if a.isdigit():
                         target_pid = int(a)
+                    elif a.lower() in ('scalp', 'normal'):
+                        new_mode = a.lower()
                     else:
                         new_sym = a.upper()
-                if target_pid is None:
-                    target_pid = os.getpid()
 
-                # symbol_ref を更新して次ポーリングでも反映（ウォッチドッグなし時用）
-                if new_sym and symbol_ref is not None:
-                    symbol_ref[0] = new_sym
+                # PID 指定時: そのプロセス1つだけ終了（ウォッチドッグが自動再起動）
+                if target_pid is not None:
+                    err = _terminate_pid(target_pid)
+                    if err:
+                        return [f'❌ PID `{target_pid}` の終了に失敗しました: {err}']
+                    _logger.info(f'Discord [restart] PID={target_pid}')
+                    return [f'🔄 PID `{target_pid}` を終了しました\nウォッチドッグが自動再起動します']
 
-                err = _terminate_pid(target_pid)
-                if err:
-                    return [f'❌ PID `{target_pid}` の終了に失敗しました: {err}']
+                # PID 未指定: 全ウォッチドッグをデタッチドヘルパーで再起動
+                watchdog_procs = _find_watchdog_procs()
+                if not watchdog_procs:
+                    return ['⚠️ 実行中のウォッチドッグが見つかりませんでした']
 
-                sym_msg = f' → シンボル: `{new_sym}`' if new_sym else ''
-                _logger.info(f'Discord [restart] PID={target_pid}{sym_msg}')
+                w_pids = [p for p, _ in watchdog_procs]
+                w_cmds = []
+                for _, wc in watchdog_procs:
+                    updated = list(wc)
+                    if new_sym:
+                        for i, c in enumerate(updated):
+                            if c == '--symbol' and i + 1 < len(updated):
+                                updated[i + 1] = new_sym
+                                break
+                        else:
+                            updated += ['--symbol', new_sym]
+                    if new_mode:
+                        for i, c in enumerate(updated):
+                            if c == '--mode' and i + 1 < len(updated):
+                                updated[i + 1] = new_mode
+                                break
+                        else:
+                            updated += ['--mode', new_mode]
+                    w_cmds.append(updated)
+
+                helper_path = os.path.join(_REPO_DIR, '_restart_helper.py')
+                try:
+                    with open(helper_path, 'w', encoding='utf-8') as _hf:
+                        _hf.write(_make_watchdog_restart_helper(w_pids, w_cmds))
+                    _DETACHED = 0x00000008
+                    _NEW_PG   = 0x00000200
+                    flags = (_DETACHED | _NEW_PG) if os.name == 'nt' else 0
+                    subprocess.Popen(
+                        [sys.executable, helper_path],
+                        cwd=_REPO_DIR, creationflags=flags, close_fds=True,
+                    )
+                except Exception as e:
+                    return [f'❌ 再起動ヘルパーの起動に失敗しました: {e}']
+
+                change_log = []
+                if new_sym:
+                    change_log.append(f'シンボル→`{new_sym}`')
+                if new_mode:
+                    change_log.append(f'モード→`{new_mode}`')
+                change_str = f'\n変更: {", ".join(change_log)}' if change_log else ''
+                pids_str = ', '.join(str(p) for p in w_pids)
+                _logger.info(f'Discord [restart] 全ウォッチドッグ再起動 PIDs={w_pids} 変更={change_log}')
                 return [
-                    f'🔄 PID `{target_pid}` を終了しました{sym_msg}\n'
-                    'ウォッチドッグが自動再起動します（シンボル変更は ウォッチドッグの'
-                    ' `!restart SYMBOL` で実行するとより確実です）'
+                    f'🔄 {len(watchdog_procs)} 個のウォッチドッグを再起動します '
+                    f'(PID: {pids_str}){change_str}\n約3秒後に再起動されます'
                 ]
 
             # ── !mode ──────────────────────────────────────────────────
