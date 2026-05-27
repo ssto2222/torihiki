@@ -98,6 +98,9 @@ class ScalpState:
     # 大変動→通常モード中フラグ（遷移ログの重複抑制 + 復帰検出）
     in_big_move_normal: bool = False
 
+    # ネックライン接近→ノーマルモード中フラグ
+    near_neckline_normal: bool = False
+
     # ボリュームブレイクアウト重複防止（同バーで2回発火しない）
     vol_breakout_bar: object = None  # 直前ブレイクアウト発火の M5 バー時刻
     vol_breakout_dir: str    = 'none'
