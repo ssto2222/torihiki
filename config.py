@@ -150,7 +150,7 @@ SCALP = dict(
     cooldown_trades   = 3,       # この回数トレードするごとにクールダウンを発動
     min_margin_level  = 200.0,   # 証拠金維持率の下限（%）。これを下回らないようlotを縮小
     big_move_lookback  = 12,     # 大変動判定: 過去 N 本（12本=60分）
-    big_move_atr_multi = 5.0,   # 大変動判定: 価格変動 > ATR × N で切換え
+    big_move_atr_multi = 2.0,   # 大変動判定: 価格変動 > ATR × N で切換え
     m1_early_margin    = 2.0,   # M5 RSI が閾値からこの値以内に接近 + M1 先行クロスで早期執行
     m1_confirm_half_bar = True, # True=半足モード: close>open で確認（バー途中でエントリー）
                                 # False=通常モード: close>prev_close で確認（バー確定後）
