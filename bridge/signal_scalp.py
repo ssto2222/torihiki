@@ -38,8 +38,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
     try:
         scalp      = cfg.get('SCALP', {})
         jpy_rate   = _get_jpy_per_usd(jpy_cache, scalp.get('jpy_per_usd', 150.0), mt5=mt5)
-        target     = scalp.get('target_profit_jpy',  300)
-        sl_ratio   = scalp.get('sl_ratio',           1.5)
+        target     = scalp.get('target_profit_jpy',  1000)
+        sl_ratio   = scalp.get('sl_ratio',           3)
         sig_tf     = scalp.get('signal_tf',          'M5')
         buy_thrs   = sorted(scalp.get('rsi_buy_thrs',  [50.0, 55.0, 60.0]))
         sell_thrs  = sorted(scalp.get('rsi_sell_thrs', [45.0, 40.0, 35.0]), reverse=True)
@@ -320,7 +320,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # ── ノーマルバリアント: 大変動/ネックライン接近時の拡張パラメーター ──
         # 同じ執行条件でTP拡大+トレーリング+ロット調整を適用する
         _normal_variant  = False   # True になると NV パラメーターで上書き
-        _nv_enabled      = scalp.get('normal_variant_enabled', True)
+        _nv_enabled      = scalp.get('normal_variant_enabled', False)
         _nv_tp_frac      = scalp.get('normal_variant_tp_atr', 1.5)
         _nv_lot_frac_cfg = scalp.get('normal_variant_lot_frac', 1.0)
         _nv_tp_move      = atr_v * _nv_tp_frac
@@ -573,7 +573,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # ── SMA20 タッチマージン事前計算 ─────────────────────────────────────────
         # キャッシュあり → キャッシュ値、なし → M5 ATR × 0.15 (BTCで約$150、動的に適正化)
-        _touch_atr_frac = scalp.get('sma20_touch_margin_atr', 0.15)
+        _touch_atr_frac = scalp.get('sma20_touch_margin_atr', 0.4)
         _cached_margin  = sma20_cache.margins.get(symbol, None)
         touch_margin    = (_cached_margin if _cached_margin is not None
                            else atr_v * _touch_atr_frac)
@@ -652,8 +652,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 state.buy_sma_pending  = True
                                 state.buy_sma_at       = now
                                 state.buy_sma_level    = thr
-                                state.sell_sma_pending     = False
-                                state.sell_confirm_pending = False
+                                state.sell_sma_pending      = False
+                                state.sell_sma_at           = None
+                                state.sell_sma_level        = 0.0
+                                state.sell_confirm_pending  = False
+                                state.sell_confirm_at       = None
+                                state.sell_confirm_count    = 0
+                                state.sell_confirm_bar_time = None
+                                state.sell_confirm_level    = 0.0
                                 label = '急騰兆候BUY' if surge_info['is_early_surge'] else '押し目BUY'
                                 print(f"[{label}] Confidence={surge_info['confidence']:.2f}")
                             break
@@ -665,8 +671,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 state.sell_sma_pending  = True
                                 state.sell_sma_at       = now
                                 state.sell_sma_level    = thr
-                                state.buy_sma_pending     = False
-                                state.buy_confirm_pending = False
+                                state.buy_sma_pending       = False
+                                state.buy_sma_at            = None
+                                state.buy_sma_level         = 0.0
+                                state.buy_confirm_pending   = False
+                                state.buy_confirm_at        = None
+                                state.buy_confirm_count     = 0
+                                state.buy_confirm_bar_time  = None
+                                state.buy_confirm_level     = 0.0
                                 print(f"[押し戻りSELL] M1 RSI={rsi_m1_cur:.1f} thr={int(thr)}")
                             break
 
@@ -710,8 +722,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 print(f"[SELL SMA20バイパス] 乖離={sma20_m1-close_m1:.1f} > マージン={touch_margin:.1f}")
                         # mtf_sell_ok=False でもペンディング継続（次ポールで再チェック）
                     elif abs(close_m1 - sma20_m1) <= touch_margin:
-                        slope_bars = scalp.get('sma20_slope_bars', 5)
-                        slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
+                        slope_bars = _slope_bars
+                        slope_thr  = _slope_thr
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
                         # 明確な上昇中でなければ OK（上昇は SELL に不利なので弱い上昇も許可）
@@ -819,8 +831,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 print(f"[BUY SMA20バイパス] 乖離={close_m1-sma20_m1:.1f} > マージン={touch_margin:.1f}")
                         # mtf_buy_ok=False でもペンディング継続（次ポールで再チェック）
                     elif abs(close_m1 - sma20_m1) <= touch_margin:
-                        slope_bars = scalp.get('sma20_slope_bars', 5)
-                        slope_thr  = scalp.get('sma20_slope_atr_thr', 0.10)
+                        slope_bars = _slope_bars
+                        slope_thr  = _slope_thr
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
                         # 明確な下落中でなければ OK（フラット・上昇中は BUY を許可）
