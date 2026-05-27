@@ -182,6 +182,13 @@ SCALP = dict(
     vol_bo_rsi_sell_max   = 48.0,  # ブレイクアウトSELL: RSI ≤ この値（下落方向確認）
     vol_bo_tp_multi       = 1.8,   # TP倍率（通常スキャルプTP × この値 → 大きな波に乗る）
     vol_bo_sl_multi       = 0.8,   # SL倍率（通常SL × この値 → エントリー根拠明確ならタイトに）
+    # ── SMA 優先エントリー + RSI スケールイン ────────────────────────────
+    sma_watch_cooldown_s  = 60,    # 直前エントリーからこの秒数以内は sma_pending 自動再武装しない
+    sma_entry_lot_frac    = 1.0,   # SMA優先エントリーのロット倍率（1.0 = 変更なし）
+    rsi_scalein_enabled   = True,  # RSIクロスによるスケールイン有効化
+    rsi_scalein_lot_frac  = 0.5,   # スケールインエントリーのロット倍率
+    rsi_scalein_max       = 2,     # スケールイン最大回数（per primary entry）
+    rsi_scalein_window_min = 30,   # 最終エントリーからこの分数以内のみスケールイン許可
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────
