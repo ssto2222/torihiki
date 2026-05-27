@@ -314,63 +314,44 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         expected_profit_usd = tp_move * contract_size * lot
         expected_profit_jpy = expected_profit_usd * jpy_rate
 
+        # ── ノーマルバリアント: 大変動/ネックライン接近時の拡張パラメーター ──
+        # 同じ執行条件でTP拡大+トレーリング+ロット調整を適用する
+        _normal_variant  = False   # True になると NV パラメーターで上書き
+        _nv_tp_frac      = scalp.get('normal_variant_tp_atr', 1.5)
+        _nv_lot_frac_cfg = scalp.get('normal_variant_lot_frac', 1.0)
+        _nv_tp_move      = atr_v * _nv_tp_frac
+        _nv_sl_move      = _nv_tp_move * sl_ratio
+        _nv_lot_raw      = target_usd / (_nv_tp_move * contract_size) if _nv_tp_move > 0 else 0
+        _nv_lot_base     = max(l_min, min(l_max, round(_nv_lot_raw / l_step) * l_step))
+        _nv_lot          = max(l_min, min(l_max, scalp_lot_max,
+                               round(_nv_lot_base * r_multi_s * _nv_lot_frac_cfg / l_step) * l_step))
+
         # ── 大変動検知: スキャルプ→通常モード自動切換え ──────────
         bm_lookback  = scalp.get('big_move_lookback',  12)
         bm_atr_multi = scalp.get('big_move_atr_multi', 2.0)
         big_move     = detect_big_move(df, bm_lookback, bm_atr_multi)
 
+        # 大変動検知: ノーマルバリアントパラメーターに切替（同じ執行条件を使用）
         if big_move != 'none':
-            normal_data = compute_signal(symbol, cfg, sig_state, jpy_cache, mt5=mt5)
-            if normal_data is not None:
-                state.buy_sma_pending = state.sell_sma_pending = False
-                state.buy_sma_at      = state.sell_sma_at      = None
-                state.buy_sma_level   = state.sell_sma_level   = 0.0
-                state.buy_confirm_pending = state.sell_confirm_pending = False
-                state.buy_confirm_at      = state.sell_confirm_at      = None
-                state.buy_confirm_count   = state.sell_confirm_count   = 0
-                state.buy_confirm_bar_time = state.sell_confirm_bar_time = None
-                state.buy_confirm_level   = state.sell_confirm_level   = 0.0
-                position_aligns = (
-                    (big_move == 'up'   and state.last_action == 'buy') or
-                    (big_move == 'down' and state.last_action == 'sell')
-                )
-                if position_aligns:
-                    normal_data['trail_multi'] = cfg['SL']['trail_multi']
-                normal_data['signal_type'] = f'big_move_{big_move}(was_scalp)'
-                normal_data['scalp_mode']  = False
-                if not state.in_big_move_normal:
-                    # 初回遷移時のみログ（毎ポールは抑制）
-                    print(f"[スキャルプ→通常] 大変動={big_move}  "
-                          f"last_pos={state.last_action}  "
-                          f"trail={'ON' if position_aligns else 'scalp_trail=0'}")
-                    _logger.info(f'[スキャルプ→通常] 大変動={big_move}')
-                state.in_big_move_normal = True
-                return normal_data
-            _logger.warning("大変動検知中に compute_signal 失敗 → スキャルプスキップ")
-            return None
-
-        # 大変動解消: スキャルプモード復帰
-        if state.in_big_move_normal:
+            if not state.in_big_move_normal:
+                print(f"[スキャルプ→NVモード] 大変動={big_move} last_pos={state.last_action}"
+                      f" → 同条件+拡張TP/トレーリング")
+                _logger.info(f'[スキャルプ→NVモード] 大変動={big_move}')
+            state.in_big_move_normal = True
+        elif state.in_big_move_normal:
+            # 大変動解消: スキャルプパラメーターに復帰
             state.in_big_move_normal = False
-            print(f"[通常→スキャルプ復帰] 大変動解消 → スキャルプモードに戻ります")
-            _logger.info('[通常→スキャルプ復帰] 大変動解消')
+            print(f"[NV→スキャルプ復帰] 大変動解消")
+            _logger.info('[NV→スキャルプ復帰] 大変動解消')
+        _normal_variant = state.in_big_move_normal
 
-        # ── クールダウン中は通常モードに切換え ─────────────────────
+        # ── クールダウン中 ─────────────────────────────────────────
         # cooldown_trades 回トレードするごとに cooldown_min 分間のクールダウン
+        # 同じ執行条件でスキャルプロジックを継続（クールダウンゲートで入場抑制）
         in_cooldown = (
             state.cooldown_start_at is not None and
             now < state.cooldown_start_at + timedelta(minutes=cooldown)
         )
-        if in_cooldown:
-            normal_data = compute_signal(symbol, cfg, sig_state, jpy_cache, mt5=mt5)
-            if normal_data is not None:
-                rem = int((state.cooldown_start_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
-                normal_data['scalp_cooldown_rem'] = rem
-                normal_data['scalp_mode']         = False
-                return normal_data
-            # compute_signal 失敗時はスキャルプロジックにフォールバックし
-            # line 488 のクールダウンガードが action='none' を保証する
-            _logger.warning("クールダウン中に compute_signal 失敗 → スキャルプロジックにフォールバック")
 
         # ── 急騰初期検知と中段階回避 ─────────────────────────────
         surge_info = detect_early_surge(df, cfg)
@@ -412,9 +393,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         break
 
         if _near_neckline and not state.near_neckline_normal:
-            print(f"[ネックライン接近] ノーマルモード切替 "
+            print(f"[ネックライン接近] NVモード切替 "
                   f"close={close_v:.2f} margin={_nl_margin:.2f}")
-            _logger.info(f'[ネックライン接近] ノーマルモード切替 close={close_v:.2f}')
+            _logger.info(f'[ネックライン接近] NVモード切替 close={close_v:.2f}')
             state.near_neckline_normal = True
 
         if state.near_neckline_normal:
@@ -426,18 +407,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 _has_pos = True  # 取得失敗時は安全のためポジションありと仮定
 
             if _has_pos or _near_neckline:
-                nl_data = compute_signal(symbol, cfg, sig_state, jpy_cache, mt5=mt5)
-                if nl_data is not None:
-                    nl_data['scalp_mode'] = False
-                    if nl_data.get('action') != 'none':
-                        # エントリー確定 → trailing 有効化
-                        nl_data['trail_multi'] = cfg['SL']['trail_multi']
-                        nl_data['signal_type'] = f"neckline_{nl_data.get('action','none')}"
-                    else:
-                        # 待機中 (ポジション保有 or 接近監視中)
-                        nl_data['signal_type'] = f'neckline_hold_{state.last_action}'
-                    return nl_data
-                # compute_signal 失敗 → スキャルプロジックにフォールバック
+                # ノーマルバリアントパラメーターでスキャルプロジックを継続
+                _normal_variant = True
             else:
                 # ポジションなし + ネックライン付近でもない → スキャルプ復帰
                 state.near_neckline_normal = False
@@ -452,6 +423,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _is_ew2_signal     = False  # EW2専用フラグ: RSIゲートをバイパスする
         _is_scalein_signal = False  # RSIスケールイン由来: M1 RSI極端値ゲートをスキップ
         _lot_frac          = 1.0    # ロット倍率（SMA優先=1.0、スケールイン=rsi_scalein_lot_frac）
+        # _normal_variant は big_move/neckline セクションで既にセット済み
 
         # ── H1 パターン ネックライン突破: スキャルプ直接エントリー ─────────────
         if df_h1_raw is not None and len(df_h1_raw) >= 2 and _h1_pats_raw:
@@ -1085,7 +1057,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = f'forbidden_hour={eff_hour}'
             elif state.count >= max_day:
                 skip = f'daily_limit={state.count}/{max_day}'
-            elif (state.cooldown_start_at is not None and
+            elif (not _normal_variant and
+                  state.cooldown_start_at is not None and
                   now < state.cooldown_start_at + timedelta(minutes=cooldown)):
                 rem  = int((state.cooldown_start_at + timedelta(minutes=cooldown) - now).total_seconds() / 60)
                 skip = f'cooldown残{rem}分({cooldown_trades}回毎)'
@@ -1113,6 +1086,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # ── ロット倍率適用（スケールイン= rsi_scalein_lot_frac）──────────
         if _lot_frac != 1.0 and action in ('buy', 'sell'):
             lot = max(l_min, round(lot * _lot_frac / l_step) * l_step)
+            expected_profit_usd = tp_move * contract_size * lot
+            expected_profit_jpy = expected_profit_usd * jpy_rate
+
+        # ── ノーマルバリアント: 拡張TP/SL/ロット上書き ────────────────────
+        if _normal_variant and action in ('buy', 'sell'):
+            # lot は NV 基準（スケールイン倍率も適用）
+            lot     = max(l_min, round(_nv_lot * _lot_frac / l_step) * l_step) if _lot_frac != 1.0 else _nv_lot
+            tp_move = _nv_tp_move
+            sl_move = _nv_sl_move
             expected_profit_usd = tp_move * contract_size * lot
             expected_profit_jpy = expected_profit_usd * jpy_rate
 
@@ -1251,9 +1233,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
             'signal_type':        (_ew2_signal_type if (_ew2_signal_type and action != 'none')
-                                   else (f'scalp_{action}_scalein_{int(crossed_level or 0)}'
+                                   else (f'{"normal" if _normal_variant else "scalp"}_{action}_scalein_{int(crossed_level or 0)}'
                                          if (_is_scalein_signal and action != 'none')
-                                         else (f'scalp_{action}_{int(crossed_level or (state.buy_sma_level if action == "buy" else state.sell_sma_level))}'
+                                         else (f'{"normal" if _normal_variant else "scalp"}_{action}_{int(crossed_level or (state.buy_sma_level if action == "buy" else state.sell_sma_level))}'
                                                if action != 'none' else 'none'))),
             'execution_tf':       'm5',
             'signal_valid_until': '',
@@ -1270,10 +1252,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'tp_hold_minutes':    0,
             'skip_reason':        skip,
             'rsi_exit_thr':       cfg['SL']['rsi_exit_thr'],
-            'trail_multi':        0.0,
+            'trail_multi':        cfg['SL']['trail_multi'] if (_normal_variant and action != 'none') else 0.0,
             'max_slip_pt':        max_pt,
             'lot_size':           lot,
-            'scalp_mode':         True,
+            'scalp_mode':         not _normal_variant,
             'scalp_buy_enabled':  buy_enabled,
             'scalp_sell_enabled': sell_enabled,
             'target_profit_jpy':  target,
