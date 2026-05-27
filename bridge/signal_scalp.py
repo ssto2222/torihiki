@@ -281,17 +281,21 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         if regime_h1s == 'trend_up' and (state.sell_sma_pending or state.sell_confirm_pending):
             state.sell_sma_pending      = False
             state.sell_sma_at           = None
+            state.sell_sma_level        = 0.0
             state.sell_confirm_pending  = False
             state.sell_confirm_at       = None
             state.sell_confirm_count    = 0
             state.sell_confirm_bar_time = None
+            state.sell_confirm_level    = 0.0
         if regime_h1s == 'trend_down' and (state.buy_sma_pending or state.buy_confirm_pending):
             state.buy_sma_pending      = False
             state.buy_sma_at           = None
+            state.buy_sma_level        = 0.0
             state.buy_confirm_pending  = False
             state.buy_confirm_at       = None
             state.buy_confirm_count    = 0
             state.buy_confirm_bar_time = None
+            state.buy_confirm_level    = 0.0
 
         target_usd    = target / jpy_rate
         _tp_frac_cfg  = scalp.get('tp_atr_fraction', 0.5)
@@ -320,10 +324,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             if normal_data is not None:
                 state.buy_sma_pending = state.sell_sma_pending = False
                 state.buy_sma_at      = state.sell_sma_at      = None
+                state.buy_sma_level   = state.sell_sma_level   = 0.0
                 state.buy_confirm_pending = state.sell_confirm_pending = False
                 state.buy_confirm_at      = state.sell_confirm_at      = None
                 state.buy_confirm_count   = state.sell_confirm_count   = 0
                 state.buy_confirm_bar_time = state.sell_confirm_bar_time = None
+                state.buy_confirm_level   = state.sell_confirm_level   = 0.0
                 position_aligns = (
                     (big_move == 'up'   and state.last_action == 'buy') or
                     (big_move == 'down' and state.last_action == 'sell')
@@ -583,7 +589,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 label = '急騰兆候BUY' if surge_info['is_early_surge'] else '押し目BUY'
                                 print(f"[{label}] Confidence={surge_info['confidence']:.2f}")
                             break
-            if confirmed_signal is None and sell_enabled and not state.sell_sma_pending and not avoid_sell_surge:
+            if confirmed_signal is None and sell_enabled and not state.sell_sma_pending and not state.buy_sma_pending and not avoid_sell_surge:
                 for thr in sell_thrs:
                     if thr <= rsi_cur <= thr + m1_early_margin:
                         if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
@@ -661,7 +667,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 state.sell_confirm_level    = state.sell_sma_level
                         # sma20_slope_ok=False or mtf_sell_ok=False → ペンディング継続
 
-        # SELL 下落確認: SMA20タッチ後 M1 下落バー 2 本
+        # SELL 下落確認: SMA20タッチ後 M1 下落バー 1 本
         if confirmed_signal is None and state.sell_confirm_pending:
             timeout_min = 30
             if (state.sell_confirm_at is not None and
@@ -685,10 +691,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 _half_bar    = scalp.get('m1_confirm_half_bar', True)
                 is_down_bar  = (close_m1_cur < open_m1_cur) if _half_bar else (close_m1_cur < close_m1_prv)
 
-                if is_down_bar and trend_ok and m1_bar_cur != state.sell_confirm_bar_time:
+                # mtf_sell_ok を confirm ループでも再チェック（confirm_pending 設定後に
+                # M5 SMA20 傾きが変化した場合のゲートバイパスを防ぐ）
+                if is_down_bar and trend_ok and mtf_sell_ok and m1_bar_cur != state.sell_confirm_bar_time:
                     state.sell_confirm_count   += 1
                     state.sell_confirm_bar_time = m1_bar_cur
-                elif not is_down_bar or not trend_ok:
+                elif not is_down_bar or not trend_ok or not mtf_sell_ok:
                     state.sell_confirm_count    = 0
                     state.sell_confirm_bar_time = None
 
@@ -765,7 +773,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 state.buy_confirm_level    = state.buy_sma_level
                         # sma20_slope_ok=False or mtf_buy_ok=False → ペンディング継続
 
-        # BUY 上昇確認: SMA20タッチ後 M1 上昇バー 2 本
+        # BUY 上昇確認: SMA20タッチ後 M1 上昇バー 1 本
         if confirmed_signal is None and state.buy_confirm_pending:
             timeout_min = 30
             if (state.buy_confirm_at is not None and
@@ -789,10 +797,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 _half_bar    = scalp.get('m1_confirm_half_bar', True)
                 is_up_bar    = (close_m1_cur > open_m1_cur) if _half_bar else (close_m1_cur > close_m1_prv)
 
-                if is_up_bar and trend_ok and m1_bar_cur != state.buy_confirm_bar_time:
+                # mtf_buy_ok を confirm ループでも再チェック（confirm_pending 設定後に
+                # M5 SMA20 傾きが変化した場合のゲートバイパスを防ぐ）
+                if is_up_bar and trend_ok and mtf_buy_ok and m1_bar_cur != state.buy_confirm_bar_time:
                     state.buy_confirm_count   += 1
                     state.buy_confirm_bar_time = m1_bar_cur
-                elif not is_up_bar or not trend_ok:
+                elif not is_up_bar or not trend_ok or not mtf_buy_ok:
                     state.buy_confirm_count    = 0
                     state.buy_confirm_bar_time = None
 
