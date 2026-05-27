@@ -320,6 +320,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # ── ノーマルバリアント: 大変動/ネックライン接近時の拡張パラメーター ──
         # 同じ執行条件でTP拡大+トレーリング+ロット調整を適用する
         _normal_variant  = False   # True になると NV パラメーターで上書き
+        _nv_enabled      = scalp.get('normal_variant_enabled', True)
         _nv_tp_frac      = scalp.get('normal_variant_tp_atr', 1.5)
         _nv_lot_frac_cfg = scalp.get('normal_variant_lot_frac', 1.0)
         _nv_tp_move      = atr_v * _nv_tp_frac
@@ -335,18 +336,20 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         big_move     = detect_big_move(df, bm_lookback, bm_atr_multi)
 
         # 大変動検知: ノーマルバリアントパラメーターに切替（同じ執行条件を使用）
-        if big_move != 'none':
-            if not state.in_big_move_normal:
-                print(f"[スキャルプ→NVモード] 大変動={big_move} last_pos={state.last_action}"
-                      f" → 同条件+拡張TP/トレーリング")
-                _logger.info(f'[スキャルプ→NVモード] 大変動={big_move}')
-            state.in_big_move_normal = True
-        elif state.in_big_move_normal:
-            # 大変動解消: スキャルプパラメーターに復帰
+        if _nv_enabled:
+            if big_move != 'none':
+                if not state.in_big_move_normal:
+                    print(f"[スキャルプ→NVモード] 大変動={big_move} last_pos={state.last_action}"
+                          f" → 同条件+拡張TP/トレーリング")
+                    _logger.info(f'[スキャルプ→NVモード] 大変動={big_move}')
+                state.in_big_move_normal = True
+            elif state.in_big_move_normal:
+                state.in_big_move_normal = False
+                print(f"[NV→スキャルプ復帰] 大変動解消")
+                _logger.info('[NV→スキャルプ復帰] 大変動解消')
+            _normal_variant = state.in_big_move_normal
+        else:
             state.in_big_move_normal = False
-            print(f"[NV→スキャルプ復帰] 大変動解消")
-            _logger.info('[NV→スキャルプ復帰] 大変動解消')
-        _normal_variant = state.in_big_move_normal
 
         # ── クールダウン中 ─────────────────────────────────────────
         # cooldown_trades 回トレードするごとに cooldown_min 分間のクールダウン
@@ -376,7 +379,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # H1 パターンのネックライン付近（ATR×neckline_approach_atr 以内）に接近したら
         # ノーマルモードに切り替えて大変動エントリーに備える。
         # ポジション保有中はトレーリング継続のため決済までスキャルプを待機させる。
-        _nl_enabled = scalp.get('neckline_approach_enabled', True)
+        _nl_enabled = _nv_enabled and scalp.get('neckline_approach_enabled', True)
         _nl_margin  = atr_v * scalp.get('neckline_approach_atr', 1.5) if _nl_enabled else 0.0
         _near_neckline = False
         if _nl_margin > 0 and _h1_pats_raw:
@@ -417,6 +420,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.near_neckline_normal = False
                 print(f"[ネックライン解消] スキャルプモードに復帰")
                 _logger.info('[ネックライン解消] スキャルプモードに復帰')
+        if not _nv_enabled:
+            state.near_neckline_normal = False
 
         # ── M1 待機ロジック ────────────────────────────────────────
         confirmed_signal  = None
