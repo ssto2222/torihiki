@@ -392,20 +392,16 @@ def start_discord_bot(cfg: dict[str, Any],
                             ['git'] + git_args, cwd=_REPO_DIR,
                             capture_output=True, text=True, timeout=60,
                         )
-                    r = _run(['pull', '--ff-only'])
+                    # ブランチを明示して pull（FETCH_HEAD に複数ブランチある環境でも失敗しない）
+                    rb = _run(['rev-parse', '--abbrev-ref', 'HEAD'])
+                    branch = (rb.stdout + rb.stderr).strip() or 'main'
+                    r = _run(['pull', '--ff-only', 'origin', branch])
                     out = (r.stdout + r.stderr).strip()
                     if r.returncode != 0:
                         if 'incorrect old value provided' in out or 'fetching ref' in out:
                             _run(['remote', 'prune', 'origin'])
-                            r2 = _run(['pull', '--ff-only'])
+                            r2 = _run(['pull', '--ff-only', 'origin', branch])
                             return r2.returncode, (r2.stdout + r2.stderr).strip()
-                        if 'Cannot fast-forward to multiple branches' in out:
-                            # fetch してから FETCH_HEAD を明示的にマージ
-                            rf = _run(['fetch', 'origin'])
-                            if rf.returncode != 0:
-                                return rf.returncode, (rf.stdout + rf.stderr).strip()
-                            rm = _run(['merge', '--ff-only', 'FETCH_HEAD'])
-                            return rm.returncode, (rm.stdout + rm.stderr).strip()
                     return r.returncode, out
 
                 try:
