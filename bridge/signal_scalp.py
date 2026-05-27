@@ -18,8 +18,6 @@ from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _position_status, _get_jpy_per_usd,
                               _has_positions_in_direction,
                               detect_bidirectional_loss)
-from bridge.signal_normal import compute_signal
-
 if TYPE_CHECKING:
     from bridge.state import ScalpState, SignalState, JpyRateCache, Sma20TouchCache, MacroBiasState
 
@@ -270,10 +268,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # ── ウィップソー（行ってこい相場）検出 ─────────────────────
         _ws_cfg       = cfg.get('WHIPSAW', {})
-        _ws_block     = False
-        _ws_ratio     = 0.0
-        _is_whipsaw   = False
-        _is_bidir     = False
+        _ws_n         = _ws_cfg.get('ratio_n', 20)
+        _ws_thr       = _ws_cfg.get('ratio_thr', 2.0)
+        _bidir_h      = _ws_cfg.get('bidir_lookback_h', 2)
+        _is_whipsaw, _ws_ratio = detect_whipsaw(df, _ws_n, _ws_thr)
+        _is_bidir     = detect_bidirectional_loss(
+            symbol, cfg['MT5'].get('magic', 20240101), _bidir_h, mt5=mt5)
+        _ws_block     = _is_whipsaw or _is_bidir
+        _ws_reason    = (f'ウィップソー(ratio={_ws_ratio:.1f}≥{_ws_thr})' if _is_whipsaw
+                         else '双方向損失検出')
 
         # 確定トレンド転換時に逆方向の待機状態をキャンセル
         # M5（短期）ではなく H1（中期）確定トレンドのみでキャンセル
@@ -317,6 +320,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # ── ノーマルバリアント: 大変動/ネックライン接近時の拡張パラメーター ──
         # 同じ執行条件でTP拡大+トレーリング+ロット調整を適用する
         _normal_variant  = False   # True になると NV パラメーターで上書き
+        _nv_enabled      = scalp.get('normal_variant_enabled', True)
         _nv_tp_frac      = scalp.get('normal_variant_tp_atr', 1.5)
         _nv_lot_frac_cfg = scalp.get('normal_variant_lot_frac', 1.0)
         _nv_tp_move      = atr_v * _nv_tp_frac
@@ -332,18 +336,20 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         big_move     = detect_big_move(df, bm_lookback, bm_atr_multi)
 
         # 大変動検知: ノーマルバリアントパラメーターに切替（同じ執行条件を使用）
-        if big_move != 'none':
-            if not state.in_big_move_normal:
-                print(f"[スキャルプ→NVモード] 大変動={big_move} last_pos={state.last_action}"
-                      f" → 同条件+拡張TP/トレーリング")
-                _logger.info(f'[スキャルプ→NVモード] 大変動={big_move}')
-            state.in_big_move_normal = True
-        elif state.in_big_move_normal:
-            # 大変動解消: スキャルプパラメーターに復帰
+        if _nv_enabled:
+            if big_move != 'none':
+                if not state.in_big_move_normal:
+                    print(f"[スキャルプ→NVモード] 大変動={big_move} last_pos={state.last_action}"
+                          f" → 同条件+拡張TP/トレーリング")
+                    _logger.info(f'[スキャルプ→NVモード] 大変動={big_move}')
+                state.in_big_move_normal = True
+            elif state.in_big_move_normal:
+                state.in_big_move_normal = False
+                print(f"[NV→スキャルプ復帰] 大変動解消")
+                _logger.info('[NV→スキャルプ復帰] 大変動解消')
+            _normal_variant = state.in_big_move_normal
+        else:
             state.in_big_move_normal = False
-            print(f"[NV→スキャルプ復帰] 大変動解消")
-            _logger.info('[NV→スキャルプ復帰] 大変動解消')
-        _normal_variant = state.in_big_move_normal
 
         # ── クールダウン中 ─────────────────────────────────────────
         # cooldown_trades 回トレードするごとに cooldown_min 分間のクールダウン
@@ -373,7 +379,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # H1 パターンのネックライン付近（ATR×neckline_approach_atr 以内）に接近したら
         # ノーマルモードに切り替えて大変動エントリーに備える。
         # ポジション保有中はトレーリング継続のため決済までスキャルプを待機させる。
-        _nl_enabled = scalp.get('neckline_approach_enabled', True)
+        _nl_enabled = _nv_enabled and scalp.get('neckline_approach_enabled', True)
         _nl_margin  = atr_v * scalp.get('neckline_approach_atr', 1.5) if _nl_enabled else 0.0
         _near_neckline = False
         if _nl_margin > 0 and _h1_pats_raw:
@@ -414,6 +420,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.near_neckline_normal = False
                 print(f"[ネックライン解消] スキャルプモードに復帰")
                 _logger.info('[ネックライン解消] スキャルプモードに復帰')
+        if not _nv_enabled:
+            state.near_neckline_normal = False
 
         # ── M1 待機ロジック ────────────────────────────────────────
         confirmed_signal  = None
@@ -615,7 +623,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _sma_cooldown_s = scalp.get('sma_watch_cooldown_s', 60)
         _just_entered   = (state.last_at is not None and
                            (now - state.last_at).total_seconds() < _sma_cooldown_s)
-        if (confirmed_signal is None and not _just_entered and not in_cooldown
+        if (confirmed_signal is None and not _just_entered
+                and (not in_cooldown or _normal_variant)
                 and not state.buy_sma_pending  and not state.sell_sma_pending
                 and not state.buy_confirm_pending and not state.sell_confirm_pending):
             if buy_enabled and not avoid_buy_surge and mtf_buy_ok and rsi_cur >= 50.0:
@@ -1248,7 +1257,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sl_dist':            _sl_dist_out,
             'tp_dist':            _tp_dist_out,
             'score':              100,
-            'strength':           'scalp',
+            'strength':           'normal' if _normal_variant else 'scalp',
             'tp_hold_minutes':    0,
             'skip_reason':        skip,
             'rsi_exit_thr':       cfg['SL']['rsi_exit_thr'],

@@ -195,6 +195,10 @@ SCALP = dict(
     # ── ネックライン接近でノーマルモード切替 ──────────────────────────
     neckline_approach_enabled = True,  # True: H1ネックライン付近でノーマルモードに切替
     neckline_approach_atr     = 1.5,   # 接近判定マージン = M5_ATR × この値
+    # ── ノーマルバリアント（大変動/ネックライン接近時の拡張パラメーター）──────────
+    normal_variant_enabled    = False, # False: NV遷移を無効化（常にスキャルプパラメーターで執行）
+    normal_variant_tp_atr     = 1.5,   # NV TP幅 = M5_ATR × この値（スキャルプより広い）
+    normal_variant_lot_frac   = 1.0,   # NV ロット倍率（1.0 = 目標利益ベース計算をそのまま使用）
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────
