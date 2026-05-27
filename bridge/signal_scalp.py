@@ -388,6 +388,62 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         if avoid_sell_surge:
             print(f"[売られすぎ回避] RSI={rsi_cur:.1f} が低すぎる → SELL見送り")
 
+        # ── ネックライン接近: ノーマルモードへ切替 ───────────────────────
+        # H1 パターンのネックライン付近（ATR×neckline_approach_atr 以内）に接近したら
+        # ノーマルモードに切り替えて大変動エントリーに備える。
+        # ポジション保有中はトレーリング継続のため決済までスキャルプを待機させる。
+        _nl_enabled = scalp.get('neckline_approach_enabled', True)
+        _nl_margin  = atr_v * scalp.get('neckline_approach_atr', 1.5) if _nl_enabled else 0.0
+        _near_neckline = False
+        if _nl_margin > 0 and _h1_pats_raw:
+            for _pnl in _h1_pats_raw:
+                if _pnl.confidence < 0.45:
+                    continue
+                _fp_nl = (_pnl.name, round(_pnl.neckline, 0))
+                if _fp_nl in state.pattern_traded:
+                    continue
+                if _pnl.direction == 'bullish' and buy_enabled and not avoid_buy_surge:
+                    if 0 < _pnl.neckline - close_v <= _nl_margin:
+                        _near_neckline = True
+                        break
+                elif _pnl.direction == 'bearish' and sell_enabled and not avoid_sell_surge:
+                    if 0 < close_v - _pnl.neckline <= _nl_margin:
+                        _near_neckline = True
+                        break
+
+        if _near_neckline and not state.near_neckline_normal:
+            print(f"[ネックライン接近] ノーマルモード切替 "
+                  f"close={close_v:.2f} margin={_nl_margin:.2f}")
+            _logger.info(f'[ネックライン接近] ノーマルモード切替 close={close_v:.2f}')
+            state.near_neckline_normal = True
+
+        if state.near_neckline_normal:
+            _magic_id = cfg['MT5'].get('magic', 20240101)
+            try:
+                _all_pos = mt5.positions_get(symbol=symbol) or []
+                _has_pos = any(getattr(p, 'magic', 0) == _magic_id for p in _all_pos)
+            except Exception:
+                _has_pos = True  # 取得失敗時は安全のためポジションありと仮定
+
+            if _has_pos or _near_neckline:
+                nl_data = compute_signal(symbol, cfg, sig_state, jpy_cache, mt5=mt5)
+                if nl_data is not None:
+                    nl_data['scalp_mode'] = False
+                    if nl_data.get('action') != 'none':
+                        # エントリー確定 → trailing 有効化
+                        nl_data['trail_multi'] = cfg['SL']['trail_multi']
+                        nl_data['signal_type'] = f"neckline_{nl_data.get('action','none')}"
+                    else:
+                        # 待機中 (ポジション保有 or 接近監視中)
+                        nl_data['signal_type'] = f'neckline_hold_{state.last_action}'
+                    return nl_data
+                # compute_signal 失敗 → スキャルプロジックにフォールバック
+            else:
+                # ポジションなし + ネックライン付近でもない → スキャルプ復帰
+                state.near_neckline_normal = False
+                print(f"[ネックライン解消] スキャルプモードに復帰")
+                _logger.info('[ネックライン解消] スキャルプモードに復帰')
+
         # ── M1 待機ロジック ────────────────────────────────────────
         confirmed_signal  = None
         candidate_signal  = None

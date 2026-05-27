@@ -192,6 +192,9 @@ SCALP = dict(
     # ── 通常モード → スキャルプ自動復帰 ─────────────────────────────
     scalp_auto_restore      = True, # True: 通常モード中に大変動が解消したらスキャルプに自動復帰
     scalp_restore_calm_bars = 5,    # N ポール連続で big_move='none' になったら復帰
+    # ── ネックライン接近でノーマルモード切替 ──────────────────────────
+    neckline_approach_enabled = True,  # True: H1ネックライン付近でノーマルモードに切替
+    neckline_approach_atr     = 1.5,   # 接近判定マージン = M5_ATR × この値
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────
