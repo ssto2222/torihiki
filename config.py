@@ -189,6 +189,9 @@ SCALP = dict(
     rsi_scalein_lot_frac  = 0.5,   # スケールインエントリーのロット倍率
     rsi_scalein_max       = 2,     # スケールイン最大回数（per primary entry）
     rsi_scalein_window_min = 30,   # 最終エントリーからこの分数以内のみスケールイン許可
+    # ── 通常モード → スキャルプ自動復帰 ─────────────────────────────
+    scalp_auto_restore      = True, # True: 通常モード中に大変動が解消したらスキャルプに自動復帰
+    scalp_restore_calm_bars = 5,    # N ポール連続で big_move='none' になったら復帰
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────

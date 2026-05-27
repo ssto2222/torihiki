@@ -338,12 +338,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     normal_data['trail_multi'] = cfg['SL']['trail_multi']
                 normal_data['signal_type'] = f'big_move_{big_move}(was_scalp)'
                 normal_data['scalp_mode']  = False
-                print(f"[スキャルプ→通常] 大変動={big_move}  "
-                      f"last_pos={state.last_action}  "
-                      f"trail={'ON' if position_aligns else 'scalp_trail=0'}")
+                if not state.in_big_move_normal:
+                    # 初回遷移時のみログ（毎ポールは抑制）
+                    print(f"[スキャルプ→通常] 大変動={big_move}  "
+                          f"last_pos={state.last_action}  "
+                          f"trail={'ON' if position_aligns else 'scalp_trail=0'}")
+                    _logger.info(f'[スキャルプ→通常] 大変動={big_move}')
+                state.in_big_move_normal = True
                 return normal_data
             _logger.warning("大変動検知中に compute_signal 失敗 → スキャルプスキップ")
             return None
+
+        # 大変動解消: スキャルプモード復帰
+        if state.in_big_move_normal:
+            state.in_big_move_normal = False
+            print(f"[通常→スキャルプ復帰] 大変動解消 → スキャルプモードに戻ります")
+            _logger.info('[通常→スキャルプ復帰] 大変動解消')
 
         # ── クールダウン中は通常モードに切換え ─────────────────────
         # cooldown_trades 回トレードするごとに cooldown_min 分間のクールダウン
