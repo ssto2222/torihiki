@@ -97,7 +97,9 @@ class _ErrTeeWriter(io.TextIOBase):
 import MetaTrader5 as mt5
 
 import config as C
-from core.data import connect_mt5
+from core.data        import connect_mt5, fetch_ohlcv
+from core.indicators  import add_m5_indicators
+from core.strategy    import detect_big_move
 
 from bridge.state        import SignalState, ScalpState, TimeBiasState, JpyRateCache, Sma20TouchCache, MacroBiasState
 from bridge.io           import write_signal, read_ea_state
@@ -251,6 +253,8 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     _fail_count           = 0
     _restart              = False
     _last_hourly_discord  = 0.0   # 1時間ごと Discord タイマー（epoch 秒）
+    _scalp_was_active     = (mode == 'scalp')  # scalp モードが有効だったことがあるか
+    _calm_count           = 0                  # 大変動解消の連続ポール数
 
     # Discord ボット: !status コマンドが参照できるよう最新 data / macro_state を共有する
     # !mode / !symbol コマンドで書き込まれる切り替えリクエストも同じ仕組みで受け取る
@@ -360,6 +364,32 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                         print(f"  [マクロ] {macro_state.summary}")
                     except Exception as _me:
                         print(f"  [マクロ] 分析失敗: {_me}")
+
+            # ── 通常モード → スキャルプ自動復帰チェック ───────────────────
+            if mode == 'scalp':
+                _scalp_was_active = True
+                _calm_count       = 0
+            elif _scalp_was_active and _eff_scalp.get('scalp_auto_restore', True):
+                _bm_lookback = _eff_scalp.get('big_move_lookback', 12)
+                _bm_multi    = _eff_scalp.get('big_move_atr_multi', 2.0)
+                _restore_thr = _eff_scalp.get('scalp_restore_calm_bars', 5)
+                try:
+                    _bm_raw = fetch_ohlcv(symbol, 'M5', _bm_lookback + 15)
+                    if _bm_raw is not None:
+                        _bm_df  = add_m5_indicators(_bm_raw, effective_cfg)
+                        _bm_val = detect_big_move(_bm_df, _bm_lookback, _bm_multi)
+                        if _bm_val == 'none':
+                            _calm_count += 1
+                            if _calm_count >= _restore_thr:
+                                _calm_count  = 0
+                                mode         = 'scalp'
+                                _mode_ref[0] = 'scalp'
+                                _logger.info(f'[自動復帰] {_restore_thr}ポール安定 → スキャルプ復帰')
+                                print(f"  [通常→スキャルプ自動復帰] {_restore_thr}ポール連続安定 → スキャルプモードに戻ります")
+                        else:
+                            _calm_count = 0
+                except Exception as _br_e:
+                    _logger.debug(f'[スキャルプ復帰チェック] {_br_e}')
 
             if mode == 'scalp':
                 data = compute_scalp_signal(symbol, effective_cfg, sc_state, sig_state,
