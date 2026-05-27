@@ -781,7 +781,12 @@ def _auto_update() -> bool:
         return r.returncode, (r.stdout + r.stderr).strip()
 
     try:
-        code, out = _run(['pull', '--ff-only'])
+        # ブランチを明示して pull（FETCH_HEAD に複数ブランチある環境でも失敗しない）
+        _, branch = _run(['rev-parse', '--abbrev-ref', 'HEAD'])
+        if not branch:
+            branch = 'main'
+
+        code, out = _run(['pull', '--ff-only', 'origin', branch])
         if code == 0:
             if 'Already up to date' not in out:
                 _logger.info(f'[auto-update] 更新完了:\n{out}')
@@ -792,7 +797,7 @@ def _auto_update() -> bool:
         if 'incorrect old value provided' in out or 'fetching ref' in out:
             _logger.warning('[auto-update] stale ref を検出 → git remote prune origin を実行します')
             _run(['remote', 'prune', 'origin'])
-            code2, out2 = _run(['pull', '--ff-only'])
+            code2, out2 = _run(['pull', '--ff-only', 'origin', branch])
             if code2 == 0:
                 _logger.info(f'[auto-update] prune 後に更新完了:\n{out2}')
                 return True
