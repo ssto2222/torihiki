@@ -611,19 +611,28 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.sell_sma_pending = False
                     state.sell_sma_at      = None
                 elif not np.isnan(sma20_m1):
-                    close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
-                    # ── SMA20 バイパス: 価格が SMA20 より touch_margin 以上下方
-                    #    （急落・ズルズル下落ともに「戻り確認不要」でそのまま確認フェーズへ）
+                    close_m1  = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
+                    _open_m1  = (float(df_m1['Open'].iloc[-1])
+                                 if (df_m1 is not None and 'Open' in df_m1.columns) else close_m1)
+                    _bar_down = close_m1 < _open_m1   # 現在M1バーが陰線（方向確認済み）
+                    # ── SMA20 バイパス: 価格が SMA20 より touch_margin 以上下方 ──
                     if close_m1 < sma20_m1 - touch_margin:
                         if mtf_sell_ok:
-                            state.sell_sma_pending      = False
-                            state.sell_sma_at           = None
-                            state.sell_confirm_pending  = True
-                            state.sell_confirm_at       = now
-                            state.sell_confirm_count    = 0
-                            state.sell_confirm_bar_time = None
-                            state.sell_confirm_level    = state.sell_sma_level
-                            print(f"[SELL SMA20バイパス] 乖離={sma20_m1-close_m1:.1f} > マージン={touch_margin:.1f}")
+                            state.sell_sma_pending = False
+                            state.sell_sma_at      = None
+                            if _bar_down:
+                                # 現在バーが陰線 → confirm_pending をスキップして即エントリー
+                                confirmed_signal = 'sell'
+                                crossed_level    = state.sell_sma_level
+                                print(f"[SELL 即エントリー/bypass] 乖離={sma20_m1-close_m1:.1f}")
+                            else:
+                                # 現在バーが陽線 → confirm_pending で次バー待ち
+                                state.sell_confirm_pending  = True
+                                state.sell_confirm_at       = now
+                                state.sell_confirm_count    = 0
+                                state.sell_confirm_bar_time = None
+                                state.sell_confirm_level    = state.sell_sma_level
+                                print(f"[SELL SMA20バイパス] 乖離={sma20_m1-close_m1:.1f} > マージン={touch_margin:.1f}")
                         # mtf_sell_ok=False でもペンディング継続（次ポールで再チェック）
                     elif abs(close_m1 - sma20_m1) <= touch_margin:
                         slope_bars = scalp.get('sma20_slope_bars', 5)
@@ -635,16 +644,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                             np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
                             (sma20_m1 - sma20_prev) < (atr_m1_v * slope_thr)
                         )
-                        if sma20_slope_ok:
-                            if mtf_sell_ok:
-                                state.sell_sma_pending      = False
-                                state.sell_sma_at           = None
+                        if sma20_slope_ok and mtf_sell_ok:
+                            state.sell_sma_pending = False
+                            state.sell_sma_at      = None
+                            if _bar_down:
+                                # SMA20タッチ + 陰線 → 即エントリー（最良ポイント）
+                                confirmed_signal = 'sell'
+                                crossed_level    = state.sell_sma_level
+                                print(f"[SELL 即エントリー/touch] SMA20={sma20_m1:.1f}")
+                            else:
+                                # 陽線中 → confirm_pending で方向反転待ち
                                 state.sell_confirm_pending  = True
                                 state.sell_confirm_at       = now
                                 state.sell_confirm_count    = 0
                                 state.sell_confirm_bar_time = None
                                 state.sell_confirm_level    = state.sell_sma_level
-                            # mtf_sell_ok=False でもペンディング継続（次ポールで再チェック）
+                        # sma20_slope_ok=False or mtf_sell_ok=False → ペンディング継続
 
         # SELL 下落確認: SMA20タッチ後 M1 下落バー 2 本
         if confirmed_signal is None and state.sell_confirm_pending:
@@ -700,19 +715,28 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.buy_sma_pending = False
                     state.buy_sma_at      = None
                 elif not np.isnan(sma20_m1):
-                    close_m1 = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
-                    # ── SMA20 バイパス: 価格が SMA20 より touch_margin 以上上方
-                    #    （急騰・ズルズル上昇ともに「押し目確認不要」でそのまま確認フェーズへ）
+                    close_m1  = float(df_m1['Close'].iloc[-1]) if (df_m1 is not None and not df_m1.empty) else close_v
+                    _open_m1  = (float(df_m1['Open'].iloc[-1])
+                                 if (df_m1 is not None and 'Open' in df_m1.columns) else close_m1)
+                    _bar_up   = close_m1 > _open_m1   # 現在M1バーが陽線（方向確認済み）
+                    # ── SMA20 バイパス: 価格が SMA20 より touch_margin 以上上方 ──
                     if close_m1 > sma20_m1 + touch_margin:
                         if mtf_buy_ok:
-                            state.buy_sma_pending      = False
-                            state.buy_sma_at           = None
-                            state.buy_confirm_pending  = True
-                            state.buy_confirm_at       = now
-                            state.buy_confirm_count    = 0
-                            state.buy_confirm_bar_time = None
-                            state.buy_confirm_level    = state.buy_sma_level
-                            print(f"[BUY SMA20バイパス] 乖離={close_m1-sma20_m1:.1f} > マージン={touch_margin:.1f}")
+                            state.buy_sma_pending = False
+                            state.buy_sma_at      = None
+                            if _bar_up:
+                                # 現在バーが陽線 → confirm_pending をスキップして即エントリー
+                                confirmed_signal = 'buy'
+                                crossed_level    = state.buy_sma_level
+                                print(f"[BUY 即エントリー/bypass] 乖離={close_m1-sma20_m1:.1f}")
+                            else:
+                                # 現在バーが陰線 → confirm_pending で次バー待ち
+                                state.buy_confirm_pending  = True
+                                state.buy_confirm_at       = now
+                                state.buy_confirm_count    = 0
+                                state.buy_confirm_bar_time = None
+                                state.buy_confirm_level    = state.buy_sma_level
+                                print(f"[BUY SMA20バイパス] 乖離={close_m1-sma20_m1:.1f} > マージン={touch_margin:.1f}")
                         # mtf_buy_ok=False でもペンディング継続（次ポールで再チェック）
                     elif abs(close_m1 - sma20_m1) <= touch_margin:
                         slope_bars = scalp.get('sma20_slope_bars', 5)
@@ -724,16 +748,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                             np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
                             (sma20_m1 - sma20_prev) > -(atr_m1_v * slope_thr)
                         )
-                        if sma20_slope_ok:
-                            if mtf_buy_ok:
-                                state.buy_sma_pending      = False
-                                state.buy_sma_at           = None
+                        if sma20_slope_ok and mtf_buy_ok:
+                            state.buy_sma_pending = False
+                            state.buy_sma_at      = None
+                            if _bar_up:
+                                # SMA20タッチ + 陽線 → 即エントリー（最良ポイント）
+                                confirmed_signal = 'buy'
+                                crossed_level    = state.buy_sma_level
+                                print(f"[BUY 即エントリー/touch] SMA20={sma20_m1:.1f}")
+                            else:
+                                # 陰線中 → confirm_pending で方向反転待ち
                                 state.buy_confirm_pending  = True
                                 state.buy_confirm_at       = now
                                 state.buy_confirm_count    = 0
                                 state.buy_confirm_bar_time = None
                                 state.buy_confirm_level    = state.buy_sma_level
-                            # mtf_buy_ok=False でもペンディング継続（次ポールで再チェック）
+                        # sma20_slope_ok=False or mtf_buy_ok=False → ペンディング継続
 
         # BUY 上昇確認: SMA20タッチ後 M1 上昇バー 2 本
         if confirmed_signal is None and state.buy_confirm_pending:
