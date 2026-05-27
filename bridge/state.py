@@ -91,6 +91,10 @@ class ScalpState:
     ew2_last_buy:  dict | None = field(default=None)
     ew2_last_sell: dict | None = field(default=None)
 
+    # RSI スケールイン重複防止（使用済み RSI 水準セット）
+    buy_scalein_rsi_done:  set = field(default_factory=set)
+    sell_scalein_rsi_done: set = field(default_factory=set)
+
     # ボリュームブレイクアウト重複防止（同バーで2回発火しない）
     vol_breakout_bar: object = None  # 直前ブレイクアウト発火の M5 バー時刻
     vol_breakout_dir: str    = 'none'

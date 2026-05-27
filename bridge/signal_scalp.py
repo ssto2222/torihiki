@@ -382,8 +382,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         confirmed_signal  = None
         candidate_signal  = None
         crossed_level     = 0.0
-        _direct_confirmed = False  # EW2/H1パターン由来: 一部ゲートをスキップ
-        _is_ew2_signal    = False  # EW2専用フラグ: RSIゲートをバイパスする
+        _direct_confirmed  = False  # EW2/H1パターン由来: 一部ゲートをスキップ
+        _is_ew2_signal     = False  # EW2専用フラグ: RSIゲートをバイパスする
+        _is_scalein_signal = False  # RSIスケールイン由来: M1 RSI極端値ゲートをスキップ
+        _lot_frac          = 1.0    # ロット倍率（SMA優先=1.0、スケールイン=rsi_scalein_lot_frac）
 
         # ── H1 パターン ネックライン突破: スキャルプ直接エントリー ─────────────
         if df_h1_raw is not None and len(df_h1_raw) >= 2 and _h1_pats_raw:
@@ -570,6 +572,25 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 _logger.info(f'[VOL-BO-SELL] {symbol} RVOL={_vol_bo["rvol"]:.1f} '
                              f'body={_vol_bo["body_ratio"]:.2f} RSI={rsi_cur:.1f}')
 
+        # ── SMA 優先自動待機セット ─────────────────────────────────────────
+        # RSI クロスを待たずに MTF 条件 + RSI50 方向フィルターで sma_pending を自動セット
+        _sma_cooldown_s = scalp.get('sma_watch_cooldown_s', 60)
+        _just_entered   = (state.last_at is not None and
+                           (now - state.last_at).total_seconds() < _sma_cooldown_s)
+        if (confirmed_signal is None and not _just_entered and not in_cooldown
+                and not state.buy_sma_pending  and not state.sell_sma_pending
+                and not state.buy_confirm_pending and not state.sell_confirm_pending):
+            if buy_enabled and not avoid_buy_surge and mtf_buy_ok and rsi_cur >= 50.0:
+                state.buy_sma_pending = True
+                state.buy_sma_at      = now
+                state.buy_sma_level   = 50.0
+                print(f"[SMA優先AUTO-WATCH/BUY] RSI={rsi_cur:.1f} MTF=OK")
+            elif sell_enabled and not avoid_sell_surge and mtf_sell_ok and rsi_cur < 50.0:
+                state.sell_sma_pending = True
+                state.sell_sma_at      = now
+                state.sell_sma_level   = 50.0
+                print(f"[SMA優先AUTO-WATCH/SELL] RSI={rsi_cur:.1f} MTF=OK")
+
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
         if (confirmed_signal is None
@@ -630,6 +651,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 # 現在バーが陰線 → confirm_pending をスキップして即エントリー
                                 confirmed_signal = 'sell'
                                 crossed_level    = state.sell_sma_level
+                                state.sell_scalein_rsi_done.clear()
                                 print(f"[SELL 即エントリー/bypass] 乖離={sma20_m1-close_m1:.1f}")
                             else:
                                 # 現在バーが陽線 → confirm_pending で次バー待ち
@@ -657,6 +679,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 # SMA20タッチ + 陰線 → 即エントリー（最良ポイント）
                                 confirmed_signal = 'sell'
                                 crossed_level    = state.sell_sma_level
+                                state.sell_scalein_rsi_done.clear()
                                 print(f"[SELL 即エントリー/touch] SMA20={sma20_m1:.1f}")
                             else:
                                 # 陽線中 → confirm_pending で方向反転待ち
@@ -703,6 +726,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 if state.sell_confirm_count >= 1:
                     confirmed_signal            = 'sell'
                     crossed_level               = state.sell_confirm_level
+                    state.sell_scalein_rsi_done.clear()
                     state.sell_confirm_pending  = False
                     state.sell_confirm_at       = None
                     state.sell_confirm_count    = 0
@@ -736,6 +760,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 # 現在バーが陽線 → confirm_pending をスキップして即エントリー
                                 confirmed_signal = 'buy'
                                 crossed_level    = state.buy_sma_level
+                                state.buy_scalein_rsi_done.clear()
                                 print(f"[BUY 即エントリー/bypass] 乖離={close_m1-sma20_m1:.1f}")
                             else:
                                 # 現在バーが陰線 → confirm_pending で次バー待ち
@@ -763,6 +788,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 # SMA20タッチ + 陽線 → 即エントリー（最良ポイント）
                                 confirmed_signal = 'buy'
                                 crossed_level    = state.buy_sma_level
+                                state.buy_scalein_rsi_done.clear()
                                 print(f"[BUY 即エントリー/touch] SMA20={sma20_m1:.1f}")
                             else:
                                 # 陰線中 → confirm_pending で方向反転待ち
@@ -809,10 +835,50 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 if state.buy_confirm_count >= 1:
                     confirmed_signal           = 'buy'
                     crossed_level              = state.buy_confirm_level
+                    state.buy_scalein_rsi_done.clear()
                     state.buy_confirm_pending  = False
                     state.buy_confirm_at       = None
                     state.buy_confirm_count    = 0
                     state.buy_confirm_bar_time = None
+
+        # ── RSI スケールイン ──────────────────────────────────────────────
+        # SMA優先エントリー後、RSI が方向継続でクロスしたら追加エントリー
+        _si_enabled     = scalp.get('rsi_scalein_enabled', True)
+        _si_lot_frac    = scalp.get('rsi_scalein_lot_frac', 0.5)
+        _si_max         = scalp.get('rsi_scalein_max', 2)
+        _si_window_min  = scalp.get('rsi_scalein_window_min', 30)
+        if (_si_enabled and confirmed_signal is None and not in_cooldown
+                and state.last_at is not None
+                and (now - state.last_at).total_seconds() <= _si_window_min * 60
+                and state.last_action in ('buy', 'sell')):
+            if (state.last_action == 'buy' and buy_enabled and not avoid_buy_surge
+                    and mtf_buy_ok):
+                for thr in buy_thrs:
+                    if (thr not in state.buy_scalein_rsi_done
+                            and rsi_cur > thr and rsi_prev_bar <= thr
+                            and len(state.buy_scalein_rsi_done) < _si_max):
+                        confirmed_signal   = 'buy'
+                        crossed_level      = thr
+                        _lot_frac          = _si_lot_frac
+                        _is_scalein_signal = True
+                        state.buy_scalein_rsi_done.add(thr)
+                        print(f"[BUY スケールイン] RSI={rsi_cur:.1f} thr={thr:.0f}"
+                              f" 済={sorted(state.buy_scalein_rsi_done)}")
+                        break
+            elif (state.last_action == 'sell' and sell_enabled and not avoid_sell_surge
+                    and mtf_sell_ok):
+                for thr in sell_thrs:
+                    if (thr not in state.sell_scalein_rsi_done
+                            and rsi_cur < thr and rsi_prev_bar >= thr
+                            and len(state.sell_scalein_rsi_done) < _si_max):
+                        confirmed_signal   = 'sell'
+                        crossed_level      = thr
+                        _lot_frac          = _si_lot_frac
+                        _is_scalein_signal = True
+                        state.sell_scalein_rsi_done.add(thr)
+                        print(f"[SELL スケールイン] RSI={rsi_cur:.1f} thr={thr:.0f}"
+                              f" 済={sorted(state.sell_scalein_rsi_done)}")
+                        break
 
         # M5 新規クロス検出（既存の待機状態がない場合のみ）
         if confirmed_signal is None and state.prev_rsi is not None:
@@ -900,11 +966,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
-            # M1 RSI 極端値ゲート: EW2免除（W2形成中はRSIが極端値になることが多い）
-            elif (not _is_ew2_signal and not np.isnan(rsi_m1_cur)
+            # M1 RSI 極端値ゲート: EW2・スケールイン免除（RSI継続上昇/下落でM1が極端になりうる）
+            elif (not _is_ew2_signal and not _is_scalein_signal and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur >= scalp.get('m1_rsi_ob_gate', 70.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≥{scalp.get("m1_rsi_ob_gate", 70.0):.0f} 過熱 エントリー禁止'
-            elif (not _is_ew2_signal and not np.isnan(rsi_m1_cur)
+            elif (not _is_ew2_signal and not _is_scalein_signal and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur <= scalp.get('m1_rsi_os_gate', 30.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≤{scalp.get("m1_rsi_os_gate", 30.0):.0f} 売られすぎ エントリー禁止'
             # M1 SMA20 絶対ゲート: EW2は免除（W2形成中はM1下落が正常）
@@ -977,6 +1043,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.last_at   = now
                 if state.count % cooldown_trades == 0:
                     state.cooldown_start_at = now
+
+        # ── ロット倍率適用（スケールイン= rsi_scalein_lot_frac）──────────
+        if _lot_frac != 1.0 and action in ('buy', 'sell'):
+            lot = max(l_min, round(lot * _lot_frac / l_step) * l_step)
+            expected_profit_usd = tp_move * contract_size * lot
+            expected_profit_jpy = expected_profit_usd * jpy_rate
 
         if action == 'buy':
             sl_price = close_v - sl_move
@@ -1113,8 +1185,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
             'signal_type':        (_ew2_signal_type if (_ew2_signal_type and action != 'none')
-                                   else (f'scalp_{action}_{int(crossed_level or (state.buy_sma_level if action == "buy" else state.sell_sma_level))}'
-                                         if action != 'none' else 'none')),
+                                   else (f'scalp_{action}_scalein_{int(crossed_level or 0)}'
+                                         if (_is_scalein_signal and action != 'none')
+                                         else (f'scalp_{action}_{int(crossed_level or (state.buy_sma_level if action == "buy" else state.sell_sma_level))}'
+                                               if action != 'none' else 'none'))),
             'execution_tf':       'm5',
             'signal_valid_until': '',
             'downtrend_ok':       False,
