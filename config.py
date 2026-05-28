@@ -145,6 +145,7 @@ SCALP = dict(
     rsi_sell_thrs     = [50.0, 45.0, 40.0, 35.0],   # RSI 下抜け → SELL
     buy_enabled       = True,     # scalp buy を有効化 / 無効化
     sell_enabled      = True,     # scalp sell を有効化 / 無効化
+    max_positions     = 3,       # 同時保有ポジション上限（0 = リスク比率から自動計算）
     max_trades_day    = 20,      # 1日の最大エントリー回数
     cooldown_min      = 15,      # クールダウン時間（分）
     cooldown_trades   = 3,       # この回数トレードするごとにクールダウンを発動
