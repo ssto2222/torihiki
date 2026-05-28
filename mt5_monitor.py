@@ -19,6 +19,7 @@ mt5_monitor.py — MT5 EA ブリッジ 監視・ウォッチドッグ
 import logging
 import logging.handlers
 import os
+from pathlib import Path
 import subprocess
 import sys
 import threading
@@ -611,15 +612,40 @@ def start_monitor_bot(shared: dict) -> 'threading.Thread | None':
                 running = (proc is not None and proc.poll() is None) or _is_bridge_running()
                 paused  = shared.get('paused', False)
                 rc      = shared.get('restart_count', 0)
-                lines   = [
+                wd_lines = [
                     '**【ウォッチドッグ ステータス】**',
                     f'ブリッジ: {"✅ 稼働中" if running else "❌ 停止中"}',
                     f'一時停止: {"はい（`!start` で再開）" if paused else "いいえ"}',
                     f'再起動回数: {rc}',
                 ]
                 if proc is not None:
-                    lines.append(f'PID: {proc.pid}')
-                return ['\n'.join(lines)]
+                    wd_lines.append(f'PID: {proc.pid}')
+                replies = ['\n'.join(wd_lines)]
+
+                # ブリッジのコンソール表示スナップショットを検索して送信
+                try:
+                    import config as _cfg_mod
+                    _sig_base = _cfg_mod.BRIDGE.get('signal_file', '')
+                    _sig_dir  = Path(_sig_base).parent if _sig_base else None
+                    if _sig_dir and _sig_dir.exists():
+                        _display_files = sorted(_sig_dir.glob('status_display_*.txt'))
+                        for _dp in _display_files:
+                            try:
+                                _text = _dp.read_text(encoding='utf-8').strip()
+                                if not _text:
+                                    continue
+                                # Discord 1メッセージ上限 2000文字 → 1800文字ずつ分割
+                                _chunk_size = 1800
+                                for _i in range(0, len(_text), _chunk_size):
+                                    replies.append(f'```\n{_text[_i:_i + _chunk_size]}\n```')
+                            except Exception as _re:
+                                replies.append(f'⚠️ {_dp.name} 読み込み失敗: {_re}')
+                    elif _sig_dir:
+                        replies.append(f'⚠️ ステータスファイルが見つかりません（まだ1回もポーリングされていない可能性）')
+                except Exception as _e:
+                    replies.append(f'⚠️ ブリッジステータス取得失敗: {_e}')
+
+                return replies
 
             # ── !help ────────────────────────────────────────────────
             if cmd == 'help' and not args:
