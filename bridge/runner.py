@@ -113,7 +113,7 @@ from bridge.sma20        import _load_sma20_touch_margins
 from bridge.signal_normal  import compute_signal
 from bridge.signal_scalp   import compute_scalp_signal
 from bridge.param_override import apply_overrides
-from bridge.dashboard      import print_poll_status, activate_dashboard_mode
+from bridge.dashboard      import print_poll_status, activate_dashboard_mode, format_poll_status_plain
 from core.macro_analysis   import analyze_macro_bias
 
 _logger = logging.getLogger('torihiki')
@@ -473,6 +473,18 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                                   macro_state=macro_state,
                                   dashboard_mode=_is_dashboard,
                                   recent_logs=_recent_logs)
+
+                # !status Discord コマンド用スナップショット（ポーリング毎に上書き）
+                try:
+                    _sym_sfx = Path(sig_path).stem[len('signal'):]  # '_BTCUSD' など
+                    _sd_path = Path(sig_path).parent / f'status_display{_sym_sfx}.txt'
+                    _sd_path.write_text(
+                        format_poll_status_plain(data, mode, itr, bal, consec_losses,
+                                                 effective_cfg, macro_state=macro_state),
+                        encoding='utf-8',
+                    )
+                except Exception:
+                    pass
 
                 # Discord 通知: アクション変化時のみ
                 curr_action = data.get('action', 'none')
