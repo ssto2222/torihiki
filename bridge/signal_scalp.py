@@ -1100,6 +1100,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # scalp はカウントベース管理。r_multi_s で max_positions の有効リスクを補正
         pos_st         = _position_status(risk_pct, total_risk_pct, symbol, magic_id,
                                           r_multi=r_multi_s, mt5=mt5)
+        _max_pos_cap = scalp.get('max_positions', 0)
+        if _max_pos_cap > 0 and pos_st['max_positions'] > _max_pos_cap:
+            pos_st['max_positions']   = _max_pos_cap
+            pos_st['available_slots'] = max(0, _max_pos_cap - pos_st['total_positions'])
 
         if new_cross:
             hour_utc = now.hour
