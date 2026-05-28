@@ -195,6 +195,9 @@ SCALP = dict(
     # ── ネックライン接近でノーマルモード切替 ──────────────────────────
     neckline_approach_enabled = True,  # True: H1ネックライン付近でノーマルモードに切替
     neckline_approach_atr     = 1.5,   # 接近判定マージン = M5_ATR × この値
+    # ── SMA タッチ + H1 ネックライン方向一致時の TP 拡張 ─────────────────
+    neckline_tp_extend_enabled = True, # True: SMAタッチがH1パターン方向一致時にTPをtargetへ延長
+    neckline_tp_extend_atr     = 3.0,  # 「ネックライン近辺」判定マージン = M5_ATR × この値
     # ── ノーマルバリアント（大変動/ネックライン接近時の拡張パラメーター）──────────
     normal_variant_enabled    = False, # False: NV遷移を無効化（常にスキャルプパラメーターで執行）
     normal_variant_tp_atr     = 1.5,   # NV TP幅 = M5_ATR × この値（スキャルプより広い）
