@@ -185,6 +185,8 @@ SCALP = dict(
     # ── SMA 優先エントリー + RSI スケールイン ────────────────────────────
     sma_watch_cooldown_s  = 60,    # 直前エントリーからこの秒数以内は sma_pending 自動再武装しない
     sma_entry_lot_frac    = 1.0,   # SMA優先エントリーのロット倍率（1.0 = 変更なし）
+    sma_pending_timeout_min = 10,  # sma_pending / confirm_pending のタイムアウト（分）
+    sma_departure_atr     = 1.5,   # pending中に価格がSMA20からこのATR以上乖離したら即エントリー
     rsi_scalein_enabled   = True,  # RSIクロスによるスケールイン有効化
     rsi_scalein_lot_frac  = 0.5,   # スケールインエントリーのロット倍率
     rsi_scalein_max       = 2,     # スケールイン最大回数（per primary entry）
