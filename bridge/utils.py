@@ -154,9 +154,11 @@ def _has_positions_in_direction(symbol: str, magic: int, direction: str, *, mt5)
 
 def detect_bidirectional_loss(symbol: str, magic: int,
                                lookback_h: int = 4, *, mt5) -> bool:
-    """直近2件のクローズトレードが逆方向かつ両方損失か（行ってこい相場の痕跡）。
+    """直近3件のクローズトレードが全損失かつ両方向を含む場合（行ってこい相場の痕跡）。
 
-    クローズディールの type が異なる = ポジション方向が逆
+    2件だけ（1損失ずつ）では発動しない。直近3件全てが損失で、かつ買いポジ決済と
+    売りポジ決済の両方が含まれる場合のみブロック。
+
     DEAL_TYPE_SELL(=1) でクローズ → 買いポジを決済
     DEAL_TYPE_BUY (=0) でクローズ → 売りポジを決済
     """
@@ -170,12 +172,12 @@ def detect_bidirectional_loss(symbol: str, magic: int,
                        if d.symbol == symbol
                        and d.magic == magic
                        and d.entry == mt5.DEAL_ENTRY_OUT]
-        if len(close_deals) < 2:
+        if len(close_deals) < 3:
             return False
-        last2     = sorted(close_deals, key=lambda d: d.time)[-2:]
-        both_loss = all(d.profit + d.commission + d.swap < 0 for d in last2)
-        opp_dir   = last2[0].type != last2[1].type
-        return both_loss and opp_dir
+        last3     = sorted(close_deals, key=lambda d: d.time)[-3:]
+        all_loss  = all(d.profit + d.commission + d.swap < 0 for d in last3)
+        both_dirs = len({d.type for d in last3}) >= 2  # 買いポジ決済(0)と売りポジ決済(1)が混在
+        return all_loss and both_dirs
     except Exception:
         return False
 
