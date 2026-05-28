@@ -694,7 +694,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.sell_sma_pending = False
                 state.sell_sma_at      = None
             else:
-                timeout_min = 30
+                timeout_min = scalp.get('sma_pending_timeout_min', 10)
                 sma20_m1 = (float(df_m1['SMA20'].iloc[-1])
                             if (df_m1 is not None and 'SMA20' in df_m1.columns and not df_m1.empty)
                             else float('nan'))
@@ -707,8 +707,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     _open_m1  = (float(df_m1['Open'].iloc[-1])
                                  if (df_m1 is not None and 'Open' in df_m1.columns) else close_m1)
                     _bar_down = close_m1 < _open_m1   # 現在M1バーが陰線（方向確認済み）
+                    _depart_atr = scalp.get('sma_departure_atr', 1.5)
+                    _depart_thr = atr_v * _depart_atr
+                    # ── SMA20 乖離エントリー: 価格が SMA20 より departure_atr 以上下方（バウンス確定）──
+                    if close_m1 < sma20_m1 - _depart_thr and mtf_sell_ok:
+                        state.sell_sma_pending = False
+                        state.sell_sma_at      = None
+                        confirmed_signal = 'sell'
+                        crossed_level    = state.sell_sma_level
+                        state.sell_scalein_rsi_done.clear()
+                        print(f"[SELL 即エントリー/departure] SMA20乖離={sma20_m1-close_m1:.1f} >= {_depart_thr:.1f}")
                     # ── SMA20 バイパス: 価格が SMA20 より touch_margin 以上下方 ──
-                    if close_m1 < sma20_m1 - touch_margin:
+                    elif close_m1 < sma20_m1 - touch_margin:
                         if mtf_sell_ok:
                             state.sell_sma_pending = False
                             state.sell_sma_at      = None
@@ -757,7 +767,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # SELL 下落確認: SMA20タッチ後 M1 下落バー 1 本
         if confirmed_signal is None and state.sell_confirm_pending:
-            timeout_min = 30
+            timeout_min = scalp.get('sma_pending_timeout_min', 10)
             if (state.sell_confirm_at is not None and
                     (now - state.sell_confirm_at).total_seconds() > timeout_min * 60):
                 state.sell_confirm_pending  = False
@@ -772,23 +782,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 if 'Open' in df_m1.columns else close_m1_prv)
                 sma20_m1_c   = (float(df_m1['SMA20'].iloc[-1])
                                 if 'SMA20' in df_m1.columns else float('nan'))
-                # M1 上昇トレンド中（close > SMA20）の下落バーはカウントしない
-                trend_ok     = np.isnan(sma20_m1_c) or close_m1_cur <= sma20_m1_c
-                # 半足モード: 現在バーが自身のオープンより下 → 早期検出
-                # 通常モード: 前バーの終値より下 → バー確定後に検出
-                _half_bar    = scalp.get('m1_confirm_half_bar', True)
-                is_down_bar  = (close_m1_cur < open_m1_cur) if _half_bar else (close_m1_cur < close_m1_prv)
-
-                # mtf_sell_ok を confirm ループでも再チェック（confirm_pending 設定後に
-                # M5 SMA20 傾きが変化した場合のゲートバイパスを防ぐ）
-                if is_down_bar and trend_ok and mtf_sell_ok and m1_bar_cur != state.sell_confirm_bar_time:
-                    state.sell_confirm_count   += 1
-                    state.sell_confirm_bar_time = m1_bar_cur
-                elif not is_down_bar or not trend_ok or not mtf_sell_ok:
-                    state.sell_confirm_count    = 0
-                    state.sell_confirm_bar_time = None
-
-                if state.sell_confirm_count >= 1:
+                _depart_atr_c  = scalp.get('sma_departure_atr', 1.5)
+                _depart_thr_c  = atr_v * _depart_atr_c
+                # 確認待ち中に価格が大きく乖離 → 即エントリー（チャンス逃し防止）
+                if (not np.isnan(sma20_m1_c)
+                        and close_m1_cur < sma20_m1_c - _depart_thr_c
+                        and mtf_sell_ok):
                     confirmed_signal            = 'sell'
                     crossed_level               = state.sell_confirm_level
                     state.sell_scalein_rsi_done.clear()
@@ -796,6 +795,32 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.sell_confirm_at       = None
                     state.sell_confirm_count    = 0
                     state.sell_confirm_bar_time = None
+                    print(f"[SELL 即エントリー/confirm-departure] 乖離={sma20_m1_c-close_m1_cur:.1f}")
+                else:
+                    # M1 上昇トレンド中（close > SMA20）の下落バーはカウントしない
+                    trend_ok     = np.isnan(sma20_m1_c) or close_m1_cur <= sma20_m1_c
+                    # 半足モード: 現在バーが自身のオープンより下 → 早期検出
+                    # 通常モード: 前バーの終値より下 → バー確定後に検出
+                    _half_bar    = scalp.get('m1_confirm_half_bar', True)
+                    is_down_bar  = (close_m1_cur < open_m1_cur) if _half_bar else (close_m1_cur < close_m1_prv)
+
+                    # mtf_sell_ok を confirm ループでも再チェック（confirm_pending 設定後に
+                    # M5 SMA20 傾きが変化した場合のゲートバイパスを防ぐ）
+                    if is_down_bar and trend_ok and mtf_sell_ok and m1_bar_cur != state.sell_confirm_bar_time:
+                        state.sell_confirm_count   += 1
+                        state.sell_confirm_bar_time = m1_bar_cur
+                    elif not is_down_bar or not trend_ok or not mtf_sell_ok:
+                        state.sell_confirm_count    = 0
+                        state.sell_confirm_bar_time = None
+
+                    if state.sell_confirm_count >= 1:
+                        confirmed_signal            = 'sell'
+                        crossed_level               = state.sell_confirm_level
+                        state.sell_scalein_rsi_done.clear()
+                        state.sell_confirm_pending  = False
+                        state.sell_confirm_at       = None
+                        state.sell_confirm_count    = 0
+                        state.sell_confirm_bar_time = None
 
         # BUY SMA20 タッチ待ち
         if confirmed_signal is None and state.buy_sma_pending:
@@ -803,7 +828,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.buy_sma_pending = False
                 state.buy_sma_at      = None
             else:
-                timeout_min = 30
+                timeout_min = scalp.get('sma_pending_timeout_min', 10)
                 sma20_m1 = (float(df_m1['SMA20'].iloc[-1])
                             if (df_m1 is not None and 'SMA20' in df_m1.columns and not df_m1.empty)
                             else float('nan'))
@@ -816,8 +841,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     _open_m1  = (float(df_m1['Open'].iloc[-1])
                                  if (df_m1 is not None and 'Open' in df_m1.columns) else close_m1)
                     _bar_up   = close_m1 > _open_m1   # 現在M1バーが陽線（方向確認済み）
+                    _depart_atr = scalp.get('sma_departure_atr', 1.5)
+                    _depart_thr  = atr_v * _depart_atr
+                    # ── SMA20 乖離エントリー: 価格が SMA20 より departure_atr 以上上方（バウンス確定）──
+                    if close_m1 > sma20_m1 + _depart_thr and mtf_buy_ok:
+                        state.buy_sma_pending = False
+                        state.buy_sma_at      = None
+                        confirmed_signal = 'buy'
+                        crossed_level    = state.buy_sma_level
+                        state.buy_scalein_rsi_done.clear()
+                        print(f"[BUY 即エントリー/departure] SMA20乖離={close_m1-sma20_m1:.1f} >= {_depart_thr:.1f}")
                     # ── SMA20 バイパス: 価格が SMA20 より touch_margin 以上上方 ──
-                    if close_m1 > sma20_m1 + touch_margin:
+                    elif close_m1 > sma20_m1 + touch_margin:
                         if mtf_buy_ok:
                             state.buy_sma_pending = False
                             state.buy_sma_at      = None
@@ -866,7 +901,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # BUY 上昇確認: SMA20タッチ後 M1 上昇バー 1 本
         if confirmed_signal is None and state.buy_confirm_pending:
-            timeout_min = 30
+            timeout_min = scalp.get('sma_pending_timeout_min', 10)
             if (state.buy_confirm_at is not None and
                     (now - state.buy_confirm_at).total_seconds() > timeout_min * 60):
                 state.buy_confirm_pending  = False
@@ -881,23 +916,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 if 'Open' in df_m1.columns else close_m1_prv)
                 sma20_m1_c   = (float(df_m1['SMA20'].iloc[-1])
                                 if 'SMA20' in df_m1.columns else float('nan'))
-                # M1 下落トレンド中（close < SMA20）の上昇バーはカウントしない
-                trend_ok     = np.isnan(sma20_m1_c) or close_m1_cur >= sma20_m1_c
-                # 半足モード: 現在バーが自身のオープンより上 → 早期検出
-                # 通常モード: 前バーの終値より上 → バー確定後に検出
-                _half_bar    = scalp.get('m1_confirm_half_bar', True)
-                is_up_bar    = (close_m1_cur > open_m1_cur) if _half_bar else (close_m1_cur > close_m1_prv)
-
-                # mtf_buy_ok を confirm ループでも再チェック（confirm_pending 設定後に
-                # M5 SMA20 傾きが変化した場合のゲートバイパスを防ぐ）
-                if is_up_bar and trend_ok and mtf_buy_ok and m1_bar_cur != state.buy_confirm_bar_time:
-                    state.buy_confirm_count   += 1
-                    state.buy_confirm_bar_time = m1_bar_cur
-                elif not is_up_bar or not trend_ok or not mtf_buy_ok:
-                    state.buy_confirm_count    = 0
-                    state.buy_confirm_bar_time = None
-
-                if state.buy_confirm_count >= 1:
+                _depart_atr_c  = scalp.get('sma_departure_atr', 1.5)
+                _depart_thr_c  = atr_v * _depart_atr_c
+                # 確認待ち中に価格が大きく乖離 → 即エントリー（チャンス逃し防止）
+                if (not np.isnan(sma20_m1_c)
+                        and close_m1_cur > sma20_m1_c + _depart_thr_c
+                        and mtf_buy_ok):
                     confirmed_signal           = 'buy'
                     crossed_level              = state.buy_confirm_level
                     state.buy_scalein_rsi_done.clear()
@@ -905,6 +929,32 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.buy_confirm_at       = None
                     state.buy_confirm_count    = 0
                     state.buy_confirm_bar_time = None
+                    print(f"[BUY 即エントリー/confirm-departure] 乖離={close_m1_cur-sma20_m1_c:.1f}")
+                else:
+                    # M1 下落トレンド中（close < SMA20）の上昇バーはカウントしない
+                    trend_ok     = np.isnan(sma20_m1_c) or close_m1_cur >= sma20_m1_c
+                    # 半足モード: 現在バーが自身のオープンより上 → 早期検出
+                    # 通常モード: 前バーの終値より上 → バー確定後に検出
+                    _half_bar    = scalp.get('m1_confirm_half_bar', True)
+                    is_up_bar    = (close_m1_cur > open_m1_cur) if _half_bar else (close_m1_cur > close_m1_prv)
+
+                    # mtf_buy_ok を confirm ループでも再チェック（confirm_pending 設定後に
+                    # M5 SMA20 傾きが変化した場合のゲートバイパスを防ぐ）
+                    if is_up_bar and trend_ok and mtf_buy_ok and m1_bar_cur != state.buy_confirm_bar_time:
+                        state.buy_confirm_count   += 1
+                        state.buy_confirm_bar_time = m1_bar_cur
+                    elif not is_up_bar or not trend_ok or not mtf_buy_ok:
+                        state.buy_confirm_count    = 0
+                        state.buy_confirm_bar_time = None
+
+                    if state.buy_confirm_count >= 1:
+                        confirmed_signal           = 'buy'
+                        crossed_level              = state.buy_confirm_level
+                        state.buy_scalein_rsi_done.clear()
+                        state.buy_confirm_pending  = False
+                        state.buy_confirm_at       = None
+                        state.buy_confirm_count    = 0
+                        state.buy_confirm_bar_time = None
 
         # ── RSI スケールイン ──────────────────────────────────────────────
         # SMA優先エントリー後、RSI が方向継続でクロスしたら追加エントリー
