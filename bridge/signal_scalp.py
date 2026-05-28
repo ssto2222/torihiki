@@ -429,6 +429,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _is_ew2_signal     = False  # EW2専用フラグ: RSIゲートをバイパスする
         _is_scalein_signal = False  # RSIスケールイン由来: M1 RSI極端値ゲートをスキップ
         _lot_frac          = 1.0    # ロット倍率（SMA優先=1.0、スケールイン=rsi_scalein_lot_frac）
+        _nl_tp_target: float | None = None  # SMAタッチ+ネックライン方向一致時のTP拡張先
+        _nl_tp_label       = ''
         # _normal_variant は big_move/neckline セクションで既にセット済み
 
         # ── H1 パターン ネックライン突破: スキャルプ直接エントリー ─────────────
@@ -943,6 +945,36 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                               f" 済={sorted(state.sell_scalein_rsi_done)}")
                         break
 
+        # ── ネックライン TP 拡張: SMA タッチが H1 パターン方向に一致する場合 ────────
+        # 直接確認 (H1ブレイク / EW2 / VolBO) と スケールインは除外
+        # ローカル変数 _nl_tp_target のみ使用: state を汚染しない
+        _nl_tp_extend = scalp.get('neckline_tp_extend_enabled', True)
+        if (_nl_tp_extend and confirmed_signal is not None
+                and not _direct_confirmed and not _is_ew2_signal and not _is_scalein_signal
+                and _h1_pats_raw and state.pattern_tp_target is None):
+            _nl_tp_margin = atr_v * scalp.get('neckline_tp_extend_atr', 3.0)
+            for _pnl_tp in _h1_pats_raw:
+                if _pnl_tp.confidence < 0.45 or _pnl_tp.target is None:
+                    continue
+                if (_pnl_tp.direction == 'bullish' and confirmed_signal == 'buy'
+                        and _pnl_tp.target > close_v
+                        and abs(close_v - _pnl_tp.neckline) <= _nl_tp_margin):
+                    _nl_tp_target = _pnl_tp.target
+                    _nl_tp_label  = _pnl_tp.label
+                    print(f"[ネックラインTP拡張/BUY] {_pnl_tp.label} "
+                          f"NL={_pnl_tp.neckline:,.0f} target={_pnl_tp.target:,.0f} "
+                          f"conf={_pnl_tp.confidence:.0%}")
+                    break
+                elif (_pnl_tp.direction == 'bearish' and confirmed_signal == 'sell'
+                        and _pnl_tp.target < close_v
+                        and abs(close_v - _pnl_tp.neckline) <= _nl_tp_margin):
+                    _nl_tp_target = _pnl_tp.target
+                    _nl_tp_label  = _pnl_tp.label
+                    print(f"[ネックラインTP拡張/SELL] {_pnl_tp.label} "
+                          f"NL={_pnl_tp.neckline:,.0f} target={_pnl_tp.target:,.0f} "
+                          f"conf={_pnl_tp.confidence:.0%}")
+                    break
+
         # M5 新規クロス検出（既存の待機状態がない場合のみ）
         if confirmed_signal is None and state.prev_rsi is not None:
             if (buy_enabled
@@ -1123,6 +1155,19 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 tp_price = max(close_v + tp_move, min(close_v + tp_move * 8, _pt_s))
             else:
                 tp_price = min(close_v - tp_move, max(close_v - tp_move * 8, _pt_s))
+
+        # SMA タッチ + ネックライン方向一致: target が標準 TP より遠ければ延長
+        if _nl_tp_target is not None and action in ('buy', 'sell'):
+            if action == 'buy' and _nl_tp_target > close_v + tp_move:
+                _nl_tp_capped = min(close_v + tp_move * 8, _nl_tp_target)
+                if _nl_tp_capped > tp_price:
+                    tp_price = _nl_tp_capped
+                    _logger.info(f'[ネックラインTP拡張/BUY] {_nl_tp_label} TP={tp_price:,.2f}')
+            elif action == 'sell' and _nl_tp_target < close_v - tp_move:
+                _nl_tp_capped = max(close_v - tp_move * 8, _nl_tp_target)
+                if _nl_tp_capped < tp_price:
+                    tp_price = _nl_tp_capped
+                    _logger.info(f'[ネックラインTP拡張/SELL] {_nl_tp_label} TP={tp_price:,.2f}')
 
         # EW2 TP/SL 上書き: Fibonacci 拡張TP + W2 失効ラインSL
         # TP = W2底 + Wave1×1.618 (Wave3 目標) — 標準ATR-TPより通常大きい
