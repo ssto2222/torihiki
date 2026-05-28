@@ -363,14 +363,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
         # BUY 専用: RSI が高すぎる（急騰中段階）はエントリー見送り
         avoid_buy_surge = (should_avoid_entry_during_surge(df, cfg)
-                           and not surge_info['is_early_surge']
-                           and not in_cooldown)
+                           and not surge_info['is_early_surge'])
         if avoid_buy_surge:
             print(f"[急騰回避] RSI={rsi_cur:.1f} が高すぎる → BUY見送り")
 
         # SELL 専用: RSI が低すぎる（売られすぎ）はエントリー見送り
         sell_oversold_thr = cfg.get('INDICATOR', {}).get('surge_oversold_threshold', 30.0)
-        avoid_sell_surge  = rsi_cur < sell_oversold_thr and not in_cooldown
+        avoid_sell_surge  = rsi_cur < sell_oversold_thr
         if avoid_sell_surge:
             print(f"[売られすぎ回避] RSI={rsi_cur:.1f} が低すぎる → SELL見送り")
 
@@ -451,6 +450,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         _direct_confirmed = True
                         state.pattern_traded.add(_fp_s)
                         state.pattern_tp_target = _pat_s.target
+                        state.buy_scalein_rsi_done.clear()
                         _logger.info(f'[スキャルプパターンBUY] {_pat_s.label} '
                                      f'NL={_pat_s.neckline:,.2f} 信頼度={_pat_s.confidence:.0%}')
                         break
@@ -461,6 +461,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         _direct_confirmed = True
                         state.pattern_traded.add(_fp_s)
                         state.pattern_tp_target = _pat_s.target
+                        state.sell_scalein_rsi_done.clear()
                         _logger.info(f'[スキャルプパターンSELL] {_pat_s.label} '
                                      f'NL={_pat_s.neckline:,.2f} 信頼度={_pat_s.confidence:.0%}')
                         break
@@ -516,6 +517,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         crossed_level     = _ew2b['w2_low']
                         _direct_confirmed = True
                         _is_ew2_signal    = True
+                        state.buy_scalein_rsi_done.clear()
                         _ew2_signal_type  = (f"EW2_buy_fib{_ew2b['fib_level']:.2f}"
                                              f"_div{_ew2b['rsi_div']:.1f}")
                         _ew2_tp_price = _b_tp
@@ -559,6 +561,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         crossed_level     = _ew2s['w2_high']
                         _direct_confirmed = True
                         _is_ew2_signal    = True
+                        state.sell_scalein_rsi_done.clear()
                         _ew2_signal_type  = (f"EW2_sell_fib{_ew2s['fib_level']:.2f}"
                                              f"_div{_ew2s['rsi_div']:.1f}")
                         _ew2_tp_price = _s_tp
@@ -596,6 +599,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.vol_breakout_bar = bar_time
                 state.vol_breakout_dir = 'up'
                 confirmed_signal = 'buy'
+                state.buy_scalein_rsi_done.clear()
                 crossed_level    = close_v
                 _ew2_signal_type = f'vol_bo_up_rvol{_vol_bo["rvol"]:.1f}'
                 _vb_tp_multi = scalp.get('vol_bo_tp_multi', 1.8)
@@ -610,6 +614,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.vol_breakout_bar = bar_time
                 state.vol_breakout_dir = 'down'
                 confirmed_signal = 'sell'
+                state.sell_scalein_rsi_done.clear()
                 crossed_level    = close_v
                 _ew2_signal_type = f'vol_bo_down_rvol{_vol_bo["rvol"]:.1f}'
                 _vb_tp_multi = scalp.get('vol_bo_tp_multi', 1.8)
@@ -1076,15 +1081,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     state.cooldown_start_at = now
 
         # ── ロット倍率適用（スケールイン= rsi_scalein_lot_frac）──────────
-        if _lot_frac != 1.0 and action in ('buy', 'sell'):
+        # ── ロット倍率適用（NV モードは下の override ブロックで適用するためスキップ）
+        if _lot_frac != 1.0 and action in ('buy', 'sell') and not _normal_variant:
             lot = max(l_min, round(lot * _lot_frac / l_step) * l_step)
             expected_profit_usd = tp_move * contract_size * lot
             expected_profit_jpy = expected_profit_usd * jpy_rate
 
         # ── ノーマルバリアント: 拡張TP/SL/ロット上書き ────────────────────
         if _normal_variant and action in ('buy', 'sell'):
-            # lot は NV 基準（スケールイン倍率も適用）
-            lot     = max(l_min, round(_nv_lot * _lot_frac / l_step) * l_step) if _lot_frac != 1.0 else _nv_lot
+            lot     = (max(l_min, round(_nv_lot * _lot_frac / l_step) * l_step)
+                       if _lot_frac != 1.0 else _nv_lot)
             tp_move = _nv_tp_move
             sl_move = _nv_sl_move
             expected_profit_usd = tp_move * contract_size * lot
