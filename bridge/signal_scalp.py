@@ -256,13 +256,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _sma20_m5_accel_sell_ok = _sma20_accel_ok(df,    'sell')
         _sma20_m1_accel_buy_ok  = _sma20_accel_ok(df_m1, 'buy')
         _sma20_m1_accel_sell_ok = _sma20_accel_ok(df_m1, 'sell')
+        # SMA タッチ入力は M1 タッチ判定内で slope をチェックするため、ここでは H1 レジームのみ判定
         mtf_buy_ok  = (regime_h1s != 'trend_down' and
-                       (not _use_di_filter or _h1_di_buy) and
-                       _sma20_slope_buy_ok)
+                       (not _use_di_filter or _h1_di_buy))
         mtf_sell_ok = (regime_h1s != 'trend_up' and
-                       (not _use_di_filter or _h1_di_sell) and
-                       _sma20_slope_sell_ok)
-        # EW2 専用: W2底/天井形成中はM5 SMA20がまだ逆向きのため、スロープチェックを外す
+                       (not _use_di_filter or _h1_di_sell))
+        # EW2 専用（変更なし）
         mtf_ew2_buy_ok  = (regime_h1s != 'trend_down' and (not _use_di_filter or _h1_di_buy))
         mtf_ew2_sell_ok = (regime_h1s != 'trend_up'   and (not _use_di_filter or _h1_di_sell))
 
@@ -1033,39 +1032,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                   and rsi_m1_cur <= scalp.get('m1_rsi_os_gate', 30.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≤{scalp.get("m1_rsi_os_gate", 30.0):.0f} 売られすぎ エントリー禁止'
             # M1 SMA20 絶対ゲート: EW2は免除（W2形成中はM1下落が正常）
+            # M1 SMA20 絶対ゲート: EW2は免除（W2形成中はM1下落が正常）
             elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m1_buy_ok:
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
-            # M5 SMA20 2階微分ゲート（シグナル確認）: EW2免除（W2形成中の減速は正常）
-            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m5_accel_buy_ok:
-                skip = 'M5 SMA20傾き減速中 BUY禁止'
-            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m5_accel_sell_ok:
-                skip = 'M5 SMA20傾き減速中 SELL禁止'
-            # M1 SMA20 2階微分ゲート（執行確認）: EW2免除
-            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m1_accel_buy_ok:
-                skip = 'M1 SMA20傾き減速中 BUY禁止'
-            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_accel_sell_ok:
-                skip = 'M1 SMA20傾き減速中 SELL禁止'
-            # M5 SMA20 価格位置ゲート: EW2 + _direct_confirmed 免除
-            # （H1パターンはネックライン突破時にSMA20を跨ぐ形で発動するため）
-            elif (new_cross == 'buy' and not _is_ew2_signal and not _direct_confirmed
-                  and not np.isnan(sma20_m5_val) and sma20_m5_val > 0
-                  and close_v < sma20_m5_val):
-                skip = f'M5 SMA20下({close_v:,.0f}<{sma20_m5_val:,.0f}) BUY禁止'
-            elif (new_cross == 'sell' and not _is_ew2_signal and not _direct_confirmed
-                  and not np.isnan(sma20_m5_val) and sma20_m5_val > 0
-                  and close_v > sma20_m5_val):
-                skip = f'M5 SMA20上({close_v:,.0f}>{sma20_m5_val:,.0f}) SELL禁止'
-            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_d1_buy_ok:
-                skip = 'D1 SMA20下落中 BUY禁止(EW2除外)'
-            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_d1_sell_ok:
-                skip = 'D1 SMA20上昇中 SELL禁止(EW2除外)'
-            # M5/M15 SMA20 コンセンサス: EW2は免除（W2押し目でM5下落は正常）
-            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_consensus_buy:
-                skip = 'SMA20下落(M5/M15両方負) BUY禁止'
-            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_consensus_sell:
-                skip = 'SMA20上昇(M5/M15両方正) SELL禁止'
             elif new_cross == 'buy' and not _is_ew2_signal and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
                 skip = f'RSI{rsi_cur:.1f}<BUY最低閾値{scalp.get("rsi_buy_gate_min", 40.0):.0f} 禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
