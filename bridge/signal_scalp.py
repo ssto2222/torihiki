@@ -204,9 +204,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 return True
             slope = sma_now - sma_prev
             thr_v = (atr_v_tf * _slope_thr) if not np.isnan(atr_v_tf) else 0.0
-            # BUY: 明確な下落でなければOK（上昇必須→フラット許容に緩和）
-            # SELL: 明確な上昇でなければOK
-            return slope > -thr_v if direction == 'buy' else slope < thr_v
+            # BUY: SMA20 が thr_v 以上上昇していること（下落・フラット禁止）
+            # SELL: SMA20 が thr_v 以上下落していること（上昇・フラット禁止）
+            return slope > thr_v if direction == 'buy' else slope < -thr_v
 
         def _sma20_accel_ok(tfdf, direction: str) -> bool:
             """SMA20 2階微分チェック: |傾き|がウィンドウ内で accel_tol 以上減少していれば False。
@@ -742,10 +742,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         slope_thr  = _slope_thr
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
-                        # 明確な上昇中でなければ OK（上昇は SELL に不利なので弱い上昇も許可）
+                        # SELL タッチ: SMA20 が slope_thr 以上下落していること
                         sma20_slope_ok = (
                             np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
-                            (sma20_m1 - sma20_prev) < (atr_m1_v * slope_thr)
+                            (sma20_m1 - sma20_prev) < -(atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok and mtf_sell_ok:
                             state.sell_sma_pending = False
@@ -876,10 +876,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         slope_thr  = _slope_thr
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
-                        # 明確な下落中でなければ OK（フラット・上昇中は BUY を許可）
+                        # BUY タッチ: SMA20 が slope_thr 以上上昇していること
                         sma20_slope_ok = (
                             np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
-                            (sma20_m1 - sma20_prev) > -(atr_m1_v * slope_thr)
+                            (sma20_m1 - sma20_prev) > (atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok and mtf_buy_ok:
                             state.buy_sma_pending = False
@@ -1128,6 +1128,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
+            # M15 SMA20 傾きゲート: EW2は免除
+            elif (new_cross == 'buy' and not _is_ew2_signal
+                  and scalp.get('m15_slope_filter', True) and not _sma20_m15_buy_ok):
+                skip = 'M15 SMA20下落中 BUY禁止'
+            elif (new_cross == 'sell' and not _is_ew2_signal
+                  and scalp.get('m15_slope_filter', True) and not _sma20_m15_sell_ok):
+                skip = 'M15 SMA20上昇中 SELL禁止'
             elif new_cross == 'buy' and not _is_ew2_signal and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
                 skip = f'RSI{rsi_cur:.1f}<BUY最低閾値{scalp.get("rsi_buy_gate_min", 40.0):.0f} 禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
