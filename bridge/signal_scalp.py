@@ -204,9 +204,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 return True
             slope = sma_now - sma_prev
             thr_v = (atr_v_tf * _slope_thr) if not np.isnan(atr_v_tf) else 0.0
-            # BUY: 明確な下落でなければOK（上昇必須→フラット許容に緩和）
-            # SELL: 明確な上昇でなければOK
-            return slope > -thr_v if direction == 'buy' else slope < thr_v
+            # BUY: SMA20 が thr_v 以上上昇していること（下落・フラット禁止）
+            # SELL: SMA20 が thr_v 以上下落していること（上昇・フラット禁止）
+            return slope > thr_v if direction == 'buy' else slope < -thr_v
 
         def _sma20_accel_ok(tfdf, direction: str) -> bool:
             """SMA20 2階微分チェック: |傾き|がウィンドウ内で accel_tol 以上減少していれば False。
@@ -742,10 +742,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         slope_thr  = _slope_thr
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
-                        # 明確な上昇中でなければ OK（上昇は SELL に不利なので弱い上昇も許可）
+                        # SELL タッチ: SMA20 が slope_thr 以上下落していること
                         sma20_slope_ok = (
                             np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
-                            (sma20_m1 - sma20_prev) < (atr_m1_v * slope_thr)
+                            (sma20_m1 - sma20_prev) < -(atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok and mtf_sell_ok:
                             state.sell_sma_pending = False
@@ -876,10 +876,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         slope_thr  = _slope_thr
                         atr_m1_v   = float(df_m1['ATR'].iloc[-1]) if ('ATR' in df_m1.columns and len(df_m1) > slope_bars) else float('nan')
                         sma20_prev = float(df_m1['SMA20'].iloc[-(slope_bars + 1)]) if len(df_m1) > slope_bars else float('nan')
-                        # 明確な下落中でなければ OK（フラット・上昇中は BUY を許可）
+                        # BUY タッチ: SMA20 が slope_thr 以上上昇していること
                         sma20_slope_ok = (
                             np.isnan(atr_m1_v) or np.isnan(sma20_prev) or
-                            (sma20_m1 - sma20_prev) > -(atr_m1_v * slope_thr)
+                            (sma20_m1 - sma20_prev) > (atr_m1_v * slope_thr)
                         )
                         if sma20_slope_ok and mtf_buy_ok:
                             state.buy_sma_pending = False

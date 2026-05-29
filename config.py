@@ -156,8 +156,8 @@ SCALP = dict(
     m1_confirm_half_bar = True, # True=半足モード: close>open で確認（バー途中でエントリー）
                                 # False=通常モード: close>prev_close で確認（バー確定後）
     lot_max            = {'XAUUSD': 0.05, 'BTCUSD': 0.10},  # シンボル別ロット上限。未設定 = 上限なし
-    sma20_slope_bars   = 5,     # SELL SMA20タッチ判定: 傾き計算に使う M1 バー数
-    sma20_slope_atr_thr = 0.10, # SELL SMA20タッチ判定: SMA20がATR×この値以上下落していること
+    sma20_slope_bars   = 5,     # 傾き計算バー数（各TF共通）
+    sma20_slope_atr_thr = 0.10, # BUY: slope > +ATR×この値 / SELL: slope < -ATR×この値 が必要
     sma20_accel_bars   = 4,     # SMA20 2階微分: 傾きサンプル数（n本の傾きでトレンド判定）
     sma20_accel_tol    = 0.3,   # SMA20 2階微分: 減少率閾値（0.3=ウィンドウ内30%超縮小で禁止）
     m15_slope_filter   = True,  # True: M15 SMA20が逆方向に傾いていればエントリー禁止（EW2は免除）
