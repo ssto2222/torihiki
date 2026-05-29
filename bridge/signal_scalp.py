@@ -246,10 +246,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _sma20_m15_sell_ok   = _sma20_ok(df_m15, 'sell')
         _sma20_d1_buy_ok     = _sma20_ok(df_d1,  'buy')  # D1
         _sma20_d1_sell_ok    = _sma20_ok(df_d1,  'sell')
-        # M1 は絶対ゲート（エントリーゲートで別途チェック）
-        # M5/M15 が両方とも逆向き → BUY/SELL禁止（M1クリア後の二次フィルター）
-        _sma20_consensus_buy  = (_sma20_slope_buy_ok  or _sma20_m15_buy_ok)
-        _sma20_consensus_sell = (_sma20_slope_sell_ok or _sma20_m15_sell_ok)
+        # M5 AND M15 両方が正方向でなければコンセンサスNG（OR→AND に強化）
+        _sma20_consensus_buy  = (_sma20_slope_buy_ok  and _sma20_m15_buy_ok)
+        _sma20_consensus_sell = (_sma20_slope_sell_ok and _sma20_m15_sell_ok)
         # SMA20 2階微分フラグ: |傾き|が減少トレンドかどうか
         # シグナル時はM5、執行時はM1でチェック（EW2はW2形成中に正常減速するため免除）
         _sma20_m5_accel_buy_ok  = _sma20_accel_ok(df,    'buy')
@@ -633,16 +632,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 and (not in_cooldown or _normal_variant)
                 and not state.buy_sma_pending  and not state.sell_sma_pending
                 and not state.buy_confirm_pending and not state.sell_confirm_pending):
-            if buy_enabled and not avoid_buy_surge and mtf_buy_ok and rsi_cur >= 50.0:
+            if (buy_enabled and not avoid_buy_surge and mtf_buy_ok and rsi_cur >= 50.0
+                    and _sma20_m1_buy_ok and _sma20_consensus_buy):
                 state.buy_sma_pending = True
                 state.buy_sma_at      = now
                 state.buy_sma_level   = 50.0
-                print(f"[SMA優先AUTO-WATCH/BUY] RSI={rsi_cur:.1f} MTF=OK")
-            elif sell_enabled and not avoid_sell_surge and mtf_sell_ok and rsi_cur < 50.0:
+                print(f"[SMA優先AUTO-WATCH/BUY] RSI={rsi_cur:.1f} MTF=OK M1/M5/M15傾きOK")
+            elif (sell_enabled and not avoid_sell_surge and mtf_sell_ok and rsi_cur < 50.0
+                    and _sma20_m1_sell_ok and _sma20_consensus_sell):
                 state.sell_sma_pending = True
                 state.sell_sma_at      = now
                 state.sell_sma_level   = 50.0
-                print(f"[SMA優先AUTO-WATCH/SELL] RSI={rsi_cur:.1f} MTF=OK")
+                print(f"[SMA優先AUTO-WATCH/SELL] RSI={rsi_cur:.1f} MTF=OK M1/M5/M15傾きOK")
 
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
@@ -693,6 +694,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             if not sell_enabled:
                 state.sell_sma_pending = False
                 state.sell_sma_at      = None
+            elif not mtf_sell_ok:
+                # H1 レジームが反転 → ペンディング無効
+                state.sell_sma_pending = False
+                state.sell_sma_at      = None
+                print('[SELL-WATCH キャンセル] H1レジーム変化でMTF条件NG')
             else:
                 timeout_min = scalp.get('sma_pending_timeout_min', 10)
                 sma20_m1 = (float(df_m1['SMA20'].iloc[-1])
@@ -784,8 +790,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 if 'SMA20' in df_m1.columns else float('nan'))
                 _depart_atr_c  = scalp.get('sma_departure_atr', 1.5)
                 _depart_thr_c  = atr_v * _depart_atr_c
-                # 確認待ち中に価格が大きく乖離 → 即エントリー（チャンス逃し防止）
+                # 価格が SMA20 を上方に抜け返した → タッチは失敗、キャンセル
                 if (not np.isnan(sma20_m1_c)
+                        and close_m1_cur > sma20_m1_c + touch_margin):
+                    state.sell_confirm_pending  = False
+                    state.sell_confirm_at       = None
+                    state.sell_confirm_count    = 0
+                    state.sell_confirm_bar_time = None
+                    print(f"[SELL-CONFIRM キャンセル] 価格がSMA20上方に反発 乖離={close_m1_cur-sma20_m1_c:.1f}")
+                # 確認待ち中に価格が大きく乖離 → 即エントリー（チャンス逃し防止）
+                elif (not np.isnan(sma20_m1_c)
                         and close_m1_cur < sma20_m1_c - _depart_thr_c
                         and mtf_sell_ok):
                     confirmed_signal            = 'sell'
@@ -827,6 +841,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             if not buy_enabled:
                 state.buy_sma_pending = False
                 state.buy_sma_at      = None
+            elif not mtf_buy_ok:
+                # H1 レジームが反転 → ペンディング無効
+                state.buy_sma_pending = False
+                state.buy_sma_at      = None
+                print('[BUY-WATCH キャンセル] H1レジーム変化でMTF条件NG')
             else:
                 timeout_min = scalp.get('sma_pending_timeout_min', 10)
                 sma20_m1 = (float(df_m1['SMA20'].iloc[-1])
@@ -918,8 +937,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 if 'SMA20' in df_m1.columns else float('nan'))
                 _depart_atr_c  = scalp.get('sma_departure_atr', 1.5)
                 _depart_thr_c  = atr_v * _depart_atr_c
-                # 確認待ち中に価格が大きく乖離 → 即エントリー（チャンス逃し防止）
+                # 価格が SMA20 を下方に抜け返した → タッチは失敗、キャンセル
                 if (not np.isnan(sma20_m1_c)
+                        and close_m1_cur < sma20_m1_c - touch_margin):
+                    state.buy_confirm_pending  = False
+                    state.buy_confirm_at       = None
+                    state.buy_confirm_count    = 0
+                    state.buy_confirm_bar_time = None
+                    print(f"[BUY-CONFIRM キャンセル] 価格がSMA20下方に反転 乖離={sma20_m1_c-close_m1_cur:.1f}")
+                # 確認待ち中に価格が大きく乖離 → 即エントリー（チャンス逃し防止）
+                elif (not np.isnan(sma20_m1_c)
                         and close_m1_cur > sma20_m1_c + _depart_thr_c
                         and mtf_buy_ok):
                     confirmed_signal           = 'buy'
@@ -1261,14 +1288,15 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 sl_price = close_v + _sl_dist * _mb_rm
 
         # ── 最低 SL 距離フロア ────────────────────────────────────────
-        # シグナル生成から EA 執行まで価格が動いた場合に SL が約定価格を
-        # 跨いで即損切りになるのを防ぐ。EW2 など SL バッファが小さい経路で特に重要。
-        _min_sl_atr = scalp.get('min_sl_atr', 0.5)
+        # EW2 は W2 失効ラインをSLとして意図的に設定しているため minフロアを免除。
+        # それ以外はシグナル→執行の価格移動で SL 即抵触を防ぐ。
+        _min_sl_atr  = scalp.get('min_sl_atr', 0.5)
         _min_sl_dist = atr_v * _min_sl_atr
-        if action == 'buy':
-            sl_price = min(sl_price, close_v - _min_sl_dist)
-        elif action == 'sell':
-            sl_price = max(sl_price, close_v + _min_sl_dist)
+        if not _is_ew2_signal:
+            if action == 'buy':
+                sl_price = min(sl_price, close_v - _min_sl_dist)
+            elif action == 'sell':
+                sl_price = max(sl_price, close_v + _min_sl_dist)
 
         # ── 証拠金維持率チェック: lot を上限調整 ────────────────────────
         _min_ml     = scalp.get('min_margin_level', 200.0)
