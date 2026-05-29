@@ -1128,6 +1128,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
+            # M15 SMA20 傾きゲート: EW2は免除
+            elif (new_cross == 'buy' and not _is_ew2_signal
+                  and scalp.get('m15_slope_filter', True) and not _sma20_m15_buy_ok):
+                skip = 'M15 SMA20下落中 BUY禁止'
+            elif (new_cross == 'sell' and not _is_ew2_signal
+                  and scalp.get('m15_slope_filter', True) and not _sma20_m15_sell_ok):
+                skip = 'M15 SMA20上昇中 SELL禁止'
             elif new_cross == 'buy' and not _is_ew2_signal and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
                 skip = f'RSI{rsi_cur:.1f}<BUY最低閾値{scalp.get("rsi_buy_gate_min", 40.0):.0f} 禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
