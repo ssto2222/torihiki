@@ -323,7 +323,7 @@ def detect_pre_surge(df_m5: pd.DataFrame, cfg: dict) -> dict:
         if len(adx_vals) >= 3:
             adx_cur  = float(adx_vals[-1])
             adx_prev = float(adx_vals[-3])
-            if adx_cur < 30 and adx_cur > adx_prev + 0.5:
+            if adx_cur < 30 and adx_cur > adx_prev:
                 adx_turning_up   = di_plus  > di_minus
                 adx_turning_down = di_minus > di_plus
 
