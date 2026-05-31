@@ -69,6 +69,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             state.sell_confirm_count    = 0
             state.sell_confirm_bar_time = None
 
+        # プレサージアーム自動クリア: 全pending消滅後（エントリー後 / キャンセル後）にリセット
+        if (not state.buy_sma_pending and not state.buy_confirm_pending
+                and not state.sell_sma_pending and not state.sell_confirm_pending):
+            state.pre_surge_armed = False
+            state.pre_surge_score = 0
+
         now   = datetime.now(timezone.utc)
         today = now.date()
 
@@ -672,6 +678,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.buy_sma_pending = True
                 state.buy_sma_at      = now
                 state.buy_sma_level   = rsi_cur
+                state.pre_surge_armed = True
+                state.pre_surge_score = pre_surge_info['score_up']
                 print(f"[プレサージBUY] RSI={rsi_cur:.1f} score={pre_surge_info['score_up']} {_ps_tag}")
             elif (pre_surge_info['pre_surge_down'] and sell_enabled
                     and not avoid_sell_surge and mtf_sell_ok and _sma20_consensus_sell
@@ -679,6 +687,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.sell_sma_pending = True
                 state.sell_sma_at      = now
                 state.sell_sma_level   = rsi_cur
+                state.pre_surge_armed = True
+                state.pre_surge_score = pre_surge_info['score_down']
                 print(f"[プレサージSELL] RSI={rsi_cur:.1f} score={pre_surge_info['score_down']} {_ps_tag}")
 
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
@@ -1259,6 +1269,24 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             sl_move = _nv_sl_move
             expected_profit_usd = tp_move * contract_size * lot
             expected_profit_jpy = expected_profit_usd * jpy_rate
+
+        # ── プレサージ最小ロット制限 ───────────────────────────────────────
+        # プレサージ経由のエントリーはリスクを下げるため最低ロットに制限する。
+        # ビッグチャンス解除: pre_surge_big_chance_unlock=True かつ score>=3 なら除外。
+        if state.pre_surge_armed and action in ('buy', 'sell'):
+            _ps_use_min   = scalp.get('pre_surge_use_min_lot', True)
+            _ps_bc_unlock = scalp.get('pre_surge_big_chance_unlock', True)
+            _ps_bc_score  = scalp.get('pre_surge_big_chance_score', 3)
+            _ps_is_bc     = _ps_bc_unlock and state.pre_surge_score >= _ps_bc_score
+            if _ps_use_min and not _ps_is_bc:
+                lot = l_min
+                expected_profit_usd = tp_move * contract_size * lot
+                expected_profit_jpy = expected_profit_usd * jpy_rate
+                print(f"[プレサージ最小ロット] score={state.pre_surge_score} → lot={lot} "
+                      f"(score<{_ps_bc_score}のため制限)")
+            elif _ps_is_bc:
+                print(f"[プレサージBIGCHANCE] score={state.pre_surge_score} ≥ {_ps_bc_score} "
+                      f"→ ロット制限解除 lot={lot}")
 
         if action == 'buy':
             sl_price = close_v - sl_move
