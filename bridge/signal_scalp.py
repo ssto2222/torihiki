@@ -8,7 +8,7 @@ import numpy as np
 
 from core.data       import fetch_ohlcv
 from core.indicators import add_m5_indicators, add_m1_indicators, add_h1_indicators
-from core.strategy   import (detect_big_move, detect_early_surge,
+from core.strategy   import (detect_big_move, detect_early_surge, detect_pre_surge,
                               should_avoid_entry_during_surge, detect_whipsaw,
                               detect_elliott_w2_buy, detect_elliott_w2_sell,
                               detect_volume_breakout)
@@ -358,7 +358,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         )
 
         # ── 急騰初期検知と中段階回避 ─────────────────────────────
-        surge_info = detect_early_surge(df, cfg)
+        surge_info      = detect_early_surge(df, cfg)
+        pre_surge_info  = detect_pre_surge(df, cfg)
 
         # BUY 専用: RSI が高すぎる（急騰中段階）はエントリー見送り
         avoid_buy_surge = (should_avoid_entry_during_surge(df, cfg)
@@ -653,6 +654,32 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.sell_sma_at      = now
                 state.sell_sma_level   = 50.0
                 print(f"[SMA優先AUTO-WATCH/SELL] RSI={rsi_cur:.1f} MTF=OK M1/M5/M15傾きOK")
+
+        # ── プレサージ早期アーミング ──────────────────────────────────────
+        # BB Squeeze + RVOL 上昇 + ADX 転換 で 2 条件以上充足
+        # → 通常の RSI 閾値クロスを待たずに sma_pending をセット
+        _ps_min_rsi_buy  = scalp.get('pre_surge_min_rsi_buy',  42.0)
+        _ps_max_rsi_sell = scalp.get('pre_surge_max_rsi_sell', 58.0)
+        if (confirmed_signal is None and not _just_entered
+                and (not in_cooldown or _normal_variant)
+                and not state.buy_sma_pending  and not state.buy_confirm_pending
+                and not state.sell_sma_pending and not state.sell_confirm_pending):
+            _ps_tag = (f"SQ={pre_surge_info['squeeze_on']} "
+                       f"RVOL={pre_surge_info['rvol_building']}")
+            if (pre_surge_info['pre_surge_up'] and buy_enabled
+                    and not avoid_buy_surge and mtf_buy_ok and _sma20_consensus_buy
+                    and rsi_cur >= _ps_min_rsi_buy):
+                state.buy_sma_pending = True
+                state.buy_sma_at      = now
+                state.buy_sma_level   = rsi_cur
+                print(f"[プレサージBUY] RSI={rsi_cur:.1f} score={pre_surge_info['score_up']} {_ps_tag}")
+            elif (pre_surge_info['pre_surge_down'] and sell_enabled
+                    and not avoid_sell_surge and mtf_sell_ok and _sma20_consensus_sell
+                    and rsi_cur <= _ps_max_rsi_sell):
+                state.sell_sma_pending = True
+                state.sell_sma_at      = now
+                state.sell_sma_level   = rsi_cur
+                print(f"[プレサージSELL] RSI={rsi_cur:.1f} score={pre_surge_info['score_down']} {_ps_tag}")
 
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
