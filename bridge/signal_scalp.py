@@ -510,7 +510,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     _df_ew2, lookback=_ew_lb, sw_window=_ew_sw,
                     fib_min=_ew_fmin, fib_max=_ew_fmax,
                     min_wave1_atr=_ew_w1at, rsi_div_min=_ew_div,
-                    w2_rsi_max=_ew_cfg.get('w2_buy_rsi_max', 45.0),
+                    w2_rsi_max=_ew_cfg.get('w2_buy_rsi_max', 50.0),
                     w2_bars_ago_max=_ew_bago,
                 )
                 if _ew2b is not None:
@@ -554,7 +554,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     _df_ew2, lookback=_ew_lb, sw_window=_ew_sw,
                     fib_min=_ew_fmin, fib_max=_ew_fmax,
                     min_wave1_atr=_ew_w1at, rsi_div_min=_ew_div,
-                    w2_rsi_min=_ew_cfg.get('w2_sell_rsi_min', 55.0),
+                    w2_rsi_min=_ew_cfg.get('w2_sell_rsi_min', 50.0),
                     w2_bars_ago_max=_ew_bago,
                 )
                 if _ew2s is not None:
@@ -740,7 +740,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 state.buy_confirm_count     = 0
                                 state.buy_confirm_bar_time  = None
                                 state.buy_confirm_level     = 0.0
-                                print(f"[押し戻りSELL] M1 RSI={rsi_m1_cur:.1f} thr={int(thr)}")
+                                label = '急落兆候SELL' if _is_early_selloff else '押し戻りSELL'
+                                print(f"[{label}] M1 RSI={rsi_m1_cur:.1f} thr={int(thr)}")
                             break
 
         # SELL SMA20 タッチ待ち
