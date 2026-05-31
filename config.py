@@ -38,7 +38,8 @@ INDICATOR = dict(
     rvol_surge_threshold      = 1.5,    # RVOL急増閾値
     early_surge_rvol_threshold = 1.3,   # 急騰初期RVOL閾値
     early_surge_accel_threshold = 0.5,  # 急騰初期価格加速閾値
-    surge_overbought_threshold = 70.0,  # 急騰中段階RSI閾値
+    surge_overbought_threshold = 70.0,  # 急騰中段階RSI閾値（BUY回避）
+    surge_oversold_threshold   = 30.0,  # 急落中段階RSI閾値（SELL回避）
     surge_avoid_accel_threshold = 1.5,  # 急騰回避価格加速閾値
     bb_tp_sigma              = 2.0,    # H1 BB2σ を TP 初期位置に使う
     bb_tp_near_pct           = 0.85,   # H1 BB2σ 近傍判定（%）
@@ -173,9 +174,11 @@ SCALP = dict(
     rsi_buy_gate_min      = 40.0,  # BUY: M5 RSIがこの値未満なら全シグナルをブロック
     rsi_sell_gate_max     = 60.0,  # SELL: M5 RSIがこの値超なら全シグナルをブロック
     # M1 RSI 極端値ゲート: 過熱/売られすぎ時の無差別エントリー禁止（EW2免除）
-    m1_rsi_ob_gate        = 70.0,  # M1 RSI ≥ この値: 過熱、全方向エントリー禁止
-    m1_rsi_os_gate        = 30.0,  # M1 RSI ≤ この値: 売られすぎ、全方向エントリー禁止
-    m1_bb_margin_atr      = 0.3,   # M1 BB 2σバンドからこのATR以内はエントリー禁止（伸び切り回避）
+    m1_rsi_ob_gate         = 70.0,  # M1 RSI ≥ この値: 過熱、全方向エントリー禁止（ハードブロック）
+    m1_rsi_os_gate         = 30.0,  # M1 RSI ≤ この値: 売られすぎ、全方向エントリー禁止（ハードブロック）
+    m1_rsi_add_buy_limit   = 65.0,  # M1 RSI ≥ この値: ポジション保有中の追加BUYを控える（ソフトブロック）
+    m1_rsi_add_sell_limit  = 35.0,  # M1 RSI ≤ この値: ポジション保有中の追加SELLを控える（ソフトブロック）
+    m1_bb_margin_atr       = 0.3,   # M1 BB 2σバンドからこのATR以内はエントリー禁止（伸び切り回避）
     # ── ボリュームブレイクアウト（大変動予兆を検知しSMA20タッチをスキップ） ──────────
     vol_bo_enabled        = True,  # ボリュームブレイクアウト有効/無効
     vol_bo_rvol_thr       = 2.0,   # RVOL ≥ この値でブレイクアウト候補

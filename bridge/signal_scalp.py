@@ -144,10 +144,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif 'SMA20' in df_d1.columns:
                 sma20_d1_val = float(df_d1['SMA20'].iloc[-1])
 
-        # M1 RSI 追跡（BUY過熱: >65 / SELL過熱: <35）
+        # M1 RSI ソフトブロック追跡（追加ポジション抑制用。ハードブロック m1_rsi_ob/os_gate とは別閾値）
         if not np.isnan(rsi_m1_cur):
-            state.m1_rsi_above_65 = rsi_m1_cur > 65
-            state.m1_rsi_below_35 = rsi_m1_cur < 35
+            _m1_add_buy_lim  = scalp.get('m1_rsi_add_buy_limit',  65.0)
+            _m1_add_sell_lim = scalp.get('m1_rsi_add_sell_limit', 35.0)
+            state.m1_rsi_above_65 = rsi_m1_cur > _m1_add_buy_lim
+            state.m1_rsi_below_35 = rsi_m1_cur < _m1_add_sell_lim
 
         info          = mt5.symbol_info(symbol)
         contract_size = float(info.trade_contract_size) if info else 1.0
@@ -250,17 +252,19 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _sma20_m1_sell_ok    = _sma20_ok(df_m1, 'sell')
         _sma20_m15_buy_ok    = _sma20_ok(df_m15, 'buy')  # M15
         _sma20_m15_sell_ok   = _sma20_ok(df_m15, 'sell')
-        _sma20_d1_buy_ok     = _sma20_ok(df_d1,  'buy')  # D1
+        _sma20_d1_buy_ok     = _sma20_ok(df_d1,  'buy')   # D1: ダッシュボード表示用（スキャルプゲート未使用）
         _sma20_d1_sell_ok    = _sma20_ok(df_d1,  'sell')
-        # M5 AND M15 両方が正方向でなければコンセンサスNG（OR→AND に強化）
-        _sma20_consensus_buy  = (_sma20_slope_buy_ok  and _sma20_m15_buy_ok)
-        _sma20_consensus_sell = (_sma20_slope_sell_ok and _sma20_m15_sell_ok)
         # SMA20 2階微分フラグ: |傾き|が減少トレンドかどうか
-        # シグナル時はM5、執行時はM1でチェック（EW2はW2形成中に正常減速するため免除）
+        # M5 accel はコンセンサスに組み込む（モメンタム減速中のエントリーを防ぐ）
+        # M1 accel は実行ゲートで使用
+        # EW2 はW2形成中に正常減速するため免除（実行ゲート側で個別に適用）
         _sma20_m5_accel_buy_ok  = _sma20_accel_ok(df,    'buy')
         _sma20_m5_accel_sell_ok = _sma20_accel_ok(df,    'sell')
         _sma20_m1_accel_buy_ok  = _sma20_accel_ok(df_m1, 'buy')
         _sma20_m1_accel_sell_ok = _sma20_accel_ok(df_m1, 'sell')
+        # コンセンサス: M5傾き AND M15傾き AND M5加速度（3条件すべて必要）
+        _sma20_consensus_buy  = (_sma20_slope_buy_ok  and _sma20_m15_buy_ok and _sma20_m5_accel_buy_ok)
+        _sma20_consensus_sell = (_sma20_slope_sell_ok and _sma20_m15_sell_ok and _sma20_m5_accel_sell_ok)
         # SMA タッチ入力は M1 タッチ判定内で slope をチェックするため、ここでは H1 レジームのみ判定
         mtf_buy_ok  = (regime_h1s != 'trend_down' and
                        (not _use_di_filter or _h1_di_buy))
@@ -1204,6 +1208,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
+            # M1 SMA20 加速度ゲート: EW2は免除（W2形成中は正常な減速）
+            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m1_accel_buy_ok:
+                skip = 'M1 SMA20減速中 BUY禁止'
+            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_accel_sell_ok:
+                skip = 'M1 SMA20減速中 SELL禁止'
             # M1 BB 2σ バンド付近ゲート: 伸び切り禁止・ミドル/SMA20付近のみ許可
             # EW2は免除（W2は意図的にバンド端付近で発生）
             elif (df_m1 is not None and not _is_ew2_signal
