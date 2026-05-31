@@ -1204,6 +1204,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 SMA20下落中 BUY絶対禁止'
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
+            # M1 BB 2σ バンド付近ゲート: 伸び切り禁止・ミドル/SMA20付近のみ許可
+            # EW2は免除（W2は意図的にバンド端付近で発生）
+            elif (df_m1 is not None and not _is_ew2_signal
+                  and 'BB_upper' in df_m1.columns and 'BB_lower' in df_m1.columns):
+                _close_m1_g  = float(df_m1['Close'].iloc[-1])
+                _bb_upper_m1 = float(df_m1['BB_upper'].iloc[-1])
+                _bb_lower_m1 = float(df_m1['BB_lower'].iloc[-1])
+                _atr_m1_g    = (float(df_m1['ATR'].iloc[-1])
+                                if 'ATR' in df_m1.columns else atr_v)
+                _bb_mg       = _atr_m1_g * scalp.get('m1_bb_margin_atr', 0.3)
+                if new_cross == 'buy' and _close_m1_g >= _bb_upper_m1 - _bb_mg:
+                    skip = (f'M1 BB上限付近 BUY禁止 '
+                            f'close={_close_m1_g:.2f} upper={_bb_upper_m1:.2f}')
+                elif new_cross == 'sell' and _close_m1_g <= _bb_lower_m1 + _bb_mg:
+                    skip = (f'M1 BB下限付近 SELL禁止 '
+                            f'close={_close_m1_g:.2f} lower={_bb_lower_m1:.2f}')
             # M5+M15 コンセンサスゲート: EW2は免除（両TFが正方向必須）
             elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_consensus_buy:
                 skip = 'M5/M15 SMA20コンセンサスNG BUY禁止'
