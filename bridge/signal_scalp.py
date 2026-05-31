@@ -1209,9 +1209,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
                 skip = 'M1 SMA20上昇中 SELL絶対禁止'
             # M1 SMA20 加速度ゲート: EW2は免除（W2形成中は正常な減速）
-            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m1_accel_buy_ok:
+            elif (new_cross == 'buy' and not _is_ew2_signal
+                  and scalp.get('m1_accel_gate_enabled', False)
+                  and not _sma20_m1_accel_buy_ok):
                 skip = 'M1 SMA20減速中 BUY禁止'
-            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_accel_sell_ok:
+            elif (new_cross == 'sell' and not _is_ew2_signal
+                  and scalp.get('m1_accel_gate_enabled', False)
+                  and not _sma20_m1_accel_sell_ok):
                 skip = 'M1 SMA20減速中 SELL禁止'
             # M1 BB 2σ バンド付近ゲート: 伸び切り禁止・ミドル/SMA20付近のみ許可
             # EW2は免除（W2は意図的にバンド端付近で発生）

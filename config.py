@@ -147,8 +147,8 @@ SCALP = dict(
     buy_enabled       = True,     # scalp buy を有効化 / 無効化
     sell_enabled      = True,     # scalp sell を有効化 / 無効化
     max_positions     = 3,       # 同時保有ポジション上限（0 = リスク比率から自動計算）
-    max_trades_day    = 20,      # 1日の最大エントリー回数
-    cooldown_min      = 15,      # クールダウン時間（分）
+    max_trades_day    = 30,      # 1日の最大エントリー回数
+    cooldown_min      = 10,      # クールダウン時間（分）
     cooldown_trades   = 3,       # この回数トレードするごとにクールダウンを発動
     min_margin_level  = 200.0,   # 証拠金維持率の下限（%）。これを下回らないようlotを縮小
     big_move_lookback  = 12,     # 大変動判定: 過去 N 本（12本=60分）
@@ -160,7 +160,8 @@ SCALP = dict(
     sma20_slope_bars   = 5,     # 傾き計算バー数（各TF共通）
     sma20_slope_atr_thr = 0.10, # BUY: slope > +ATR×この値 / SELL: slope < -ATR×この値 が必要
     sma20_accel_bars   = 4,     # SMA20 2階微分: 傾きサンプル数（n本の傾きでトレンド判定）
-    sma20_accel_tol    = 0.3,   # SMA20 2階微分: 減少率閾値（0.3=ウィンドウ内30%超縮小で禁止）
+    sma20_accel_tol    = 0.5,   # SMA20 2階微分: 減少率閾値（0.5=ウィンドウ内50%超縮小で禁止）
+    m1_accel_gate_enabled = False, # True: 実行ゲートでM1加速度チェック（デフォルトOFF: M1はノイジー）
     m15_slope_filter   = True,  # True: M15 SMA20が逆方向に傾いていればエントリー禁止（EW2は免除）
     # 急落・急騰時 SMA20 バイパス（大きく乖離している場合はタッチ不要）
     sell_sma_bypass_atr  = 1.2,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ
@@ -171,13 +172,13 @@ SCALP = dict(
     h1_di_filter          = False, # True=H1 DI+/DI-方向必須(厳格) / False=H1レジームのみ(推奨)
     # 極端RSI後の反発・反落シグナル
     # RSI ハードゲート: 全BUY/SELLシグナルに適用する絶対下限/上限
-    rsi_buy_gate_min      = 40.0,  # BUY: M5 RSIがこの値未満なら全シグナルをブロック
-    rsi_sell_gate_max     = 60.0,  # SELL: M5 RSIがこの値超なら全シグナルをブロック
+    rsi_buy_gate_min      = 35.0,  # BUY: M5 RSIがこの値未満なら全シグナルをブロック
+    rsi_sell_gate_max     = 65.0,  # SELL: M5 RSIがこの値超なら全シグナルをブロック
     # M1 RSI 極端値ゲート: 過熱/売られすぎ時の無差別エントリー禁止（EW2免除）
-    m1_rsi_ob_gate         = 70.0,  # M1 RSI ≥ この値: 過熱、全方向エントリー禁止（ハードブロック）
-    m1_rsi_os_gate         = 30.0,  # M1 RSI ≤ この値: 売られすぎ、全方向エントリー禁止（ハードブロック）
-    m1_rsi_add_buy_limit   = 65.0,  # M1 RSI ≥ この値: ポジション保有中の追加BUYを控える（ソフトブロック）
-    m1_rsi_add_sell_limit  = 35.0,  # M1 RSI ≤ この値: ポジション保有中の追加SELLを控える（ソフトブロック）
+    m1_rsi_ob_gate         = 75.0,  # M1 RSI ≥ この値: 過熱、全方向エントリー禁止（ハードブロック）
+    m1_rsi_os_gate         = 25.0,  # M1 RSI ≤ この値: 売られすぎ、全方向エントリー禁止（ハードブロック）
+    m1_rsi_add_buy_limit   = 70.0,  # M1 RSI ≥ この値: ポジション保有中の追加BUYを控える（ソフトブロック）
+    m1_rsi_add_sell_limit  = 30.0,  # M1 RSI ≤ この値: ポジション保有中の追加SELLを控える（ソフトブロック）
     m1_bb_margin_atr       = 0.3,   # M1 BB 2σバンドからこのATR以内はエントリー禁止（伸び切り回避）
     # ── ボリュームブレイクアウト（大変動予兆を検知しSMA20タッチをスキップ） ──────────
     vol_bo_enabled        = True,  # ボリュームブレイクアウト有効/無効
@@ -191,7 +192,7 @@ SCALP = dict(
     # ── SMA 優先エントリー + RSI スケールイン ────────────────────────────
     sma_watch_cooldown_s  = 60,    # 直前エントリーからこの秒数以内は sma_pending 自動再武装しない
     sma_entry_lot_frac    = 1.0,   # SMA優先エントリーのロット倍率（1.0 = 変更なし）
-    sma_pending_timeout_min = 10,  # sma_pending / confirm_pending のタイムアウト（分）
+    sma_pending_timeout_min = 15,  # sma_pending / confirm_pending のタイムアウト（分）
     sma_departure_atr     = 1.5,   # pending中に価格がSMA20からこのATR以上乖離したら即エントリー
     rsi_scalein_enabled   = True,  # RSIクロスによるスケールイン有効化
     rsi_scalein_lot_frac  = 0.5,   # スケールインエントリーのロット倍率
@@ -211,8 +212,8 @@ SCALP = dict(
     normal_variant_tp_atr     = 1.5,   # NV TP幅 = M5_ATR × この値（スキャルプより広い）
     normal_variant_lot_frac   = 1.0,   # NV ロット倍率（1.0 = 目標利益ベース計算をそのまま使用）
     # ── プレサージ早期エントリー ──────────────────────────────────────
-    pre_surge_min_rsi_buy     = 42.0,  # プレサージBUY発動のRSI下限（通常auto-armの50より緩い）
-    pre_surge_max_rsi_sell    = 58.0,  # プレサージSELL発動のRSI上限
+    pre_surge_min_rsi_buy     = 38.0,  # プレサージBUY発動のRSI下限（通常auto-armの50より緩い）
+    pre_surge_max_rsi_sell    = 62.0,  # プレサージSELL発動のRSI上限
     pre_surge_use_min_lot     = True,  # True: プレサージエントリーはリスク低減のため最低ロット強制
     pre_surge_big_chance_unlock = True, # True: scoreが閾値以上なら最低ロット制限を解除
     pre_surge_big_chance_score = 3,    # ビッグチャンス判定スコア（3=BB+RVOL+ADX全条件充足）
