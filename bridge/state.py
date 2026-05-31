@@ -105,6 +105,10 @@ class ScalpState:
     vol_breakout_bar: object = None  # 直前ブレイクアウト発火の M5 バー時刻
     vol_breakout_dir: str    = 'none'
 
+    # プレサージ早期アーミング追跡（ロット制限判定用）
+    pre_surge_armed: bool = False
+    pre_surge_score: int  = 0   # アーム時のスコア（3 = ビッグチャンス解除判定に使用）
+
 
 @dataclass
 class TimeBiasState:

@@ -39,6 +39,13 @@ def calc_price_acceleration(close: pd.Series, period: int = 5) -> pd.Series:
     return sma.pct_change(periods=1) * 100
 
 
+def calc_bb_width(close: pd.Series, period: int = 20, sigma: float = 2.0) -> pd.Series:
+    """BB幅（バンド幅/中心値）を返す。値が小さいほどスクイーズ（圧縮）状態"""
+    ma  = close.rolling(period).mean()
+    std = close.rolling(period).std()
+    return (2 * sigma * std) / ma.replace(0, np.nan)
+
+
 def detect_volume_surge(volume: pd.Series, rvol: pd.Series,
                         volume_threshold: float = 2.0,
                         rvol_threshold: float = 1.5) -> pd.Series:
@@ -153,6 +160,9 @@ def add_m5_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         )
     else:
         df = df.copy()
+
+    # BB 幅（スクイーズ検出用）
+    df['BB_Width'] = calc_bb_width(df['Close'], ind.get('bb_period', 20))
 
     df['RSI'] = calc_rsi(df['Close'], ind.get('rsi_period', 14))
     df['ATR'] = calc_atr(df, ind.get('atr_period', 14))

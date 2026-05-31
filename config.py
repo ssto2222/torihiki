@@ -206,6 +206,12 @@ SCALP = dict(
     normal_variant_enabled    = False, # False: NV遷移を無効化（常にスキャルプパラメーターで執行）
     normal_variant_tp_atr     = 1.5,   # NV TP幅 = M5_ATR × この値（スキャルプより広い）
     normal_variant_lot_frac   = 1.0,   # NV ロット倍率（1.0 = 目標利益ベース計算をそのまま使用）
+    # ── プレサージ早期エントリー ──────────────────────────────────────
+    pre_surge_min_rsi_buy     = 42.0,  # プレサージBUY発動のRSI下限（通常auto-armの50より緩い）
+    pre_surge_max_rsi_sell    = 58.0,  # プレサージSELL発動のRSI上限
+    pre_surge_use_min_lot     = True,  # True: プレサージエントリーはリスク低減のため最低ロット強制
+    pre_surge_big_chance_unlock = True, # True: scoreが閾値以上なら最低ロット制限を解除
+    pre_surge_big_chance_score = 3,    # ビッグチャンス判定スコア（3=BB+RVOL+ADX全条件充足）
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────

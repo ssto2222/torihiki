@@ -269,6 +269,77 @@ def should_avoid_entry_during_surge(df_m5: pd.DataFrame, cfg: dict) -> bool:
     return False
 
 
+def detect_pre_surge(df_m5: pd.DataFrame, cfg: dict) -> dict:
+    """
+    サージ前兆検出 — BB Squeeze + RVOL 上昇傾向 + ADX 転換の 3 条件スコアリング
+
+    A. BB Squeeze: BB幅が過去 N 本の最小の 120% 以内（圧縮状態）
+    B. RVOL 上昇: 直近 4 本中 3 本以上で RVOL が増加傾向
+    C. ADX 転換: ADX が低値 (<30) から上昇中 + DI が方向を示している
+
+    Returns:
+        pre_surge_up:   bool  上昇前兆スコア >= 2
+        pre_surge_down: bool  下落前兆スコア >= 2
+        squeeze_on:     bool  BB Squeeze 状態
+        rvol_building:  bool  RVOL 上昇トレンド
+        score_up:       int   上昇スコア (0-3)
+        score_down:     int   下落スコア (0-3)
+    """
+    _empty = lambda: {
+        'pre_surge_up': False, 'pre_surge_down': False,
+        'squeeze_on': False, 'rvol_building': False,
+        'score_up': 0, 'score_down': 0,
+    }
+    if df_m5 is None or len(df_m5) < 30:
+        return _empty()
+
+    ind = cfg.get('INDICATOR', {})
+    squeeze_lookback = ind.get('pre_surge_squeeze_lookback', 30)
+
+    # A. BB Squeeze
+    squeeze_on = False
+    if 'BB_Width' in df_m5.columns:
+        bw_series = df_m5['BB_Width'].dropna()
+        if len(bw_series) >= squeeze_lookback:
+            bw_cur = float(bw_series.iloc[-1])
+            bw_min = float(bw_series.tail(squeeze_lookback).min())
+            if not np.isnan(bw_cur) and bw_min > 0:
+                squeeze_on = bw_cur <= bw_min * 1.2
+
+    # B. RVOL 上昇傾向
+    rvol_building = False
+    if 'RVOL' in df_m5.columns:
+        rvol_vals = df_m5['RVOL'].dropna().tail(5).values
+        if len(rvol_vals) >= 4:
+            diffs = np.diff(rvol_vals[-4:])
+            rvol_building = int(np.sum(diffs > 0)) >= 3
+
+    # C. ADX 転換 + DI 方向性
+    adx_turning_up = adx_turning_down = False
+    if all(c in df_m5.columns for c in ['ADX', 'DI_plus', 'DI_minus']):
+        adx_vals = df_m5['ADX'].dropna().tail(5).values
+        di_plus  = float(df_m5['DI_plus'].iloc[-1])
+        di_minus = float(df_m5['DI_minus'].iloc[-1])
+        if len(adx_vals) >= 3:
+            adx_cur  = float(adx_vals[-1])
+            adx_prev = float(adx_vals[-3])
+            if adx_cur < 30 and adx_cur > adx_prev + 0.5:
+                adx_turning_up   = di_plus  > di_minus
+                adx_turning_down = di_minus > di_plus
+
+    score_up   = int(squeeze_on) + int(rvol_building) + int(adx_turning_up)
+    score_down = int(squeeze_on) + int(rvol_building) + int(adx_turning_down)
+
+    return {
+        'pre_surge_up':   score_up   >= 2,
+        'pre_surge_down': score_down >= 2,
+        'squeeze_on':     squeeze_on,
+        'rvol_building':  rvol_building,
+        'score_up':       score_up,
+        'score_down':     score_down,
+    }
+
+
 def detect_big_move(df_m5: pd.DataFrame,
                     lookback: int = 12,
                     atr_multi: float = 2.0) -> str:
