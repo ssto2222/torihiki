@@ -151,6 +151,7 @@ SCALP = dict(
     cooldown_min      = 10,      # クールダウン時間（分）
     cooldown_trades   = 3,       # この回数トレードするごとにクールダウンを発動
     min_margin_level  = 200.0,   # 証拠金維持率の下限（%）。これを下回らないようlotを縮小
+    min_balance_jpy   = 3000,    # 残高（円換算）がこの値以下ならシグナル停止（0=無効）
     big_move_lookback  = 12,     # 大変動判定: 過去 N 本（12本=60分）
     big_move_atr_multi = 2.0,   # 大変動判定: 価格変動 > ATR × N で切換え
     m1_early_margin    = 2.0,   # M5 RSI が閾値からこの値以内に接近 + M1 先行クロスで早期執行
@@ -158,14 +159,11 @@ SCALP = dict(
                                 # False=通常モード: close>prev_close で確認（バー確定後）
     lot_max            = {'XAUUSD': 0.05, 'BTCUSD': 0.10},  # シンボル別ロット上限。未設定 = 上限なし
     sma20_slope_bars   = 5,     # 傾き計算バー数（各TF共通）
-    sma20_slope_atr_thr = 0.05, # BUY: slope > +ATR×この値 / SELL: slope < -ATR×この値 が必要（緩和: 0.10→0.05）
+    sma20_slope_atr_thr = 0.0,  # BUY: slope > 0 / SELL: slope < 0（0=方向チェックのみ・大きさ不問）
     sma20_accel_bars   = 4,     # SMA20 2階微分: 傾きサンプル数（n本の傾きでトレンド判定）
     sma20_accel_tol    = 0.5,   # SMA20 2階微分: 減少率閾値（コンセンサス外: 参照のみ）
     m1_accel_gate_enabled = False, # True: 実行ゲートでM1加速度チェック（デフォルトOFF: M1はノイジー）
-    m15_slope_filter   = False, # False: M15傾きはコンセンサスで判定済みのため単独ゲート無効（緩和）
-    # 急落・急騰時 SMA20 バイパス（大きく乖離している場合はタッチ不要）
-    sell_sma_bypass_atr  = 0.8,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ（緩和: 1.2→0.8）
-    buy_sma_bypass_atr   = 0.8,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ（緩和: 1.2→0.8）
+    m15_slope_filter   = False, # False: 単独ゲート無効（コンセンサスで包含済み）
     # SMA20 タッチマージン（キャッシュ未計算時の ATR ベースフォールバック）
     sma20_touch_margin_atr = 0.4, # タッチマージン = M5_ATR × この値（BTCUSD: ATR1000→$150）
     # MTF H1 フィルター緩和
@@ -192,7 +190,7 @@ SCALP = dict(
     # ── SMA 優先エントリー + RSI スケールイン ────────────────────────────
     sma_watch_cooldown_s  = 30,    # 直前エントリーからこの秒数以内は sma_pending 自動再武装しない（緩和: 60→30）
     sma_entry_lot_frac    = 1.0,   # SMA優先エントリーのロット倍率（1.0 = 変更なし）
-    sma_pending_timeout_min = 15,  # sma_pending / confirm_pending のタイムアウト（分）
+    sma_pending_timeout_min = 30,  # sma_pending / confirm_pending のタイムアウト（分）（緩和: 15→30）
     sma_departure_atr     = 1.0,   # pending中に価格がSMA20からこのATR以上乖離したら即エントリー（緩和: 1.5→1.0）
     rsi_scalein_enabled   = True,  # RSIクロスによるスケールイン有効化
     rsi_scalein_lot_frac  = 0.5,   # スケールインエントリーのロット倍率
@@ -233,6 +231,19 @@ ELLIOTT = dict(
     w2_bars_ago_max  = 8,     # 第2底/天井が直近 N 本以内であること
     fib_tp_ext       = 1.618, # TP = W2底 + Wave1_size × fib_tp_ext（Wave3 黄金比目標）
     sl_buffer_atr    = 0.3,   # SL = W2底 - ATR × sl_buffer_atr（波動失効ライン）
+)
+
+# ── D1 トレンドライン検出 ──────────────────────────────────────────
+D1_TRENDLINE = dict(
+    enabled          = True,    # 機能の有効/無効
+    sw_window        = 3,       # スウィング検出ウィンドウ（各側 N 本確認）
+    min_points       = 2,       # ライン設定に必要な最低極値数
+    max_lookback_pts = 5,       # ライン当てに使う最大極値数（最新側から選択）
+    near_atr_mult    = 0.5,     # D1_ATR × この値 以内を「近接」と判定
+    tp_cap_enabled   = True,    # True: TP をトレンドライン手前でキャップ
+    tp_cap_buffer_atr = 0.1,    # TP キャップのバッファ（ライン ± D1_ATR × この値）
+    arm_on_bounce    = True,    # True: D1バウンス検出で sma_pending を自動アーム
+    arm_on_break     = True,    # True: D1ブレイクアウト検出で sma_pending を自動アーム
 )
 
 # ── ウィップソー（行ってこい相場）対策 ────────────────────────────
