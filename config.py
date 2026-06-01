@@ -158,14 +158,14 @@ SCALP = dict(
                                 # False=通常モード: close>prev_close で確認（バー確定後）
     lot_max            = {'XAUUSD': 0.05, 'BTCUSD': 0.10},  # シンボル別ロット上限。未設定 = 上限なし
     sma20_slope_bars   = 5,     # 傾き計算バー数（各TF共通）
-    sma20_slope_atr_thr = 0.10, # BUY: slope > +ATR×この値 / SELL: slope < -ATR×この値 が必要
+    sma20_slope_atr_thr = 0.05, # BUY: slope > +ATR×この値 / SELL: slope < -ATR×この値 が必要（緩和: 0.10→0.05）
     sma20_accel_bars   = 4,     # SMA20 2階微分: 傾きサンプル数（n本の傾きでトレンド判定）
-    sma20_accel_tol    = 0.5,   # SMA20 2階微分: 減少率閾値（0.5=ウィンドウ内50%超縮小で禁止）
+    sma20_accel_tol    = 0.5,   # SMA20 2階微分: 減少率閾値（コンセンサス外: 参照のみ）
     m1_accel_gate_enabled = False, # True: 実行ゲートでM1加速度チェック（デフォルトOFF: M1はノイジー）
-    m15_slope_filter   = True,  # True: M15 SMA20が逆方向に傾いていればエントリー禁止（EW2は免除）
+    m15_slope_filter   = False, # False: M15傾きはコンセンサスで判定済みのため単独ゲート無効（緩和）
     # 急落・急騰時 SMA20 バイパス（大きく乖離している場合はタッチ不要）
-    sell_sma_bypass_atr  = 1.2,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ
-    buy_sma_bypass_atr   = 1.2,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ
+    sell_sma_bypass_atr  = 0.8,  # SELL: 価格 < SMA20 - ATR×この値 → SMA20タッチスキップ（緩和: 1.2→0.8）
+    buy_sma_bypass_atr   = 0.8,  # BUY:  価格 > SMA20 + ATR×この値 → SMA20タッチスキップ（緩和: 1.2→0.8）
     # SMA20 タッチマージン（キャッシュ未計算時の ATR ベースフォールバック）
     sma20_touch_margin_atr = 0.4, # タッチマージン = M5_ATR × この値（BTCUSD: ATR1000→$150）
     # MTF H1 フィルター緩和
@@ -190,10 +190,10 @@ SCALP = dict(
     vol_bo_tp_multi       = 1.8,   # TP倍率（通常スキャルプTP × この値 → 大きな波に乗る）
     vol_bo_sl_multi       = 0.8,   # SL倍率（通常SL × この値 → エントリー根拠明確ならタイトに）
     # ── SMA 優先エントリー + RSI スケールイン ────────────────────────────
-    sma_watch_cooldown_s  = 60,    # 直前エントリーからこの秒数以内は sma_pending 自動再武装しない
+    sma_watch_cooldown_s  = 30,    # 直前エントリーからこの秒数以内は sma_pending 自動再武装しない（緩和: 60→30）
     sma_entry_lot_frac    = 1.0,   # SMA優先エントリーのロット倍率（1.0 = 変更なし）
     sma_pending_timeout_min = 15,  # sma_pending / confirm_pending のタイムアウト（分）
-    sma_departure_atr     = 1.5,   # pending中に価格がSMA20からこのATR以上乖離したら即エントリー
+    sma_departure_atr     = 1.0,   # pending中に価格がSMA20からこのATR以上乖離したら即エントリー（緩和: 1.5→1.0）
     rsi_scalein_enabled   = True,  # RSIクロスによるスケールイン有効化
     rsi_scalein_lot_frac  = 0.5,   # スケールインエントリーのロット倍率
     rsi_scalein_max       = 2,     # スケールイン最大回数（per primary entry）

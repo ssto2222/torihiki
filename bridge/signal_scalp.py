@@ -262,9 +262,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _sma20_m5_accel_sell_ok = _sma20_accel_ok(df,    'sell')
         _sma20_m1_accel_buy_ok  = _sma20_accel_ok(df_m1, 'buy')
         _sma20_m1_accel_sell_ok = _sma20_accel_ok(df_m1, 'sell')
-        # コンセンサス: M5傾き AND M15傾き AND M5加速度（3条件すべて必要）
-        _sma20_consensus_buy  = (_sma20_slope_buy_ok  and _sma20_m15_buy_ok and _sma20_m5_accel_buy_ok)
-        _sma20_consensus_sell = (_sma20_slope_sell_ok and _sma20_m15_sell_ok and _sma20_m5_accel_sell_ok)
+        # コンセンサス: M5傾き AND M15傾き（M5加速度はコンセンサスから除外: ノイジーすぎ）
+        _sma20_consensus_buy  = (_sma20_slope_buy_ok  and _sma20_m15_buy_ok)
+        _sma20_consensus_sell = (_sma20_slope_sell_ok and _sma20_m15_sell_ok)
         # SMA タッチ入力は M1 タッチ判定内で slope をチェックするため、ここでは H1 レジームのみ判定
         mtf_buy_ok  = (regime_h1s != 'trend_down' and
                        (not _use_di_filter or _h1_di_buy))
@@ -653,17 +653,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 and not state.buy_sma_pending  and not state.sell_sma_pending
                 and not state.buy_confirm_pending and not state.sell_confirm_pending):
             if (buy_enabled and not avoid_buy_surge and mtf_buy_ok and rsi_cur >= 50.0
-                    and _sma20_m1_buy_ok and _sma20_consensus_buy):
+                    and _sma20_consensus_buy):
                 state.buy_sma_pending = True
                 state.buy_sma_at      = now
                 state.buy_sma_level   = 50.0
-                print(f"[SMA優先AUTO-WATCH/BUY] RSI={rsi_cur:.1f} MTF=OK M1/M5/M15傾きOK")
+                print(f"[SMA優先AUTO-WATCH/BUY] RSI={rsi_cur:.1f} MTF=OK M5/M15傾きOK")
             elif (sell_enabled and not avoid_sell_surge and mtf_sell_ok and rsi_cur < 50.0
-                    and _sma20_m1_sell_ok and _sma20_consensus_sell):
+                    and _sma20_consensus_sell):
                 state.sell_sma_pending = True
                 state.sell_sma_at      = now
                 state.sell_sma_level   = 50.0
-                print(f"[SMA優先AUTO-WATCH/SELL] RSI={rsi_cur:.1f} MTF=OK M1/M5/M15傾きOK")
+                print(f"[SMA優先AUTO-WATCH/SELL] RSI={rsi_cur:.1f} MTF=OK M5/M15傾きOK")
 
         # ── プレサージ早期アーミング ──────────────────────────────────────
         # BB Squeeze + RVOL 上昇 + ADX 転換 で 2 条件以上充足
@@ -701,7 +701,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 and df_m1 is not None and len(df_m1) >= 2 and m1_early_margin > 0):
             rsi_m1_prev2 = float(df_m1['RSI'].iloc[-2])
             if (buy_enabled and not state.buy_sma_pending and not state.buy_confirm_pending
-                    and not avoid_buy_surge and _sma20_m1_buy_ok):
+                    and not avoid_buy_surge):
                 for thr in buy_thrs:
                     if thr - m1_early_margin <= rsi_cur <= thr:
                         if rsi_m1_cur > thr and rsi_m1_prev2 <= thr:
@@ -723,8 +723,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                             break
             if (confirmed_signal is None and sell_enabled
                     and not state.sell_sma_pending and not state.sell_confirm_pending
-                    and not state.buy_sma_pending and not avoid_sell_surge
-                    and _sma20_m1_sell_ok):
+                    and not state.buy_sma_pending and not avoid_sell_surge):
                 for thr in sell_thrs:
                     if thr <= rsi_cur <= thr + m1_early_margin:
                         if rsi_m1_cur < thr and rsi_m1_prev2 >= thr:
@@ -1204,11 +1203,6 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif (not _is_ew2_signal and not _is_scalein_signal and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur <= scalp.get('m1_rsi_os_gate', 30.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≤{scalp.get("m1_rsi_os_gate", 30.0):.0f} 売られすぎ エントリー禁止'
-            # M1 SMA20 絶対ゲート: EW2は免除（W2形成中はM1下落が正常）
-            elif new_cross == 'buy' and not _is_ew2_signal and not _sma20_m1_buy_ok:
-                skip = 'M1 SMA20下落中 BUY絶対禁止'
-            elif new_cross == 'sell' and not _is_ew2_signal and not _sma20_m1_sell_ok:
-                skip = 'M1 SMA20上昇中 SELL絶対禁止'
             # M1 SMA20 加速度ゲート: EW2は免除（W2形成中は正常な減速）
             elif (new_cross == 'buy' and not _is_ew2_signal
                   and scalp.get('m1_accel_gate_enabled', False)
