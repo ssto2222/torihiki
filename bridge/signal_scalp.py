@@ -1394,8 +1394,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif action == 'sell':
                 sl_price = max(sl_price, close_v + _min_sl_dist)
 
-        # ── 証拠金維持率チェック: lot を上限調整 ────────────────────────
-        _min_ml     = scalp.get('min_margin_level', 200.0)
+        # ── 残高下限チェック: equity が min_balance_jpy 以下ならシグナル停止 ──
+        _min_bal_jpy = scalp.get('min_balance_jpy', 3000)
         _acc_equity = 0.0
         _acc_margin = 0.0
         _acc_ml     = 0.0   # 現在の維持率（表示用）
@@ -1404,10 +1404,21 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             if _acc is not None:
                 _acc_equity = float(_acc.equity)
                 _acc_margin = float(_acc.margin)
-                _acc_ml     = (_acc_equity / _acc_margin * 100.0
-                               if _acc_margin > 0 else 999.9)
-        except Exception as _ml_err:
-            _logger.warning(f'[証拠金] account_info 失敗: {_ml_err}')
+        except Exception as _bal_err:
+            _logger.warning(f'[残高チェック] account_info 失敗: {_bal_err}')
+
+        if _min_bal_jpy > 0 and _acc_equity > 0:
+            _equity_jpy = _acc_equity * jpy_rate
+            if _equity_jpy <= _min_bal_jpy:
+                msg = (f'残高不足 equity={_equity_jpy:.0f}円 ≤ {_min_bal_jpy}円 → シグナル停止')
+                print(f'  [{msg}]')
+                _logger.warning(f'[残高] {msg}')
+                action = 'none'
+
+        _acc_ml = (_acc_equity / _acc_margin * 100.0 if _acc_margin > 0 else 999.9)
+
+        # ── 証拠金維持率チェック: lot を上限調整 ────────────────────────
+        _min_ml = scalp.get('min_margin_level', 200.0)
 
         if action in ('buy', 'sell') and _min_ml > 0 and _acc_equity > 0:
             try:

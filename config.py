@@ -151,6 +151,7 @@ SCALP = dict(
     cooldown_min      = 10,      # クールダウン時間（分）
     cooldown_trades   = 3,       # この回数トレードするごとにクールダウンを発動
     min_margin_level  = 200.0,   # 証拠金維持率の下限（%）。これを下回らないようlotを縮小
+    min_balance_jpy   = 3000,    # 残高（円換算）がこの値以下ならシグナル停止（0=無効）
     big_move_lookback  = 12,     # 大変動判定: 過去 N 本（12本=60分）
     big_move_atr_multi = 2.0,   # 大変動判定: 価格変動 > ATR × N で切換え
     m1_early_margin    = 2.0,   # M5 RSI が閾値からこの値以内に接近 + M1 先行クロスで早期執行
