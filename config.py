@@ -236,6 +236,19 @@ ELLIOTT = dict(
     sl_buffer_atr    = 0.3,   # SL = W2底 - ATR × sl_buffer_atr（波動失効ライン）
 )
 
+# ── D1 トレンドライン検出 ──────────────────────────────────────────
+D1_TRENDLINE = dict(
+    enabled          = True,    # 機能の有効/無効
+    sw_window        = 3,       # スウィング検出ウィンドウ（各側 N 本確認）
+    min_points       = 2,       # ライン設定に必要な最低極値数
+    max_lookback_pts = 5,       # ライン当てに使う最大極値数（最新側から選択）
+    near_atr_mult    = 0.5,     # D1_ATR × この値 以内を「近接」と判定
+    tp_cap_enabled   = True,    # True: TP をトレンドライン手前でキャップ
+    tp_cap_buffer_atr = 0.1,    # TP キャップのバッファ（ライン ± D1_ATR × この値）
+    arm_on_bounce    = True,    # True: D1バウンス検出で sma_pending を自動アーム
+    arm_on_break     = True,    # True: D1ブレイクアウト検出で sma_pending を自動アーム
+)
+
 # ── ウィップソー（行ってこい相場）対策 ────────────────────────────
 WHIPSAW = dict(
     ratio_n            = 10,    # ATR集計本数（M5: 50分 / H1: 10時間）直近相場に絞る

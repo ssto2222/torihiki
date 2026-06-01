@@ -11,7 +11,7 @@ from core.indicators import add_m5_indicators, add_m1_indicators, add_h1_indicat
 from core.strategy   import (detect_big_move, detect_early_surge, detect_pre_surge,
                               should_avoid_entry_during_surge, detect_whipsaw,
                               detect_elliott_w2_buy, detect_elliott_w2_sell,
-                              detect_volume_breakout)
+                              detect_volume_breakout, detect_d1_trendlines)
 from core.patterns   import detect_all_patterns, PatternResult
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
@@ -94,9 +94,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         bar_changed = (bar_time != state.last_bar_time)
         rsi_prev_bar = float(df['RSI'].iloc[-2]) if len(df) >= 2 else float(state.prev_rsi or 0.0)
 
-        rsi_cur = float(df['RSI'].iloc[-1])
-        close_v = float(df['Close'].iloc[-1])
-        atr_v   = float(df['ATR'].iloc[-1])
+        rsi_cur      = float(df['RSI'].iloc[-1])
+        close_v      = float(df['Close'].iloc[-1])
+        prev_close_v = float(df['Close'].iloc[-2]) if len(df) >= 2 else close_v
+        atr_v        = float(df['ATR'].iloc[-1])
         if atr_v <= 0 or np.isnan(atr_v):
             return None  # ATR 計算不能 → SL/TP が計算できないためスキップ
 
@@ -143,6 +144,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 df_d1 = None
             elif 'SMA20' in df_d1.columns:
                 sma20_d1_val = float(df_d1['SMA20'].iloc[-1])
+
+        # D1 トレンドライン（重要価格）検出
+        d1_tl = detect_d1_trendlines(df_d1, close_v, prev_close_v, cfg)
+        _tl_enabled = cfg.get('D1_TRENDLINE', {}).get('enabled', True)
 
         # M1 RSI ソフトブロック追跡（追加ポジション抑制用。ハードブロック m1_rsi_ob/os_gate とは別閾値）
         if not np.isnan(rsi_m1_cur):
@@ -694,6 +699,40 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 state.pre_surge_armed = True
                 state.pre_surge_score = pre_surge_info['score_down']
                 print(f"[プレサージSELL] RSI={rsi_cur:.1f} score={pre_surge_info['score_down']} {_ps_tag}")
+
+        # ── D1 トレンドライン: バウンス/ブレイクによる自動アーム ────────────
+        if (_tl_enabled and confirmed_signal is None and not _just_entered
+                and (not in_cooldown or _normal_variant)
+                and not state.buy_sma_pending  and not state.buy_confirm_pending
+                and not state.sell_sma_pending and not state.sell_confirm_pending):
+            _tl_arm_bounce = cfg.get('D1_TRENDLINE', {}).get('arm_on_bounce', True)
+            _tl_arm_break  = cfg.get('D1_TRENDLINE', {}).get('arm_on_break',  True)
+            # 支持線バウンス or 支持線ブレイク上抜け → BUY アーム
+            if buy_enabled and not avoid_buy_surge and mtf_buy_ok:
+                _tl_buy_trigger = ((_tl_arm_bounce and d1_tl['bounce_buy'])
+                                   or (_tl_arm_break and d1_tl['break_resistance']))
+                if _tl_buy_trigger:
+                    _tl_label = '支持線バウンス' if d1_tl['bounce_buy'] else '抵抗線ブレイク'
+                    _tl_price = (d1_tl['support']['price'] if d1_tl['bounce_buy']
+                                 else d1_tl['resistance']['price'])
+                    state.buy_sma_pending = True
+                    state.buy_sma_at      = now
+                    state.buy_sma_level   = rsi_cur
+                    print(f"[D1TL/{_tl_label}] BUY arm  line={_tl_price:.2f} "
+                          f"close={close_v:.2f} dist_atr={d1_tl['sup_dist_atr'] if d1_tl['bounce_buy'] else d1_tl['res_dist_atr']:.2f}")
+            # 抵抗線バウンス or 支持線ブレイク下抜け → SELL アーム
+            elif sell_enabled and not avoid_sell_surge and mtf_sell_ok:
+                _tl_sell_trigger = ((_tl_arm_bounce and d1_tl['bounce_sell'])
+                                    or (_tl_arm_break and d1_tl['break_support']))
+                if _tl_sell_trigger:
+                    _tl_label = '抵抗線バウンス' if d1_tl['bounce_sell'] else '支持線ブレイク'
+                    _tl_price = (d1_tl['resistance']['price'] if d1_tl['bounce_sell']
+                                 else d1_tl['support']['price'])
+                    state.sell_sma_pending = True
+                    state.sell_sma_at      = now
+                    state.sell_sma_level   = rsi_cur
+                    print(f"[D1TL/{_tl_label}] SELL arm line={_tl_price:.2f} "
+                          f"close={close_v:.2f} dist_atr={d1_tl['res_dist_atr'] if d1_tl['bounce_sell'] else d1_tl['sup_dist_atr']:.2f}")
 
         # M1 早期執行: M5 RSI が閾値に接近中かつ M1 が先行クロス
         m1_early_margin = scalp.get('m1_early_margin', 2.0)
@@ -1383,6 +1422,23 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 tp_price = close_v - _tp_dist * _mb_tp_m
                 sl_price = close_v + _sl_dist * _mb_rm
 
+        # D1 トレンドライン TP キャップ: TP がライン手前で止まるよう調整
+        if (_tl_enabled and action in ('buy', 'sell')
+                and cfg.get('D1_TRENDLINE', {}).get('tp_cap_enabled', True)):
+            _tl_buf = d1_tl['d1_atr'] * cfg.get('D1_TRENDLINE', {}).get('tp_cap_buffer_atr', 0.1)
+            if action == 'buy' and d1_tl['resistance']['valid']:
+                _res_cap = d1_tl['resistance']['price'] - _tl_buf
+                if close_v < _res_cap < tp_price:
+                    tp_price = _res_cap
+                    print(f"[D1TL/TP cap BUY] 抵抗線={d1_tl['resistance']['price']:.2f} "
+                          f"→ TP={tp_price:.2f}")
+            elif action == 'sell' and d1_tl['support']['valid']:
+                _sup_cap = d1_tl['support']['price'] + _tl_buf
+                if close_v > _sup_cap > tp_price:
+                    tp_price = _sup_cap
+                    print(f"[D1TL/TP cap SELL] 支持線={d1_tl['support']['price']:.2f} "
+                          f"→ TP={tp_price:.2f}")
+
         # ── 最低 SL 距離フロア ────────────────────────────────────────
         # EW2 は W2 失効ラインをSLとして意図的に設定しているため minフロアを免除。
         # それ以外はシグナル→執行の価格移動で SL 即抵触を防ぐ。
@@ -1561,6 +1617,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'account_equity':     round(_acc_equity, 2),
             'account_margin':     round(_acc_margin, 2),
             'min_margin_level':   _min_ml,
+            # D1 トレンドライン
+            'd1_tl_res':          round(d1_tl['resistance']['price'], 2) if d1_tl['resistance']['valid'] else None,
+            'd1_tl_sup':          round(d1_tl['support']['price'],    2) if d1_tl['support']['valid']    else None,
+            'd1_tl_res_n':        d1_tl['resistance']['n_points'],
+            'd1_tl_sup_n':        d1_tl['support']['n_points'],
+            'd1_tl_near_res':     d1_tl['near_resistance'],
+            'd1_tl_near_sup':     d1_tl['near_support'],
+            'd1_tl_break_res':    d1_tl['break_resistance'],
+            'd1_tl_break_sup':    d1_tl['break_support'],
+            'd1_tl_bounce_buy':   d1_tl['bounce_buy'],
+            'd1_tl_bounce_sell':  d1_tl['bounce_sell'],
         }
 
     except Exception:

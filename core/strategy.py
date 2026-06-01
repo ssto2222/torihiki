@@ -458,6 +458,147 @@ def detect_whipsaw(df: pd.DataFrame, n: int = 20,
     return ratio >= threshold, round(ratio, 2)
 
 
+def detect_d1_trendlines(
+    df_d1: pd.DataFrame,
+    close: float,
+    prev_close: float,
+    cfg: dict,
+) -> dict:
+    """D1 スウィング高値/安値にトレンドラインを当て、現在バーへ延長した重要価格と
+    近接・ブレイク・バウンスシグナルを返す。
+
+    極値は現在バー(最終行)を除いた履歴から検出。
+    2点以上の極値を線形回帰で結び、現在バー位置へ投影した価格を重要価格とする。
+
+    Returns:
+        resistance / support: {'price', 'slope', 'n_points', 'valid'}
+        near_resistance / near_support  : 近接フラグ
+        break_resistance               : 切り上げ (抵抗線を上抜け → BUY候補)
+        break_support                  : 割り込み (支持線を下抜け → SELL候補)
+        bounce_buy                     : 支持線反発 (BUY候補)
+        bounce_sell                    : 抵抗線反落 (SELL候補)
+        res_dist_atr / sup_dist_atr    : ライン距離 / D1_ATR
+        d1_atr                         : D1 ATR 値
+    """
+    _nan = float('nan')
+    _empty = dict(
+        resistance=dict(price=_nan, slope=0.0, n_points=0, valid=False),
+        support=   dict(price=_nan, slope=0.0, n_points=0, valid=False),
+        d1_atr=1.0,
+        near_resistance=False, near_support=False,
+        break_resistance=False, break_support=False,
+        bounce_buy=False, bounce_sell=False,
+        res_dist_atr=_nan, sup_dist_atr=_nan,
+    )
+    if df_d1 is None or len(df_d1) < 5:
+        return _empty
+
+    tl_cfg    = cfg.get('D1_TRENDLINE', {})
+    enabled   = tl_cfg.get('enabled', True)
+    if not enabled:
+        return _empty
+
+    sw_window  = tl_cfg.get('sw_window',  3)
+    min_points = tl_cfg.get('min_points', 2)
+    max_pts    = tl_cfg.get('max_lookback_pts', 5)
+    near_mult  = tl_cfg.get('near_atr_mult', 0.5)
+
+    # 現在バー(最終行)を除いた履歴から極値を検出
+    df_hist = df_d1.iloc[:-1]
+    if len(df_hist) < sw_window * 2 + 3:
+        return _empty
+
+    has_hl = 'High' in df_hist.columns and 'Low' in df_hist.columns
+    highs  = df_hist['High'].values  if has_hl else df_hist['Close'].values
+    lows   = df_hist['Low'].values   if has_hl else df_hist['Close'].values
+    cls    = df_hist['Close'].values
+
+    # D1 ATR（近接判定用）
+    tr = np.maximum(highs[1:] - lows[1:],
+         np.maximum(np.abs(highs[1:] - cls[:-1]),
+                    np.abs(lows[1:]  - cls[:-1])))
+    window_atr = min(14, len(tr))
+    d1_atr = float(np.mean(tr[-window_atr:])) if window_atr > 0 else 1.0
+    if d1_atr <= 0 or np.isnan(d1_atr):
+        d1_atr = 1.0
+
+    # スウィング高値・安値を検出（patterns.find_swing_points を再利用）
+    from core.patterns import find_swing_points
+    sw_highs, sw_lows = find_swing_points(df_hist, window=sw_window)
+
+    # 現在バーの時系列インデックス位置（投影先）
+    current_idx = float(len(df_d1) - 1)
+
+    def _fit_line(pts: list) -> tuple | None:
+        """最新側 max_pts 個を線形回帰して (slope, projected_price, n) を返す"""
+        if len(pts) < min_points:
+            return None
+        use = pts[-max_pts:]
+        xs  = np.array([p[0] for p in use], dtype=float)
+        ys  = np.array([p[1] for p in use], dtype=float)
+        if len(xs) == 2:
+            slope = (ys[1] - ys[0]) / (xs[1] - xs[0]) if xs[1] != xs[0] else 0.0
+            projected = ys[0] + slope * (current_idx - xs[0])
+        else:
+            coef = np.polyfit(xs, ys, 1)
+            slope = float(coef[0])
+            projected = slope * current_idx + float(coef[1])
+        return slope, projected, len(use)
+
+    res_fit = _fit_line(sw_highs)
+    sup_fit = _fit_line(sw_lows)
+
+    res_info = dict(price=_nan, slope=0.0, n_points=0, valid=False)
+    if res_fit is not None:
+        res_info = dict(price=res_fit[1], slope=res_fit[0], n_points=res_fit[2], valid=True)
+
+    sup_info = dict(price=_nan, slope=0.0, n_points=0, valid=False)
+    if sup_fit is not None:
+        sup_info = dict(price=sup_fit[1], slope=sup_fit[0], n_points=sup_fit[2], valid=True)
+
+    res_p = res_info['price']
+    sup_p = sup_info['price']
+    near_thr = d1_atr * near_mult
+
+    def _dist_atr(p):
+        return abs(close - p) / d1_atr if not np.isnan(p) else _nan
+
+    near_resistance = (res_info['valid'] and not np.isnan(res_p)
+                       and abs(close - res_p) <= near_thr)
+    near_support    = (sup_info['valid'] and not np.isnan(sup_p)
+                       and abs(close - sup_p) <= near_thr)
+
+    # 切り上げ: 前足が抵抗線以下 → 現足が抵抗線以上（上抜けブレイク）
+    break_resistance = (res_info['valid'] and not np.isnan(res_p)
+                        and prev_close < res_p <= close)
+    # 割り込み: 前足が支持線以上 → 現足が支持線以下（下抜けブレイク）
+    break_support    = (sup_info['valid'] and not np.isnan(sup_p)
+                        and prev_close > sup_p >= close)
+
+    # 支持線バウンス: 直前に支持線近辺まで下落し現足が上昇回復
+    bounce_buy  = (sup_info['valid'] and not np.isnan(sup_p)
+                   and prev_close <= sup_p + near_thr
+                   and close > prev_close and close > sup_p)
+    # 抵抗線バウンス: 直前に抵抗線近辺まで上昇し現足が下落
+    bounce_sell = (res_info['valid'] and not np.isnan(res_p)
+                   and prev_close >= res_p - near_thr
+                   and close < prev_close and close < res_p)
+
+    return dict(
+        resistance=res_info,
+        support=sup_info,
+        d1_atr=d1_atr,
+        near_resistance=near_resistance,
+        near_support=near_support,
+        break_resistance=break_resistance,
+        break_support=break_support,
+        bounce_buy=bounce_buy,
+        bounce_sell=bounce_sell,
+        res_dist_atr=_dist_atr(res_p),
+        sup_dist_atr=_dist_atr(sup_p),
+    )
+
+
 def _ew_swing(df: pd.DataFrame, window: int = 3):
     """EW2 検出用スイングポイント（遅延インポートで循環参照を回避）"""
     from core.patterns import find_swing_points
