@@ -114,7 +114,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                 if 'SMA20' in df_m1.columns else float('nan'))
 
         # M15 データ取得（マルチTF SMA20 傾きチェック用）
-        df_m15_raw    = fetch_ohlcv(symbol, 'M15', 30)
+        # ADX 二重平滑化 + SMA20(20) の dropna で先頭 ~28 本が落ちるため多めに取得する
+        df_m15_raw    = fetch_ohlcv(symbol, 'M15', 60)
         df_m15        = None
         sma20_m15_val = float('nan')
         if df_m15_raw is not None:
@@ -134,8 +135,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             if df_m5_ew2.empty:
                 df_m5_ew2 = None
 
-        # D1 データ取得（SMA20 方向チェック用: EW2以外は逆方向エントリー禁止）
-        df_d1_raw    = fetch_ohlcv(symbol, 'D1', 30)
+        # D1 データ取得（SMA20 方向チェック + D1トレンドライン検出用）
+        # ADX 二重平滑化 + SMA20(20) の dropna で先頭 ~28 本が落ちるため多めに取得する。
+        # 30本だと dropna 後 ~2 行しか残らず D1トレンドライン(>=5行要求)が機能しない。
+        df_d1_raw    = fetch_ohlcv(symbol, 'D1', 120)
         df_d1        = None
         sma20_d1_val = float('nan')
         if df_d1_raw is not None:
@@ -1413,18 +1416,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 sl_price = close_v + _sl_dist * _mb_rm
 
         # D1 トレンドライン TP キャップ: TP がライン手前で止まるよう調整
+        # 極小 TP（スプレッド以下 → 約定拒否・即損切り）を防ぐため最低 TP 距離を確保。
+        # ラインが近すぎてキャップ後の距離が tp_move × min_frac 未満になる場合はキャップしない。
         if (_tl_enabled and action in ('buy', 'sell')
                 and cfg.get('D1_TRENDLINE', {}).get('tp_cap_enabled', True)):
-            _tl_buf = d1_tl['d1_atr'] * cfg.get('D1_TRENDLINE', {}).get('tp_cap_buffer_atr', 0.1)
+            _tl_buf      = d1_tl['d1_atr'] * cfg.get('D1_TRENDLINE', {}).get('tp_cap_buffer_atr', 0.1)
+            _tl_min_frac = cfg.get('D1_TRENDLINE', {}).get('tp_cap_min_frac', 0.3)
+            _tl_min_dist = tp_move * _tl_min_frac
             if action == 'buy' and d1_tl['resistance']['valid']:
                 _res_cap = d1_tl['resistance']['price'] - _tl_buf
-                if close_v < _res_cap < tp_price:
+                if close_v < _res_cap < tp_price and (_res_cap - close_v) >= _tl_min_dist:
                     tp_price = _res_cap
                     print(f"[D1TL/TP cap BUY] 抵抗線={d1_tl['resistance']['price']:.2f} "
                           f"→ TP={tp_price:.2f}")
             elif action == 'sell' and d1_tl['support']['valid']:
                 _sup_cap = d1_tl['support']['price'] + _tl_buf
-                if close_v > _sup_cap > tp_price:
+                if close_v > _sup_cap > tp_price and (close_v - _sup_cap) >= _tl_min_dist:
                     tp_price = _sup_cap
                     print(f"[D1TL/TP cap SELL] 支持線={d1_tl['support']['price']:.2f} "
                           f"→ TP={tp_price:.2f}")

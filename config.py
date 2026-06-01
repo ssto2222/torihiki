@@ -242,6 +242,7 @@ D1_TRENDLINE = dict(
     near_atr_mult    = 0.5,     # D1_ATR × この値 以内を「近接」と判定
     tp_cap_enabled   = True,    # True: TP をトレンドライン手前でキャップ
     tp_cap_buffer_atr = 0.1,    # TP キャップのバッファ（ライン ± D1_ATR × この値）
+    tp_cap_min_frac  = 0.3,     # キャップ後TP距離の下限 = 通常tp_move × この値（極小TP防止）
     arm_on_bounce    = True,    # True: D1バウンス検出で sma_pending を自動アーム
     arm_on_break     = True,    # True: D1ブレイクアウト検出で sma_pending を自動アーム
 )
