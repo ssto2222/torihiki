@@ -411,9 +411,17 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                 pos           = ea.get('positions', 0)
                 bal           = ea.get('balance', 'N/A')
 
-                if consec_losses >= _eff_rules.get('max_consecutive_losses', max_consec) and data['action'] in ('buy', 'sell'):
+                def _runner_cancel(reason: str) -> None:
+                    """runner.py 側でエントリーをキャンセルし、signal_scalp で加算済みの
+                    state.count を戻す（実エントリーなしなので trades_today を増やさない）。"""
                     data['action']      = 'none'
-                    data['skip_reason'] = f'consecutive_losses={consec_losses}>={max_consec}'
+                    data['skip_reason'] = reason
+                    if sc_state.count > 0:
+                        sc_state.count -= 1
+                    data['trades_today'] = sc_state.count
+
+                if consec_losses >= _eff_rules.get('max_consecutive_losses', max_consec) and data['action'] in ('buy', 'sell'):
+                    _runner_cancel(f'consecutive_losses={consec_losses}>={max_consec}')
 
                 # 時間帯バイアス回避
                 if tb_cfg.get('enabled', False) and tb_state.hours:
@@ -433,8 +441,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                             tb_state.danger_close_done_hr = danger_hour
 
                     if in_skip_window and data.get('action') in ('buy', 'sell'):
-                        data['action']      = 'none'
-                        data['skip_reason'] = f'禁止時間帯({now_utc.strftime("%H:%M")}UTC)'
+                        _runner_cancel(f'禁止時間帯({now_utc.strftime("%H:%M")}UTC)')
 
                     if tb_state.prev_in_danger and not in_skip_window:
                         _reset_entry_windows(sig_state)
@@ -447,8 +454,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
                             and now_utc < tb_state.danger_exit_until
                             and data.get('action') in ('buy', 'sell')):
                         rem = int((tb_state.danger_exit_until - now_utc).total_seconds() / 60) + 1
-                        data['action']      = 'none'
-                        data['skip_reason'] = f'危険時間帯後クールダウン(残{rem}分)'
+                        _runner_cancel(f'危険時間帯後クールダウン(残{rem}分)')
                     elif tb_state.danger_exit_until and now_utc >= tb_state.danger_exit_until:
                         tb_state.danger_exit_until = None
 
