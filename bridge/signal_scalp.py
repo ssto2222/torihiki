@@ -142,8 +142,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         today = now.date()
 
         if state.date != today:
-            state.count = 0
-            state.date  = today
+            state.count         = 0
+            state.signals_today = 0
+            state.date          = today
 
         df_raw = fetch_ohlcv(symbol, sig_tf, 50)
         if df_raw is None:
@@ -1314,6 +1315,35 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             pos_st['max_positions']   = _max_pos_cap
             pos_st['available_slots'] = max(0, _max_pos_cap - pos_st['total_positions'])
 
+        # ── 残高チェック（ゲート前）: 残高不足ならシグナル点灯ごと阻止 ─────────
+        _min_bal_jpy   = scalp.get('min_balance_jpy', 3000)
+        _acc_equity    = 0.0
+        _acc_margin    = 0.0
+        _acc_ml        = 0.0
+        _acc_retrieved = False
+        try:
+            _acc = mt5.account_info()
+            if _acc is not None:
+                _acc_equity    = float(_acc.equity)
+                _acc_margin    = float(_acc.margin)
+                _acc_retrieved = True
+        except Exception as _bal_err:
+            _logger.warning(f'[残高チェック] account_info 失敗: {_bal_err}')
+
+        _balance_block = ''   # 残高ブロック理由（空文字なら問題なし）
+        if _min_bal_jpy > 0:
+            if not _acc_retrieved:
+                _balance_block = '残高取得失敗 → フェイルセーフでシグナル停止'
+            else:
+                _equity_jpy = _acc_equity * jpy_rate
+                if _equity_jpy <= _min_bal_jpy:
+                    _balance_block = (f'残高不足 equity={_equity_jpy:.0f}円 ≤ {_min_bal_jpy}円')
+
+        if _balance_block:
+            print(f'  [{_balance_block}]')
+            _logger.warning(f'[残高] {_balance_block} → シグナル停止')
+            new_cross = None   # ゲートを通らせない（state.count 増加しない）
+
         # M1 BB ゲートを事前評価（elif チェーン外に出すことで後続ゲートが確実に評価される）
         _bb_gate_skip = ''
         if (new_cross and df_m1 is not None and not _is_ew2_signal
@@ -1380,20 +1410,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 opp_dir = 'sell' if new_cross == 'buy' else 'buy'
                 if _has_positions_in_direction(symbol, magic_id, opp_dir, mt5=mt5):
                     # 逆方向にポジションあり → ヘッジ許可
-                    action            = new_cross
-                    state.last_action = new_cross
-                    state.count      += 1
-                    state.last_at     = now
+                    action                = new_cross
+                    state.last_action     = new_cross
+                    state.signals_today  += 1
+                    state.count          += 1
+                    state.last_at         = now
                     if state.count % cooldown_trades == 0:
                         state.cooldown_start_at = now
                 else:
                     skip = (f"max_positions={pos_st['max_positions']}に到達"
                             f"（全{pos_st['total_positions']}本）")
             else:
-                action          = new_cross
-                state.last_action = new_cross
-                state.count    += 1
-                state.last_at   = now
+                action               = new_cross
+                state.last_action    = new_cross
+                state.signals_today += 1
+                state.count         += 1
+                state.last_at        = now
                 if state.count % cooldown_trades == 0:
                     state.cooldown_start_at = now
 
@@ -1534,36 +1566,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             elif action == 'sell':
                 sl_price = max(sl_price, close_v + _min_sl_dist)
 
-        # ── 残高下限チェック: equity が min_balance_jpy 以下ならシグナル停止 ──
-        _min_bal_jpy  = scalp.get('min_balance_jpy', 3000)
-        _acc_equity   = 0.0
-        _acc_margin   = 0.0
-        _acc_ml       = 0.0   # 現在の維持率（表示用）
-        _acc_retrieved = False
-        try:
-            _acc = mt5.account_info()
-            if _acc is not None:
-                _acc_equity    = float(_acc.equity)
-                _acc_margin    = float(_acc.margin)
-                _acc_retrieved = True
-        except Exception as _bal_err:
-            _logger.warning(f'[残高チェック] account_info 失敗: {_bal_err}')
-
-        if _min_bal_jpy > 0:
-            if not _acc_retrieved:
-                # 残高取得失敗はフェイルセーフとしてシグナル停止
-                msg = '残高取得失敗 → フェイルセーフでシグナル停止'
-                print(f'  [{msg}]')
-                _logger.warning(f'[残高] {msg}')
-                action = 'none'
-            else:
-                _equity_jpy = _acc_equity * jpy_rate
-                if _equity_jpy <= _min_bal_jpy:
-                    msg = (f'残高不足 equity={_equity_jpy:.0f}円 ≤ {_min_bal_jpy}円 → シグナル停止')
-                    print(f'  [{msg}]')
-                    _logger.warning(f'[残高] {msg}')
-                    action = 'none'
-
+        # _acc_equity / _acc_margin はゲート前の残高チェックで取得済み
         _acc_ml = (_acc_equity / _acc_margin * 100.0 if _acc_margin > 0 else 999.9)
 
         # ── 証拠金維持率チェック: lot を上限調整 ────────────────────────
@@ -1687,6 +1690,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'expected_profit_jpy': round(expected_profit_jpy, 0),
             'tp_move_usd':        round(tp_move * contract_size, 4),
             'trades_today':       state.count,
+            'signals_today':      state.signals_today,
             'cooldown_min':       cooldown,
             'scalp_cooldown_rem': 0,
             'scalp_sell_sma_pending':     state.sell_sma_pending,

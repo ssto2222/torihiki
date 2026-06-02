@@ -112,6 +112,10 @@ class ScalpState:
     # 節目ラインクロス通知済みセット (round(price), 'up'|'down') のタプル
     key_level_crossed: set = field(default_factory=set)
 
+    # シグナル点灯回数（実行ゲートで action=buy/sell になった回数）
+    # state.count はEAへ送信した実エントリー数。signals_today は点灯だけのカウント。
+    signals_today: int = 0
+
 
 @dataclass
 class TimeBiasState:
