@@ -18,10 +18,72 @@ from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _position_status, _get_jpy_per_usd,
                               _has_positions_in_direction,
                               detect_bidirectional_loss)
+from bridge.notify   import send_discord, _build_key_level_cross_msg
 if TYPE_CHECKING:
     from bridge.state import ScalpState, SignalState, JpyRateCache, Sma20TouchCache, MacroBiasState
 
 _logger = logging.getLogger('torihiki')
+
+
+# ── 節目ライン収集ヘルパー ──────────────────────────────────────────────────
+
+def _dedup_levels(levels: list[dict], merge_dist: float) -> list[dict]:
+    """近接レベル (merge_dist 以内) をまとめて1エントリに統合する"""
+    if not levels:
+        return []
+    sorted_lvls = sorted(levels, key=lambda x: x['price'])
+    merged = [dict(sorted_lvls[0])]
+    for lvl in sorted_lvls[1:]:
+        if abs(lvl['price'] - merged[-1]['price']) <= merge_dist:
+            merged[-1]['price'] = round((merged[-1]['price'] + lvl['price']) / 2, 2)
+            merged[-1]['label'] += '+' + lvl['label']
+            merged[-1]['conf']   = max(merged[-1]['conf'], lvl['conf'])
+        else:
+            merged.append(dict(lvl))
+    return merged
+
+
+def _collect_key_levels(d1_tl: dict, h1_pats: list, atr_v: float) -> list[dict]:
+    """D1トレンドライン・H1パターンから節目ラインを収集して統合する。
+
+    Returns list of:
+      {'price': float, 'label': str, 'kind': 'resistance'|'support', 'conf': float}
+    """
+    levels = []
+
+    # D1 トレンドライン抵抗線
+    if d1_tl.get('resistance', {}).get('valid'):
+        levels.append({
+            'price':  d1_tl['resistance']['price'],
+            'label':  f"D1抵抗({d1_tl['resistance']['n_points']}点)",
+            'kind':   'resistance',
+            'source': 'trendline',
+            'conf':   1.0,
+        })
+
+    # D1 トレンドライン支持線
+    if d1_tl.get('support', {}).get('valid'):
+        levels.append({
+            'price':  d1_tl['support']['price'],
+            'label':  f"D1支持({d1_tl['support']['n_points']}点)",
+            'kind':   'support',
+            'source': 'trendline',
+            'conf':   1.0,
+        })
+
+    # H1 パターン ネックライン
+    for p in h1_pats:
+        kind     = 'resistance' if p.direction == 'bearish' else 'support'
+        conf_tag = '確定' if p.confirmed else '形成中'
+        levels.append({
+            'price':  p.neckline,
+            'label':  f"{p.label}NL({conf_tag}/{p.confidence:.0%})",
+            'kind':   kind,
+            'source': 'pattern',
+            'conf':   p.confidence,
+        })
+
+    return _dedup_levels(levels, atr_v * 0.15)
 
 
 def compute_scalp_signal(symbol: str, cfg: dict,
@@ -1541,6 +1603,41 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         point  = float(info.point) if info else 0.01
         max_pt = max(1, int(tp_move * 0.5 / point))
 
+        # ── 節目ライン収集 & クロス通知 ───────────────────────────────────
+        key_levels = _collect_key_levels(d1_tl, _h1_pats_raw, atr_v)
+
+        # クロス通知済みセットが肥大化しないよう上限管理
+        if len(state.key_level_crossed) > 300:
+            state.key_level_crossed.clear()
+
+        for _kl in key_levels:
+            _kl_price = _kl['price']
+            _kl_label = _kl['label']
+            # 上抜け: 前足が節目の下、現在足が節目以上
+            if prev_close_v < _kl_price <= close_v:
+                _fp = (int(round(_kl_price)), 'up')
+                if _fp not in state.key_level_crossed:
+                    state.key_level_crossed.add(_fp)
+                    try:
+                        send_discord(_build_key_level_cross_msg(
+                            symbol, _kl, 'up', close_v, prev_close_v, atr_v))
+                    except Exception as _kl_err:
+                        _logger.warning(f'[節目通知] 送信失敗: {_kl_err}')
+                    _logger.info(f'[節目/上抜け] {symbol} {_kl_label} '
+                                 f'price={_kl_price:.2f} close={close_v:.2f}')
+            # 下抜け: 前足が節目の上、現在足が節目以下
+            elif prev_close_v > _kl_price >= close_v:
+                _fp = (int(round(_kl_price)), 'down')
+                if _fp not in state.key_level_crossed:
+                    state.key_level_crossed.add(_fp)
+                    try:
+                        send_discord(_build_key_level_cross_msg(
+                            symbol, _kl, 'down', close_v, prev_close_v, atr_v))
+                    except Exception as _kl_err:
+                        _logger.warning(f'[節目通知] 送信失敗: {_kl_err}')
+                    _logger.info(f'[節目/下抜け] {symbol} {_kl_label} '
+                                 f'price={_kl_price:.2f} close={close_v:.2f}')
+
         return {
             'timestamp':          now.strftime('%Y.%m.%d %H:%M:%S'),
             'symbol':             symbol,
@@ -1658,6 +1755,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'd1_tl_break_sup':    d1_tl['break_support'],
             'd1_tl_bounce_buy':   d1_tl['bounce_buy'],
             'd1_tl_bounce_sell':  d1_tl['bounce_sell'],
+            # 節目ライン一覧
+            'key_levels':         key_levels,
         }
 
     except Exception:
