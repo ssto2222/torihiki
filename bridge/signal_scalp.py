@@ -77,6 +77,7 @@ def _collect_key_levels(d1_tl: dict, h1_pats: list, atr_v: float) -> list[dict]:
         conf_tag = '確定' if p.confirmed else '形成中'
         levels.append({
             'price':  p.neckline,
+            'target': p.target,
             'label':  f"{p.label}NL({conf_tag}/{p.confidence:.0%})",
             'kind':   kind,
             'source': 'pattern',
