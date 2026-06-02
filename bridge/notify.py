@@ -88,6 +88,37 @@ def _build_discord_signal_msg(data: dict, mode: str) -> str:
     return '\n'.join(lines)
 
 
+def _build_key_level_cross_msg(
+    symbol: str,
+    level: dict,
+    direction: str,   # 'up' | 'down'
+    close: float,
+    prev_close: float,
+    atr: float,
+) -> str:
+    """節目ラインクロス時の Discord 通知メッセージを生成する"""
+    if direction == 'up':
+        emoji = '🔼'
+        dir_label = '上抜け'
+    else:
+        emoji = '🔽'
+        dir_label = '下抜け'
+
+    price  = level['price']
+    label  = level['label']
+    kind   = level.get('kind', '')
+    dist   = abs(close - price)
+    dist_r = dist / atr if atr > 0 else 0.0
+
+    kind_label = {'resistance': '抵抗線', 'support': '支持線'}.get(kind, kind)
+    lines = [
+        f'{emoji} **[{symbol}] 節目ライン {dir_label}**',
+        f'価格: ${price:,.2f}  ({label} / {kind_label})',
+        f'close: ${prev_close:,.2f} → ${close:,.2f}  '
+        f'乖離: ${dist:,.2f} ({dist_r:.2f}ATR)',
+    ]
+    return '\n'.join(lines)
+
 
 def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
     """1時間ごとのステータスサマリーを Discord メッセージとして組み立てる"""
@@ -170,6 +201,27 @@ def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
 
     # ポジション・取引回数
     lines.append(f'ポジション: {total_p}/{max_p}本(空き{avail})  今日: {today}回  CD:{cd_cycle}/{cd_trades}')
+
+    # 節目ライン一覧
+    key_levels = data.get('key_levels') or []
+    if key_levels:
+        _close = data.get('close', 0.0)
+        _atr   = data.get('atr',   1.0) or 1.0
+        _kl_header = '📍 **節目ライン**'
+        _kl_rows   = []
+        for _kl in sorted(key_levels, key=lambda x: x['price'], reverse=True):
+            _p     = _kl['price']
+            _dist  = _p - _close
+            _dist_r = _dist / _atr
+            _arrow = '↑' if _dist > 0 else '↓'
+            _kind  = {'resistance': '抵抗', 'support': '支持'}.get(_kl.get('kind', ''), '?')
+            _kl_rows.append(
+                f"  ${_p:>12,.2f}  {_arrow}{abs(_dist_r):.2f}ATR  {_kl['label']}[{_kind}]"
+            )
+        lines.append(_kl_header)
+        lines.extend(_kl_rows)
+    else:
+        lines.append('📍 節目ライン: 検出なし')
 
     # 証拠金情報
     ml     = data.get('margin_level',   0.0)

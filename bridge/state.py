@@ -109,6 +109,9 @@ class ScalpState:
     pre_surge_armed: bool = False
     pre_surge_score: int  = 0   # アーム時のスコア（3 = ビッグチャンス解除判定に使用）
 
+    # 節目ラインクロス通知済みセット (round(price), 'up'|'down') のタプル
+    key_level_crossed: set = field(default_factory=set)
+
 
 @dataclass
 class TimeBiasState:
