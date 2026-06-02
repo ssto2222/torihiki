@@ -627,9 +627,13 @@ def detect_elliott_w2_buy(
       6. 第2底が Wave1 の Fibonacci fib_min〜fib_max 押し戻し範囲
       7. 第2底 RSI > 第1底 RSI（強気ダイバージェンス）≥ rsi_div_min
     """
+    _tag = '[EW2-BUY]'
     if df is None or len(df) < lookback + sw_window + 2:
+        _logger.info(f'{_tag} データ不足 len={len(df) if df is not None else 0} '
+                      f'必要={lookback + sw_window + 2}')
         return None
     if not {'RSI', 'ATR', 'High', 'Low', 'Close'}.issubset(df.columns):
+        _logger.info(f'{_tag} 必要カラム不足 cols={list(df.columns)}')
         return None
 
     df_w = df.iloc[-lookback:]
@@ -638,34 +642,46 @@ def detect_elliott_w2_buy(
     n    = len(df_w)
 
     if atr <= 0 or np.isnan(atr):
+        _logger.info(f'{_tag} ATR無効 atr={atr}')
         return None
 
     sh, sl = _ew_swing(df_w, window=sw_window)
+    _logger.debug(f'{_tag} スイング検出 swing_high={len(sh)}個 swing_low={len(sl)}個 '
+                  f'lookback={lookback}本 cur_rsi={float(rsi[-1]):.1f}')
 
     # ① 第2底候補: 直近 w2_bars_ago_max 本以内の確定スイングロー
     w2_cands = [(i, p) for i, p in sl if i >= n - 1 - w2_bars_ago_max]
     if not w2_cands:
+        _latest_sl = sl[-1] if sl else None
+        _ago = (n - 1 - _latest_sl[0]) if _latest_sl else '―'
+        _logger.info(f'{_tag} ①失敗: 直近{w2_bars_ago_max}本以内にスイングロー無し '
+                      f'最新スイングロー={_latest_sl} ({_ago}本前)')
         return None
     w2_idx, w2_low = w2_cands[-1]
     w2_rsi = float(rsi[w2_idx])
 
     if np.isnan(w2_rsi) or w2_rsi > w2_rsi_max:
+        _logger.info(f'{_tag} ②失敗: W2底RSI={w2_rsi:.1f} > 上限{w2_rsi_max} '
+                      f'W2底={w2_low:,.2f} ({n-1-w2_idx}本前)')
         return None
 
     # ③ RSI が第2底から反転上昇中
     cur_rsi = float(rsi[-1])
     if np.isnan(cur_rsi) or cur_rsi <= w2_rsi:
+        _logger.info(f'{_tag} ③失敗: RSI未反転 cur={cur_rsi:.1f} ≤ W2底RSI={w2_rsi:.1f}')
         return None
 
     # ④ Wave1 ピーク: 第2底より前のスイングハイ
     prev_highs = [(i, p) for i, p in sh if i < w2_idx]
     if not prev_highs:
+        _logger.info(f'{_tag} ④失敗: W2底(idx={w2_idx})より前にスイングハイ無し')
         return None
     w1_peak_idx, w1_peak = prev_highs[-1]
 
     # ④ 第1底: Wave1 ピークより前のスイングロー
     first_lows = [(i, p) for i, p in sl if i < w1_peak_idx]
     if not first_lows:
+        _logger.info(f'{_tag} ④失敗: W1ピーク(idx={w1_peak_idx})より前にスイングロー無し')
         return None
     w1_idx, w1_low = first_lows[-1]
     w1_rsi = float(rsi[w1_idx])
@@ -673,15 +689,20 @@ def detect_elliott_w2_buy(
     # ⑤ Wave1 の高さチェック
     wave1_size = w1_peak - w1_low
     if wave1_size < atr * min_wave1_atr or wave1_size <= 0:
+        _logger.info(f'{_tag} ⑤失敗: Wave1サイズ={wave1_size:.2f} < ATR×{min_wave1_atr}={atr*min_wave1_atr:.2f}')
         return None
 
     # ⑥ フィボナッチ リトレースメント
     fib_level = (w1_peak - w2_low) / wave1_size
     if not (fib_min <= fib_level <= fib_max):
+        _logger.info(f'{_tag} ⑥失敗: Fib={fib_level:.3f} 範囲外[{fib_min},{fib_max}] '
+                      f'W1底={w1_low:,.2f} W1峰={w1_peak:,.2f} W2底={w2_low:,.2f}')
         return None
 
     # ⑦ 強気ダイバージェンス: 第2底 RSI > 第1底 RSI
     if np.isnan(w1_rsi) or (w2_rsi - w1_rsi) < rsi_div_min:
+        _logger.info(f'{_tag} ⑦失敗: RSIダイバ差={w2_rsi-w1_rsi:.1f} < 閾値{rsi_div_min} '
+                      f'(W2_RSI={w2_rsi:.1f} W1_RSI={w1_rsi:.1f})')
         return None
 
     return {
@@ -715,9 +736,13 @@ def detect_elliott_w2_sell(
     下落 Wave1 → 反発 Wave2（第2天井）→ Wave3 下落へのエントリー。
     RSI 弱気ダイバージェンス: 第2天井の RSI < 第1天井の RSI。
     """
+    _tag = '[EW2-SELL]'
     if df is None or len(df) < lookback + sw_window + 2:
+        _logger.info(f'{_tag} データ不足 len={len(df) if df is not None else 0} '
+                      f'必要={lookback + sw_window + 2}')
         return None
     if not {'RSI', 'ATR', 'High', 'Low', 'Close'}.issubset(df.columns):
+        _logger.info(f'{_tag} 必要カラム不足 cols={list(df.columns)}')
         return None
 
     df_w = df.iloc[-lookback:]
@@ -726,34 +751,46 @@ def detect_elliott_w2_sell(
     n    = len(df_w)
 
     if atr <= 0 or np.isnan(atr):
+        _logger.info(f'{_tag} ATR無効 atr={atr}')
         return None
 
     sh, sl = _ew_swing(df_w, window=sw_window)
+    _logger.debug(f'{_tag} スイング検出 swing_high={len(sh)}個 swing_low={len(sl)}個 '
+                  f'lookback={lookback}本 cur_rsi={float(rsi[-1]):.1f}')
 
     # ① 第2天井候補: 直近 w2_bars_ago_max 本以内の確定スイングハイ
     w2_cands = [(i, p) for i, p in sh if i >= n - 1 - w2_bars_ago_max]
     if not w2_cands:
+        _latest_sh = sh[-1] if sh else None
+        _ago = (n - 1 - _latest_sh[0]) if _latest_sh else '―'
+        _logger.info(f'{_tag} ①失敗: 直近{w2_bars_ago_max}本以内にスイングハイ無し '
+                      f'最新スイングハイ={_latest_sh} ({_ago}本前)')
         return None
     w2_idx, w2_high = w2_cands[-1]
     w2_rsi = float(rsi[w2_idx])
 
     if np.isnan(w2_rsi) or w2_rsi < w2_rsi_min:
+        _logger.info(f'{_tag} ②失敗: W2天井RSI={w2_rsi:.1f} < 下限{w2_rsi_min} '
+                      f'W2天井={w2_high:,.2f} ({n-1-w2_idx}本前)')
         return None
 
     # ③ RSI が第2天井から反転下落中
     cur_rsi = float(rsi[-1])
     if np.isnan(cur_rsi) or cur_rsi >= w2_rsi:
+        _logger.info(f'{_tag} ③失敗: RSI未反転 cur={cur_rsi:.1f} ≥ W2天井RSI={w2_rsi:.1f}')
         return None
 
     # ④ Wave1 ボトム: 第2天井より前のスイングロー
     prev_lows = [(i, p) for i, p in sl if i < w2_idx]
     if not prev_lows:
+        _logger.info(f'{_tag} ④失敗: W2天井(idx={w2_idx})より前にスイングロー無し')
         return None
     w1_valley_idx, w1_valley = prev_lows[-1]
 
     # ④ 第1天井: Wave1 ボトムより前のスイングハイ
     first_highs = [(i, p) for i, p in sh if i < w1_valley_idx]
     if not first_highs:
+        _logger.info(f'{_tag} ④失敗: W1ボトム(idx={w1_valley_idx})より前にスイングハイ無し')
         return None
     w1_idx, w1_high = first_highs[-1]
     w1_rsi = float(rsi[w1_idx])
@@ -761,15 +798,20 @@ def detect_elliott_w2_sell(
     # ⑤ Wave1 の高さ
     wave1_size = w1_high - w1_valley
     if wave1_size < atr * min_wave1_atr or wave1_size <= 0:
+        _logger.info(f'{_tag} ⑤失敗: Wave1サイズ={wave1_size:.2f} < ATR×{min_wave1_atr}={atr*min_wave1_atr:.2f}')
         return None
 
     # ⑥ フィボナッチ
     fib_level = (w2_high - w1_valley) / wave1_size
     if not (fib_min <= fib_level <= fib_max):
+        _logger.info(f'{_tag} ⑥失敗: Fib={fib_level:.3f} 範囲外[{fib_min},{fib_max}] '
+                      f'W1天井={w1_high:,.2f} W1谷={w1_valley:,.2f} W2天井={w2_high:,.2f}')
         return None
 
     # ⑦ 弱気ダイバージェンス: 第1天井 RSI > 第2天井 RSI
     if np.isnan(w1_rsi) or (w1_rsi - w2_rsi) < rsi_div_min:
+        _logger.info(f'{_tag} ⑦失敗: RSIダイバ差={w1_rsi-w2_rsi:.1f} < 閾値{rsi_div_min} '
+                      f'(W1_RSI={w1_rsi:.1f} W2_RSI={w2_rsi:.1f})')
         return None
 
     return {

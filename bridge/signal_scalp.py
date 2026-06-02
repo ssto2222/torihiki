@@ -501,6 +501,19 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _ew2_tp_price    = None   # Fibonacci extension TP（確定後に上書き）
         _ew2_sl_price    = None   # W2 失効ライン SL
         _ew_cfg = cfg.get('ELLIOTT', {})
+        _ew2_skip_reason = None
+        if not _ew_cfg.get('enabled', True):
+            _ew2_skip_reason = 'ELLIOTT.enabled=False'
+        elif confirmed_signal is not None:
+            _ew2_skip_reason = f'confirmed_signal既にあり({confirmed_signal})'
+        elif state.buy_sma_pending or state.buy_confirm_pending:
+            _ew2_skip_reason = 'buy_sma/confirm_pending中'
+        elif state.sell_sma_pending or state.sell_confirm_pending:
+            _ew2_skip_reason = 'sell_sma/confirm_pending中'
+        elif _ws_block:
+            _ew2_skip_reason = f'whipsaw_block中({_ws_block})'
+        if _ew2_skip_reason:
+            _logger.debug(f'[EW2] {symbol} スキップ: {_ew2_skip_reason}')
         if (_ew_cfg.get('enabled', True)
                 and confirmed_signal is None
                 and not (state.buy_sma_pending or state.buy_confirm_pending
@@ -514,6 +527,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             _ew_div  = _ew_cfg.get('rsi_div_min', 3.0)
             _ew_bago = _ew_cfg.get('w2_bars_ago_max', 5)
             _df_ew2  = df_m5_ew2 if df_m5_ew2 is not None else df  # M5専用df優先
+            _ew2_df_rows = len(_df_ew2) if _df_ew2 is not None else 0
+            _logger.debug(f'[EW2] {symbol} 検出開始 df_rows={_ew2_df_rows} '
+                          f'lookback={_ew_lb} sw={_ew_sw} bago={_ew_bago} '
+                          f'buy_ok={buy_enabled and not avoid_buy_surge and mtf_ew2_buy_ok} '
+                          f'sell_ok={sell_enabled and not avoid_sell_surge and mtf_ew2_sell_ok}')
             if buy_enabled and not avoid_buy_surge and mtf_ew2_buy_ok:
                 _ew2b = detect_elliott_w2_buy(
                     _df_ew2, lookback=_ew_lb, sw_window=_ew_sw,
@@ -556,6 +574,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                      f'Fib={_ew2b["fib_level"]:.1%} '
                                      f'RSI_div={_ew2b["rsi_div"]:.1f} '
                                      f'TP={_b_tp:,.2f} SL={_b_sl:,.2f}')
+                    else:
+                        _logger.info(f'[EW2-BUY] {symbol} パターン検出済みのためスキップ '
+                                     f'W2底={_ew2b["w2_low"]:,.2f} Fib={_ew2b["fib_level"]:.1%}')
                 else:
                     state.ew2_last_buy = None
             if confirmed_signal is None and sell_enabled and not avoid_sell_surge and mtf_ew2_sell_ok:
@@ -600,6 +621,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                                      f'Fib={_ew2s["fib_level"]:.1%} '
                                      f'RSI_div={_ew2s["rsi_div"]:.1f} '
                                      f'TP={_s_tp:,.2f} SL={_s_sl:,.2f}')
+                    else:
+                        _logger.info(f'[EW2-SELL] {symbol} パターン検出済みのためスキップ '
+                                     f'W2天井={_ew2s["w2_high"]:,.2f} Fib={_ew2s["fib_level"]:.1%}')
                 else:
                     state.ew2_last_sell = None
 

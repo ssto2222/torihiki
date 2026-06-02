@@ -92,6 +92,14 @@ try:
 except OSError:
     pass  # ローカルログが書けない場合はコンソールのみ
 
+# bridge/core モジュールの 'torihiki' ロガーを同じハンドラーに接続
+# (torihiki.strategy など子ロガーの INFO ログが同じコンソール/ファイルに出力される)
+_tl = logging.getLogger('torihiki')
+_tl.setLevel(logging.INFO)
+_tl.propagate = False
+for _h in _logger.handlers:
+    _tl.addHandler(_h)
+
 
 def _ts() -> str:
     return datetime.now().strftime('%H:%M:%S')
