@@ -247,18 +247,16 @@ def print_poll_status(
                        f"  M1(BUY:{_accel_icon(_accel_buy_m1)} SELL:{_accel_icon(_accel_sell_m1)})"
                        f"  (▲加速/維持 ▽減速)")
         print(f" M5 {m5_str}  {_m5_di}  │  {_sma20_str}")
-        print(f" SMA20傾き {_slope_line}")
-        print(f" SMA20加速 {_accel_line}")
-        if sma20_m1 > 0 or sma20_m15 > 0 or sma20_d1 > 0:
-            _parts = []
-            if sma20_m1 > 0:
-                _parts.append(_c(f'M1 ${sma20_m1:,.0f}({close-sma20_m1:+,.0f})', _DIM))
-            if sma20_m15 > 0:
-                _parts.append(_c(f'M15 ${sma20_m15:,.0f}({close-sma20_m15:+,.0f})', _DIM))
-            if sma20_d1 > 0:
-                _parts.append(_c(f'D1 ${sma20_d1:,.0f}({close-sma20_d1:+,.0f})', _DIM))
-            _sma20_vals = '  '.join(_parts)
-            print(f" SMA20値  {_sma20_vals}")
+        # SMA20傾き: 1行にまとめて表示（加速行は省略）
+        _sma_extra_parts = []
+        if sma20_m1 > 0:
+            _sma_extra_parts.append(_c(f'M1:${sma20_m1:,.0f}({close-sma20_m1:+,.0f})', _DIM))
+        if sma20_m15 > 0:
+            _sma_extra_parts.append(_c(f'M15:${sma20_m15:,.0f}', _DIM))
+        if sma20_d1 > 0:
+            _sma_extra_parts.append(_c(f'D1:${sma20_d1:,.0f}', _DIM))
+        _sma_extra = ('  ' + '  '.join(_sma_extra_parts)) if _sma_extra_parts else ''
+        print(f" slope {_slope_line}{_sma_extra}")
     else:
         rsi_h1_str = _c(f'{rsi_h1:.1f}', _rsi_color(rsi_h1))
         print(f" H1 {h1_str}(ADX {adx_h1:.0f}) RSI {rsi_h1_str}  M5 {m5_str}")
@@ -277,41 +275,51 @@ def print_poll_status(
     if flags:
         print(f" {' │ '.join(flags)}")
 
-    # ── H1 パターン ────────────────────────────────────────────────────────
-    for pat in data.get('h1_patterns', []):
-        ok_sym = _c('✓', _GREEN) if pat['confirmed'] else _c('…', _YELLOW)
-        print(f" {_c('▣', _BLUE)} {pat['label']} {ok_sym}"
-              f"  {pat['confidence']:.0%}"
-              f"  NL=${pat['neckline']:,.0f}"
-              f"  TP=${pat['target']:,.0f}"
-              f"  ({pat['bars_ago']}本前)")
+    # ── 節目ライン 価格ラダー ──────────────────────────────────────────────
+    _key_levels = sorted(data.get('key_levels') or [], key=lambda x: x['price'], reverse=True)
+    print(_sep(64, '─'))
+    if _key_levels:
+        _kl_above = [k for k in _key_levels if k['price'] > close]
+        _kl_below = [k for k in _key_levels if k['price'] <= close]
+        # 上のレベルは価格降順（遠→近）で表示
+        for _kl in _kl_above:
+            _p    = _kl['price']
+            _dr   = (_p - close) / atr if atr > 0 else 0.0
+            _lbl  = _kl['label']
+            _ktag = _c('[抵]', _RED) if _kl.get('kind') == 'resistance' else _c('[支]', _GREEN)
+            _tgt  = _kl.get('target')
+            _tgt_s = _c(f' → TP${_tgt:,.0f}', _DIM) if _tgt else ''
+            _dr_s = _c(f'+{_dr:.1f}ATR', _RED)
+            print(f"  {_c(f'${_p:>10,.2f}', _WHITE)}  {_dr_s:<14}  {_lbl} {_ktag}{_tgt_s}")
+        # 現在値マーカー
+        print(f"  {_c(f'${close:>10,.2f}', _YELLOW, _BOLD)}  {'← NOW'}")
+        # 下のレベルは価格降順（近→遠）で表示
+        for _kl in _kl_below:
+            _p    = _kl['price']
+            _dr   = (close - _p) / atr if atr > 0 else 0.0
+            _lbl  = _kl['label']
+            _ktag = _c('[抵]', _RED) if _kl.get('kind') == 'resistance' else _c('[支]', _GREEN)
+            _tgt  = _kl.get('target')
+            _tgt_s = _c(f' → TP${_tgt:,.0f}', _DIM) if _tgt else ''
+            _dr_s = _c(f'-{_dr:.1f}ATR', _GREEN)
+            print(f"  {_c(f'${_p:>10,.2f}', _WHITE)}  {_dr_s:<14}  {_lbl} {_ktag}{_tgt_s}")
+    else:
+        print(f" {_c('節目ライン: 検出なし', _DIM)}")
 
-    # ── Elliott Wave 2 スキャン結果 ─────────────────────────────────────────
-    def _ew2_line(label: str, e: dict | None, is_buy: bool) -> str:
+    # ── Elliott Wave 2（コンパクト） ────────────────────────────────────────
+    def _ew2_compact(e: dict | None, label: str, is_buy: bool) -> str:
         if e is None:
-            return f" {_c('EW2', _MAGENTA)} {label} {_c('未検出', _DIM)}"
-        w2   = e['w2_price']
-        fib  = e['fib']
-        wav  = e['wave1']
-        div  = e['div']
-        tp   = e['tp']
-        sl   = e['sl']
-        bago = e['bars_ago']
-        traded_str = _c(' [済]', _DIM) if e.get('traded') else _c(' [新規]', _GREEN if is_buy else _RED)
-        arrow = '▼' if is_buy else '▲'
-        col   = _GREEN if is_buy else _RED
-        w2_lbl = 'W2底' if is_buy else 'W2天'
-        tp_lbl = 'TP↑' if is_buy else 'TP↓'
-        sl_lbl = 'SL↓' if is_buy else 'SL↑'
-        return (f" {_c('EW2', _MAGENTA)} {_c(arrow + label, col)}"
-                f"  {w2_lbl}=${w2:,.0f}  Fib={fib:.1%}  Wave1=${wav:,.0f}"
-                f"  div{div:+.1f}  {tp_lbl}=${tp:,.0f}  {sl_lbl}=${sl:,.0f}"
-                f"  ({bago}本前){traded_str}")
+            return f" {_c('EW2', _MAGENTA)} {_c(label, _DIM)} {_c('未検出', _DIM)}"
+        col    = _GREEN if is_buy else _RED
+        traded = _c(' [済]', _DIM) if e.get('traded') else ''
+        return (f" {_c('EW2', _MAGENTA)} {_c(label, col)}"
+                f"  W2=${e['w2_price']:,.0f}  Fib={e['fib']:.0%}  div{e['div']:+.1f}"
+                f"  TP=${e['tp']:,.0f}  SL=${e['sl']:,.0f}  ({e['bars_ago']}本前){traded}")
     _ew2b_data = data.get('ew2_last_buy')
     _ew2s_data = data.get('ew2_last_sell')
     if _ew2b_data is not None or _ew2s_data is not None:
-        print(_ew2_line('BUY',  _ew2b_data, True))
-        print(_ew2_line('SELL', _ew2s_data, False))
+        print(_ew2_compact(_ew2b_data, 'BUY ▼',  True))
+        print(_ew2_compact(_ew2s_data, 'SELL ▲', False))
     elif data.get('scalp_mode'):
         print(f" {_c('EW2', _MAGENTA)} {_c('BUY/SELL 未検出', _DIM)}")
 
