@@ -458,6 +458,105 @@ def detect_whipsaw(df: pd.DataFrame, n: int = 20,
     return ratio >= threshold, round(ratio, 2)
 
 
+def detect_trendlines_tf(
+    df: pd.DataFrame,
+    close: float,
+    prev_close: float,
+    sw_window: int  = 3,
+    min_points: int = 2,
+    max_pts: int    = 5,
+    near_mult: float = 0.5,
+) -> dict:
+    """任意時間足に対するトレンドライン検出（High/Low/Close があれば動作）。
+
+    detect_d1_trendlines と同じロジックだが cfg に依存せず直接パラメータで指定。
+    M15・H4 など D1 以外の時間足に使う。
+    """
+    _nan = float('nan')
+    _empty = dict(
+        resistance=dict(price=_nan, slope=0.0, n_points=0, valid=False),
+        support=   dict(price=_nan, slope=0.0, n_points=0, valid=False),
+        tf_atr=1.0,
+        near_resistance=False, near_support=False,
+        break_resistance=False, break_support=False,
+        bounce_buy=False, bounce_sell=False,
+        res_dist_atr=_nan, sup_dist_atr=_nan,
+    )
+    if df is None or len(df) < 5:
+        return _empty
+
+    df_hist = df.iloc[:-1]
+    if len(df_hist) < sw_window * 2 + 3:
+        return _empty
+
+    has_hl = 'High' in df_hist.columns and 'Low' in df_hist.columns
+    highs  = df_hist['High'].values  if has_hl else df_hist['Close'].values
+    lows   = df_hist['Low'].values   if has_hl else df_hist['Close'].values
+    cls    = df_hist['Close'].values
+
+    tr         = np.maximum(highs[1:] - lows[1:],
+                 np.maximum(np.abs(highs[1:] - cls[:-1]),
+                            np.abs(lows[1:]  - cls[:-1])))
+    window_atr = min(14, len(tr))
+    tf_atr     = float(np.mean(tr[-window_atr:])) if window_atr > 0 else 1.0
+    if tf_atr <= 0 or np.isnan(tf_atr):
+        tf_atr = 1.0
+
+    from core.patterns import find_swing_points
+    sw_highs, sw_lows = find_swing_points(df_hist, window=sw_window)
+
+    current_idx = float(len(df) - 1)
+
+    def _fit_line(pts):
+        if len(pts) < min_points:
+            return None
+        use = pts[-max_pts:]
+        xs  = np.array([p[0] for p in use], dtype=float)
+        ys  = np.array([p[1] for p in use], dtype=float)
+        if len(xs) == 2:
+            slope     = (ys[1] - ys[0]) / (xs[1] - xs[0]) if xs[1] != xs[0] else 0.0
+            projected = ys[0] + slope * (current_idx - xs[0])
+        else:
+            coef      = np.polyfit(xs, ys, 1)
+            slope     = float(coef[0])
+            projected = slope * current_idx + float(coef[1])
+        return slope, projected, len(use)
+
+    res_fit = _fit_line(sw_highs)
+    sup_fit = _fit_line(sw_lows)
+
+    res_info = dict(price=_nan, slope=0.0, n_points=0, valid=False)
+    if res_fit:
+        res_info = dict(price=res_fit[1], slope=res_fit[0], n_points=res_fit[2], valid=True)
+
+    sup_info = dict(price=_nan, slope=0.0, n_points=0, valid=False)
+    if sup_fit:
+        sup_info = dict(price=sup_fit[1], slope=sup_fit[0], n_points=sup_fit[2], valid=True)
+
+    res_p    = res_info['price']
+    sup_p    = sup_info['price']
+    near_thr = tf_atr * near_mult
+
+    def _dist_atr(p):
+        return abs(close - p) / tf_atr if not np.isnan(p) else _nan
+
+    return dict(
+        resistance=res_info,
+        support=sup_info,
+        tf_atr=tf_atr,
+        near_resistance=(res_info['valid'] and not np.isnan(res_p) and abs(close - res_p) <= near_thr),
+        near_support=   (sup_info['valid'] and not np.isnan(sup_p) and abs(close - sup_p) <= near_thr),
+        break_resistance=(res_info['valid'] and not np.isnan(res_p) and prev_close < res_p <= close),
+        break_support=   (sup_info['valid'] and not np.isnan(sup_p) and prev_close > sup_p >= close),
+        bounce_buy= (sup_info['valid'] and not np.isnan(sup_p)
+                     and prev_close <= sup_p + near_thr and close > prev_close and close > sup_p),
+        bounce_sell=(res_info['valid'] and not np.isnan(res_p)
+                     and prev_close >= res_p - near_thr and close < prev_close and close < res_p),
+        res_dist_atr=_dist_atr(res_p),
+        sup_dist_atr=_dist_atr(sup_p),
+    )
+
+
 def detect_d1_trendlines(
     df_d1: pd.DataFrame,
     close: float,
