@@ -378,6 +378,71 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             except Exception:
                 pass
 
+        # ── H1 ネックライン再テスト: ブレイク確認アーミング ─────────────────────
+        # H1 終値が 2 本以上連続して NL を超えている場合にリテスト待機をセット。
+        # 「2本確定」は最新確定バー（iloc[-2]）から逆順に連続カウントして判定する。
+        _nl_retest_conf_min = scalp.get('nl_retest_conf_min', 0.45)
+        _nl_retest_min_bars = int(scalp.get('nl_retest_min_bars', 2))
+        _nl_retest_expire_h = scalp.get('nl_retest_expire_h', 48)
+
+        if (df_h1_raw is not None and len(df_h1_raw) >= _nl_retest_min_bars + 2
+                and _h1_pats_raw):
+            _h1_closes_rt = df_h1_raw['Close'].values
+            if len(state.nl_retest_arms) > 20:
+                # 古い順に整理して 10 件まで縮小
+                state.nl_retest_arms = sorted(
+                    state.nl_retest_arms,
+                    key=lambda a: a['armed_at'], reverse=True)[:10]
+            for _pat_rt in _h1_pats_raw:
+                if _pat_rt.confidence < _nl_retest_conf_min:
+                    continue
+                _fp_rt = (_pat_rt.name, round(_pat_rt.neckline, 0))
+                # 既に執行済み・既にアーム済みはスキップ
+                if _fp_rt in state.pattern_traded:
+                    continue
+                if any(a['fp'] == _fp_rt for a in state.nl_retest_arms):
+                    continue
+
+                # H1 確定バー（iloc[-2] 以前）が連続して NL を超えた本数をカウント
+                _nl_rt  = _pat_rt.neckline
+                _dir_rt = _pat_rt.direction
+                _brk = 0
+                for _ci in range(len(_h1_closes_rt) - 2, -1, -1):
+                    _c = _h1_closes_rt[_ci]
+                    if _dir_rt == 'bullish' and _c > _nl_rt:
+                        _brk += 1
+                    elif _dir_rt == 'bearish' and _c < _nl_rt:
+                        _brk += 1
+                    else:
+                        break
+
+                if _brk < _nl_retest_min_bars:
+                    continue
+
+                # SL 参照: パターン key_points の極値（最安値 or 最高値）
+                _kp_prices = [p for _, p in _pat_rt.key_points] if _pat_rt.key_points else []
+                if _dir_rt == 'bullish':
+                    _sl_ref_rt = min(_kp_prices) if _kp_prices else (_nl_rt - atr_v * 3.0)
+                else:
+                    _sl_ref_rt = max(_kp_prices) if _kp_prices else (_nl_rt + atr_v * 3.0)
+
+                state.nl_retest_arms.append({
+                    'fp':        _fp_rt,
+                    'neckline':  _nl_rt,
+                    'direction': 'buy' if _dir_rt == 'bullish' else 'sell',
+                    'target':    _pat_rt.target,
+                    'sl_ref':    _sl_ref_rt,
+                    'conf':      _pat_rt.confidence,
+                    'label':     _pat_rt.label,
+                    'break_bars': _brk,
+                    'armed_at':   now,
+                })
+                _logger.info(
+                    f'[NLリテスト] {symbol} {_pat_rt.label} '
+                    f'NL={_nl_rt:,.2f} ブレイク{_brk}本確認 → リテスト待機 '
+                    f'({"BUY" if _dir_rt == "bullish" else "SELL"}) '
+                    f'SL参照={_sl_ref_rt:,.2f}')
+
         # MTF SMA20 傾き + H1 レジーム条件
         # 案A: weak_trend も許可し DI 方向で判断、SMA20 チェックは M5 のみ
         _slope_bars = scalp.get('sma20_slope_bars', 5)
@@ -629,6 +694,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _direct_confirmed  = False  # EW2/H1パターン由来: 一部ゲートをスキップ
         _is_ew2_signal     = False  # EW2専用フラグ: RSIゲートをバイパスする
         _is_scalein_signal = False  # RSIスケールイン由来: M1 RSI極端値ゲートをスキップ
+        _is_nl_retest      = False  # NLリテスト由来フラグ（SL/TP 上書きに使用）
+        _nl_retest_sl: float | None = None  # NLリテスト SL 価格
+        _nl_retest_tp: float | None = None  # NLリテスト TP 価格
         _lot_frac          = 1.0    # ロット倍率（SMA優先=1.0、スケールイン=rsi_scalein_lot_frac）
         _nl_tp_target: float | None = None  # SMAタッチ+ネックライン方向一致時のTP拡張先
         _nl_tp_label       = ''
@@ -670,6 +738,88 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         _logger.info(f'[スキャルプパターンSELL] {_pat_s.label} '
                                      f'NL={_pat_s.neckline:,.2f} 信頼度={_pat_s.confidence:.0%}')
                         break
+
+        # ── ネックライン再テスト: リテスト触知でエントリー ──────────────────────
+        # アーム期限切れ・無効化クリーンアップ → 価格接近でシグナル生成
+        _nl_rt_margin_v = atr_v * scalp.get('nl_retest_margin_atr', 0.5)
+        _nl_rt_inval    = atr_v * scalp.get('nl_retest_inval_atr',  2.0)
+        _nl_rt_sl_buf   = scalp.get('nl_retest_sl_atr', 0.5)   # SL バッファ（ATR 倍）
+        _nl_rt_expire   = timedelta(hours=scalp.get('nl_retest_expire_h', 48))
+
+        _nl_rt_kept = []
+        for _arm in state.nl_retest_arms:
+            _anl  = _arm['neckline']
+            _adir = _arm['direction']
+            # 期限切れ
+            if now - _arm['armed_at'] > _nl_rt_expire:
+                _logger.info(f'[NLリテスト] {symbol} {_arm["label"]} '
+                             f'NL={_anl:,.2f} 期限切れ → 削除')
+                continue
+            # 執行済み
+            if _arm['fp'] in state.pattern_traded:
+                continue
+            # 価格がネックライン逆側に大きく外れた（ブレイク失敗）
+            if _adir == 'buy'  and close_v < _anl - _nl_rt_inval:
+                _logger.info(f'[NLリテスト] {symbol} {_arm["label"]} '
+                             f'NL={_anl:,.2f} 価格逆行({close_v:,.2f}) → 無効化')
+                continue
+            if _adir == 'sell' and close_v > _anl + _nl_rt_inval:
+                _logger.info(f'[NLリテスト] {symbol} {_arm["label"]} '
+                             f'NL={_anl:,.2f} 価格逆行({close_v:,.2f}) → 無効化')
+                continue
+            _nl_rt_kept.append(_arm)
+        state.nl_retest_arms = _nl_rt_kept
+
+        if confirmed_signal is None and state.nl_retest_arms and not _ws_block:
+            for _arm in list(state.nl_retest_arms):
+                _anl  = _arm['neckline']
+                _adir = _arm['direction']
+                # 価格が NL に接近（NL ± margin_v 以内）したらリテストエントリー
+                if abs(close_v - _anl) > _nl_rt_margin_v:
+                    continue
+                if _adir == 'buy' and buy_enabled and not avoid_buy_surge and mtf_buy_ok:
+                    # SL = パターン極値 − ATR×buf（深めSL）
+                    _rt_sl = _arm['sl_ref'] - atr_v * _nl_rt_sl_buf
+                    _rt_tp = _arm['target']
+                    confirmed_signal  = 'buy'
+                    crossed_level     = _anl
+                    _direct_confirmed = True
+                    _is_nl_retest     = True
+                    _nl_retest_sl     = _rt_sl
+                    _nl_retest_tp     = _rt_tp
+                    state.pattern_traded.add(_arm['fp'])
+                    state.nl_retest_arms.remove(_arm)
+                    state.buy_scalein_rsi_done.clear()
+                    print(f"[NLリテスト/BUY] {_arm['label']} "
+                          f"NL={_anl:,.2f} close={close_v:,.2f} "
+                          f"SL={_rt_sl:,.2f} TP={_rt_tp:,.2f}")
+                    _logger.info(
+                        f'[NLリテスト/BUY] {symbol} {_arm["label"]} '
+                        f'NL={_anl:,.2f} close={close_v:,.2f} '
+                        f'SL={_rt_sl:,.2f} TP={_rt_tp:,.2f} '
+                        f'break_bars={_arm["break_bars"]}')
+                    break
+                elif _adir == 'sell' and sell_enabled and not avoid_sell_surge and mtf_sell_ok:
+                    _rt_sl = _arm['sl_ref'] + atr_v * _nl_rt_sl_buf
+                    _rt_tp = _arm['target']
+                    confirmed_signal  = 'sell'
+                    crossed_level     = _anl
+                    _direct_confirmed = True
+                    _is_nl_retest     = True
+                    _nl_retest_sl     = _rt_sl
+                    _nl_retest_tp     = _rt_tp
+                    state.pattern_traded.add(_arm['fp'])
+                    state.nl_retest_arms.remove(_arm)
+                    state.sell_scalein_rsi_done.clear()
+                    print(f"[NLリテスト/SELL] {_arm['label']} "
+                          f"NL={_anl:,.2f} close={close_v:,.2f} "
+                          f"SL={_rt_sl:,.2f} TP={_rt_tp:,.2f}")
+                    _logger.info(
+                        f'[NLリテスト/SELL] {symbol} {_arm["label"]} '
+                        f'NL={_anl:,.2f} close={close_v:,.2f} '
+                        f'SL={_rt_sl:,.2f} TP={_rt_tp:,.2f} '
+                        f'break_bars={_arm["break_bars"]}')
+                    break
 
         # ── Elliott Wave2 エントリー ────────────────────────────────────
         _ew2_signal_type = None
@@ -1615,6 +1765,20 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     tp_price = _nl_tp_capped
                     _logger.info(f'[ネックラインTP拡張/SELL] {_nl_tp_label} TP={tp_price:,.2f}')
 
+        # NL リテスト TP/SL 上書き: パターン目標TP + 極値SL（深め）
+        # EW2より前に適用し、後段のマクロバイアス倍率がかかるようにする
+        if _is_nl_retest and action in ('buy', 'sell'):
+            if action == 'buy':
+                if _nl_retest_sl is not None and _nl_retest_sl < close_v:
+                    sl_price = _nl_retest_sl   # 極値SL（深め）
+                if _nl_retest_tp is not None and _nl_retest_tp > close_v:
+                    tp_price = _nl_retest_tp   # パターン目標TP
+            else:
+                if _nl_retest_sl is not None and _nl_retest_sl > close_v:
+                    sl_price = _nl_retest_sl
+                if _nl_retest_tp is not None and _nl_retest_tp < close_v:
+                    tp_price = _nl_retest_tp
+
         # EW2 TP/SL 上書き: Fibonacci 拡張TP + W2 失効ラインSL
         # TP = W2底 + Wave1×1.618 (Wave3 目標) — 標準ATR-TPより通常大きい
         # SL = W2底 - ATR×buffer  — W2を割ったら波動構造崩壊 → タイトなSL
@@ -1671,7 +1835,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # それ以外はシグナル→執行の価格移動で SL 即抵触を防ぐ。
         _min_sl_atr  = scalp.get('min_sl_atr', 0.5)
         _min_sl_dist = atr_v * _min_sl_atr
-        if not _is_ew2_signal:
+        if not _is_ew2_signal and not _is_nl_retest:
             if action == 'buy':
                 sl_price = min(sl_price, close_v - _min_sl_dist)
             elif action == 'sell':
@@ -1906,6 +2070,13 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'd1_tl_bounce_sell':  d1_tl['bounce_sell'],
             # 節目ライン一覧
             'key_levels':         key_levels,
+            # NL リテスト待機状況
+            'nl_retest_arms':     [
+                {'label': a['label'], 'neckline': round(a['neckline'], 2),
+                 'direction': a['direction'], 'break_bars': a['break_bars'],
+                 'target': round(a['target'], 2), 'sl_ref': round(a['sl_ref'], 2)}
+                for a in state.nl_retest_arms
+            ],
         }
 
     except Exception:

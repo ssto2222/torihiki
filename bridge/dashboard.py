@@ -323,6 +323,23 @@ def print_poll_status(
     elif data.get('scalp_mode'):
         print(f" {_c('EW2', _MAGENTA)} {_c('BUY/SELL 未検出', _DIM)}")
 
+    # ── NL リテスト待機 ─────────────────────────────────────────────────────
+    _nl_rt_arms = data.get('nl_retest_arms') or []
+    if _nl_rt_arms:
+        for _nra in _nl_rt_arms[:4]:  # 最大4件表示
+            _nra_dir = _nra.get('direction', '?')
+            _nra_col = _GREEN if _nra_dir == 'buy' else _RED
+            _nra_nl  = _nra.get('neckline', 0.0)
+            _nra_tp  = _nra.get('target', 0.0)
+            _nra_sl  = _nra.get('sl_ref', 0.0)
+            _nra_bb  = _nra.get('break_bars', 0)
+            _nra_lbl = _nra.get('label', '?')
+            _nra_dist = abs(close - _nra_nl) / atr if atr > 0 else 0.0
+            print(f" {_c('NLリテスト', _CYAN)} {_c(_nra_dir.upper(), _nra_col)}"
+                  f"  {_nra_lbl}  NL=${_nra_nl:,.0f}"
+                  f"  ({_nra_dist:.1f}ATR)  {_nra_bb}本確認"
+                  f"  TP=${_nra_tp:,.0f}  SL参照=${_nra_sl:,.0f}")
+
     # ── マクロバイアス ──────────────────────────────────────────────────────
     _macro_min = (effective_cfg or {}).get('MACRO', {}).get('min_bias_to_show', 15)
     _mb_bias   = data.get('macro_bias', 0.0)
