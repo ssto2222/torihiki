@@ -4,10 +4,14 @@ import argparse
 import io
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# ANSI エスケープコード除去用（console_symbol.log に読める形で保存するため）
+_ANSI_ESCAPE = re.compile(r'\033\[[0-9;]*[mA-Za-z]')
 
 
 class _TeeWriter(io.TextIOBase):
@@ -45,10 +49,11 @@ class _TeeWriter(io.TextIOBase):
         self._buf.clear()
 
     def dump(self, path: Path) -> None:
-        """バッファ内容をファイルに上書き保存する"""
+        """バッファ内容から ANSI コードを除去してファイルに上書き保存する"""
         try:
+            plain = _ANSI_ESCAPE.sub('', ''.join(self._buf))
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(''.join(self._buf), encoding='utf-8-sig')
+            path.write_text(plain, encoding='utf-8-sig')
         except OSError:
             pass
 
