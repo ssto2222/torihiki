@@ -120,6 +120,33 @@ def _build_key_level_cross_msg(
     return '\n'.join(lines)
 
 
+def _build_mtf_cross_msg(
+    symbol: str,
+    level: dict,
+    direction: str,   # 'up' | 'down'
+    close: float,
+    prev_close: float,
+    atr: float,
+) -> str:
+    """MTF 節目ラインクロス時の Discord 警告メッセージを生成する"""
+    emoji = '⚠️🔼' if direction == 'up' else '⚠️🔽'
+    dir_label = '上抜け' if direction == 'up' else '下抜け'
+    price  = level['price']
+    label  = level['label']
+    tf     = level.get('tf', '?')
+    kind   = level.get('kind', '')
+    dist   = abs(close - price)
+    dist_r = dist / atr if atr > 0 else 0.0
+    kind_label = {'resistance': '抵抗線', 'support': '支持線'}.get(kind, kind)
+    lines = [
+        f'{emoji} **[{symbol}] {tf} 節目ライン {dir_label}**',
+        f'価格: ${price:,.2f}  ({label} / {kind_label})',
+        f'close: ${prev_close:,.2f} → ${close:,.2f}  '
+        f'乖離: ${dist:,.2f} ({dist_r:.2f}ATR)',
+    ]
+    return '\n'.join(lines)
+
+
 def _build_discord_hourly_msg(data: dict, macro_state=None) -> str:
     """1時間ごとのステータスサマリーを Discord メッセージとして組み立てる"""
     symbol    = data.get('symbol', '')

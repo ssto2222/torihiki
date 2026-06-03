@@ -11,14 +11,15 @@ from core.indicators import add_m5_indicators, add_m1_indicators, add_h1_indicat
 from core.strategy   import (detect_big_move, detect_early_surge, detect_pre_surge,
                               should_avoid_entry_during_surge, detect_whipsaw,
                               detect_elliott_w2_buy, detect_elliott_w2_sell,
-                              detect_volume_breakout, detect_d1_trendlines)
+                              detect_volume_breakout, detect_d1_trendlines,
+                              detect_trendlines_tf)
 from core.patterns   import detect_all_patterns, PatternResult
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _position_status, _get_jpy_per_usd,
                               _has_positions_in_direction,
                               detect_bidirectional_loss)
-from bridge.notify   import send_discord, _build_key_level_cross_msg
+from bridge.notify   import send_discord, _build_key_level_cross_msg, _build_mtf_cross_msg
 if TYPE_CHECKING:
     from bridge.state import ScalpState, SignalState, JpyRateCache, Sma20TouchCache, MacroBiasState
 
@@ -85,6 +86,69 @@ def _collect_key_levels(d1_tl: dict, h1_pats: list, atr_v: float) -> list[dict]:
         })
 
     return _dedup_levels(levels, atr_v * 0.15)
+
+
+def _collect_mtf_levels(
+    d1_tl: dict,
+    h4_tl: dict,
+    h1_tl: dict,
+    m15_tl: dict,
+    h1_pats: list,
+    h4_pats: list,
+    m15_pats: list,
+    atr_v: float,
+) -> list[dict]:
+    """M15以上の全時間足から節目ラインを収集して統合する（ダッシュボード非表示・警告専用）。"""
+    levels = []
+
+    _tl_map = [
+        ('D1', d1_tl,  'd1_atr'),
+        ('H4', h4_tl,  'tf_atr'),
+        ('H1', h1_tl,  'tf_atr'),
+        ('M15', m15_tl, 'tf_atr'),
+    ]
+    for tf, tl, atr_key in _tl_map:
+        if tl is None:
+            continue
+        if tl.get('resistance', {}).get('valid'):
+            levels.append({
+                'price':  tl['resistance']['price'],
+                'label':  f"{tf}抵抗TL({tl['resistance']['n_points']}点)",
+                'kind':   'resistance',
+                'tf':     tf,
+                'source': 'trendline',
+                'conf':   1.0,
+            })
+        if tl.get('support', {}).get('valid'):
+            levels.append({
+                'price':  tl['support']['price'],
+                'label':  f"{tf}支持TL({tl['support']['n_points']}点)",
+                'kind':   'support',
+                'tf':     tf,
+                'source': 'trendline',
+                'conf':   1.0,
+            })
+
+    _pat_map = [
+        ('H1',  h1_pats),
+        ('H4',  h4_pats),
+        ('M15', m15_pats),
+    ]
+    for tf, pats in _pat_map:
+        for p in pats:
+            kind     = 'resistance' if p.direction == 'bearish' else 'support'
+            conf_tag = '確定' if p.confirmed else '形成中'
+            levels.append({
+                'price':  p.neckline,
+                'target': p.target,
+                'label':  f"{tf} {p.label}NL({conf_tag}/{p.confidence:.0%})",
+                'kind':   kind,
+                'tf':     tf,
+                'source': 'pattern',
+                'conf':   p.confidence,
+            })
+
+    return _dedup_levels(levels, atr_v * 0.1)
 
 
 def compute_scalp_signal(symbol: str, cfg: dict,
@@ -177,9 +241,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 sma20_m1_val = (float(df_m1['SMA20'].iloc[-1])
                                 if 'SMA20' in df_m1.columns else float('nan'))
 
-        # M15 データ取得（マルチTF SMA20 傾きチェック用）
+        # M15 データ取得（マルチTF SMA20 傾きチェック用 + MTF節目ライン検出用）
         # ADX 二重平滑化 + SMA20(20) の dropna で先頭 ~28 本が落ちるため多めに取得する
-        df_m15_raw    = fetch_ohlcv(symbol, 'M15', 60)
+        df_m15_raw    = fetch_ohlcv(symbol, 'M15', 200)
         df_m15        = None
         sma20_m15_val = float('nan')
         if df_m15_raw is not None:
@@ -188,6 +252,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 df_m15 = None
             elif 'SMA20' in df_m15.columns:
                 sma20_m15_val = float(df_m15['SMA20'].iloc[-1])
+
+        # H4 データ取得（MTF節目ライン検出用）
+        df_h4_raw = fetch_ohlcv(symbol, 'H4', 120)
+        df_h4     = None
+        if df_h4_raw is not None:
+            df_h4 = add_h1_indicators(df_h4_raw, cfg)
+            if df_h4.empty:
+                df_h4 = None
 
         # EW2 専用 M5 データ（多めに取得してパターン探索精度を上げる）
         # signal用 df は50本のみ → EW2は独立して200本のM5足を使用
@@ -215,6 +287,22 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # D1 トレンドライン（重要価格）検出
         d1_tl = detect_d1_trendlines(df_d1, close_v, prev_close_v, cfg)
         _tl_enabled = cfg.get('D1_TRENDLINE', {}).get('enabled', True)
+
+        # MTF トレンドライン検出（M15・H4 — H1はH1フェッチ後に検出）
+        _m15_tl_mtf = None
+        _h4_tl_mtf  = None
+        if df_m15_raw is not None and len(df_m15_raw) >= 10:
+            try:
+                _m15_tl_mtf = detect_trendlines_tf(df_m15_raw, close_v, prev_close_v,
+                                                    sw_window=3, min_points=2)
+            except Exception:
+                pass
+        if df_h4_raw is not None and len(df_h4_raw) >= 10:
+            try:
+                _h4_tl_mtf = detect_trendlines_tf(df_h4_raw, close_v, prev_close_v,
+                                                   sw_window=3, min_points=2)
+            except Exception:
+                pass
 
         # M1 RSI ソフトブロック追跡（追加ポジション抑制用。ハードブロック m1_rsi_ob/os_gate とは別閾値）
         if not np.isnan(rsi_m1_cur):
@@ -264,6 +352,29 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                      'bars_ago': p.bars_ago}
                     for p in _h1_pats_raw if p.confidence >= 0.40
                 ]
+            except Exception:
+                pass
+
+        # H1 MTF トレンドライン
+        _h1_tl_mtf = None
+        if df_h1_raw is not None and len(df_h1_raw) >= 10:
+            try:
+                _h1_tl_mtf = detect_trendlines_tf(df_h1_raw, close_v, prev_close_v,
+                                                   sw_window=3, min_points=2)
+            except Exception:
+                pass
+
+        # H4 / M15 パターン検出（MTF節目ライン用）
+        _h4_pats_raw:  list[PatternResult] = []
+        _m15_pats_raw: list[PatternResult] = []
+        if df_h4_raw is not None and len(df_h4_raw) >= 20:
+            try:
+                _h4_pats_raw = detect_all_patterns(df_h4_raw, window=5, top_n=3)
+            except Exception:
+                pass
+        if df_m15_raw is not None and len(df_m15_raw) >= 20:
+            try:
+                _m15_pats_raw = detect_all_patterns(df_m15_raw, window=5, top_n=3)
             except Exception:
                 pass
 
@@ -1641,6 +1752,39 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                         _logger.warning(f'[節目通知] 送信失敗: {_kl_err}')
                     _logger.info(f'[節目/下抜け] {symbol} {_kl_label} '
                                  f'price={_kl_price:.2f} close={close_v:.2f}')
+
+        # ── MTF 節目ライン収集 & クロス通知 ─────────────────────────────────
+        mtf_levels = _collect_mtf_levels(
+            d1_tl, _h4_tl_mtf, _h1_tl_mtf, _m15_tl_mtf,
+            _h1_pats_raw, _h4_pats_raw, _m15_pats_raw, atr_v)
+
+        if len(state.mtf_level_crossed) > 300:
+            state.mtf_level_crossed.clear()
+
+        for _ml in mtf_levels:
+            _ml_price = _ml['price']
+            if prev_close_v < _ml_price <= close_v:
+                _fp = (int(round(_ml_price)), 'up')
+                if _fp not in state.mtf_level_crossed:
+                    state.mtf_level_crossed.add(_fp)
+                    try:
+                        send_discord(_build_mtf_cross_msg(
+                            symbol, _ml, 'up', close_v, prev_close_v, atr_v))
+                    except Exception as _ml_err:
+                        _logger.warning(f'[MTF節目通知] 送信失敗: {_ml_err}')
+                    _logger.info(f'[MTF節目/上抜け] {symbol} {_ml["label"]} '
+                                 f'price={_ml_price:.2f} close={close_v:.2f}')
+            elif prev_close_v > _ml_price >= close_v:
+                _fp = (int(round(_ml_price)), 'down')
+                if _fp not in state.mtf_level_crossed:
+                    state.mtf_level_crossed.add(_fp)
+                    try:
+                        send_discord(_build_mtf_cross_msg(
+                            symbol, _ml, 'down', close_v, prev_close_v, atr_v))
+                    except Exception as _ml_err:
+                        _logger.warning(f'[MTF節目通知] 送信失敗: {_ml_err}')
+                    _logger.info(f'[MTF節目/下抜け] {symbol} {_ml["label"]} '
+                                 f'price={_ml_price:.2f} close={close_v:.2f}')
 
         return {
             'timestamp':          now.strftime('%Y.%m.%d %H:%M:%S'),

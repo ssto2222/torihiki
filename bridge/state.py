@@ -112,6 +112,9 @@ class ScalpState:
     # 節目ラインクロス通知済みセット (round(price), 'up'|'down') のタプル
     key_level_crossed: set = field(default_factory=set)
 
+    # MTF 節目ライン（M15以上）クロス通知済みセット（ダッシュボード非表示・警告専用）
+    mtf_level_crossed: set = field(default_factory=set)
+
     # シグナル点灯回数（実行ゲートで action=buy/sell になった回数）
     # state.count はEAへ送信した実エントリー数。signals_today は点灯だけのカウント。
     signals_today: int = 0
