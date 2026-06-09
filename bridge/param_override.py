@@ -312,19 +312,30 @@ class ParamSpec(NamedTuple):
 
 
 PARAMS: dict[str, ParamSpec] = {
-    'target':     ParamSpec('SCALP',  'target_profit_jpy', int,   100,   50_000, '目標利益(円)'),
-    'sl_ratio':   ParamSpec('SCALP',  'sl_ratio',          float, 1.0,   10.0,   'SL比率'),
-    'tp_frac':    ParamSpec('SCALP',  'tp_atr_fraction',   float, 0.1,   2.0,    'TP幅 = ATR × この値'),
-    'buy':        ParamSpec('SCALP',  'buy_enabled',       bool,  None,  None,   'BUY有効/無効'),
-    'sell':       ParamSpec('SCALP',  'sell_enabled',      bool,  None,  None,   'SELL有効/無効'),
-    'max_trades': ParamSpec('SCALP',  'max_trades_day',    int,   1,     200,    '1日最大エントリー'),
-    'cooldown':   ParamSpec('SCALP',  'cooldown_min',      int,   1,     240,    'クールダウン(分)'),
-    'jpy_rate':   ParamSpec('SCALP',  'jpy_per_usd',       float, 100.0, 200.0,  'JPY/USDレート'),
-    'lot':        ParamSpec('BRIDGE', 'lot_size',          float, 0.01,  10.0,   'フォールバックロット'),
-    'risk':       ParamSpec('BRIDGE', 'risk_pct',          float, 0.001, 0.10,   'リスク割合'),
-    'sl_multi':   ParamSpec('SL',     'sl_multi',          float, 0.5,   5.0,    'SL幅 = ATR × 倍率'),
-    'tp_multi':   ParamSpec('SL',     'tp_atr_multi',      float, 0.5,   10.0,   'TP幅 = ATR × 倍率'),
-    'rsi_buy':    ParamSpec('SIGNAL', 'buy_rsi_thr',       float, 20.0,  60.0,   'BUY RSI閾値'),
+    'target':        ParamSpec('SCALP',  'target_profit_jpy',       int,   100,    50_000, '目標利益(円)'),
+    'sl_ratio':      ParamSpec('SCALP',  'sl_ratio',                float, 1.0,    10.0,   'SL比率'),
+    'tp_frac':       ParamSpec('SCALP',  'tp_atr_fraction',         float, 0.1,    2.0,    'TP幅 = ATR × この値'),
+    'buy':           ParamSpec('SCALP',  'buy_enabled',             bool,  None,   None,   'BUY有効/無効'),
+    'sell':          ParamSpec('SCALP',  'sell_enabled',            bool,  None,   None,   'SELL有効/無効'),
+    'max_trades':    ParamSpec('SCALP',  'max_trades_day',          int,   1,      200,    '1日最大エントリー'),
+    'cooldown':      ParamSpec('SCALP',  'cooldown_min',            int,   1,      240,    'クールダウン(分)'),
+    'jpy_rate':      ParamSpec('SCALP',  'jpy_per_usd',             float, 100.0,  200.0,  'JPY/USDレート'),
+    'lot':           ParamSpec('BRIDGE', 'lot_size',                float, 0.01,   10.0,   'フォールバックロット'),
+    'risk':          ParamSpec('BRIDGE', 'risk_pct',                float, 0.001,  0.10,   'リスク割合'),
+    'sl_multi':      ParamSpec('SL',     'sl_multi',                float, 0.5,    5.0,    'SL幅 = ATR × 倍率'),
+    'tp_multi':      ParamSpec('SL',     'tp_atr_multi',            float, 0.5,    10.0,   'TP幅 = ATR × 倍率'),
+    'rsi_buy':       ParamSpec('SIGNAL', 'buy_rsi_thr',             float, 20.0,   60.0,   'BUY RSI閾値'),
+    # ── SCALP 追加エイリアス ──────────────────────────────────────────────────
+    'max_pos':       ParamSpec('SCALP',  'max_positions',           int,   0,      20,     '同時保有ポジション上限(0=自動)'),
+    'min_bal':       ParamSpec('SCALP',  'min_balance_jpy',         int,   0,      100_000,'残高下限（円）'),
+    'vol_bo':        ParamSpec('SCALP',  'vol_bo_enabled',          bool,  None,   None,   'ボリュームBO有効/無効'),
+    'retest_bars':   ParamSpec('SCALP',  'nl_retest_min_bars',      int,   1,      10,     'NLリテスト確認H1バー数'),
+    'retest_margin': ParamSpec('SCALP',  'nl_retest_margin_atr',    float, 0.1,    3.0,    'NLリテストタッチ幅(ATR倍)'),
+    'retest_sl':     ParamSpec('SCALP',  'nl_retest_sl_atr',        float, 0.1,    5.0,    'NLリテストSLバッファ(ATR倍)'),
+    'retest_expire': ParamSpec('SCALP',  'nl_retest_expire_h',      int,   1,      168,    'NLリテスト有効期限(時間)'),
+    'm1_ob':         ParamSpec('SCALP',  'm1_rsi_ob_gate',          float, 60.0,   95.0,   'M1 RSI過熱ブロックゲート'),
+    'm1_os':         ParamSpec('SCALP',  'm1_rsi_os_gate',          float, 5.0,    40.0,   'M1 RSI売られ過ぎブロックゲート'),
+    'pend_timeout':  ParamSpec('SCALP',  'sma_pending_timeout_min', int,   5,      120,    'SMAペンディングタイムアウト(分)'),
 }
 
 

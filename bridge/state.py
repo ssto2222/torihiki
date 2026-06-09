@@ -119,6 +119,11 @@ class ScalpState:
     # state.count はEAへ送信した実エントリー数。signals_today は点灯だけのカウント。
     signals_today: int = 0
 
+    # ネックライン再テスト待機リスト（H1パターンブレイク後の戻り買い/売り）
+    # 各要素: {'fp', 'neckline', 'direction', 'target', 'sl_ref', 'conf', 'label',
+    #          'break_bars', 'armed_at'}
+    nl_retest_arms: list = field(default_factory=list)
+
 
 @dataclass
 class TimeBiasState:

@@ -215,6 +215,13 @@ SCALP = dict(
     pre_surge_use_min_lot     = True,  # True: プレサージエントリーはリスク低減のため最低ロット強制
     pre_surge_big_chance_unlock = True, # True: scoreが閾値以上なら最低ロット制限を解除
     pre_surge_big_chance_score = 3,    # ビッグチャンス判定スコア（3=BB+RVOL+ADX全条件充足）
+    # ── ネックライン再テスト（H1パターンブレイク後の戻り買い/売り）─────────────────
+    nl_retest_conf_min   = 0.45,  # パターン信頼度下限（これ以上のパターンのみアーム）
+    nl_retest_min_bars   = 2,     # ブレイク確認に必要なH1確定バー数
+    nl_retest_expire_h   = 48,    # アーム有効期限（時間）
+    nl_retest_margin_atr = 0.5,   # NLタッチ判定幅（ATR倍）：価格がNL±この範囲内でトリガー
+    nl_retest_inval_atr  = 2.0,   # 価格逆行無効化距離（ATR倍）：逆方向にこれ以上動いたらキャンセル
+    nl_retest_sl_atr     = 0.5,   # SLバッファ（ATR倍）：パターン極値 ± この幅でSL設定
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────
