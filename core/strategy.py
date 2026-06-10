@@ -340,6 +340,62 @@ def detect_pre_surge(df_m5: pd.DataFrame, cfg: dict) -> dict:
     }
 
 
+def detect_ttm_squeeze(df_m5: pd.DataFrame, cfg: dict) -> dict:
+    """TTMスクイーズ検出: BBがケルトナーチャネル(KC)内側に収縮(スクイーズ)した後、
+    解放(発火)した瞬間のブレイクアウト方向をモメンタムオシレーターで判定する。
+
+    - squeeze_on:    現在 BB が KC の内側にあるか（収縮継続中）
+    - squeeze_bars:  スクイーズ継続バー数（継続中=現在まで／解放直後=直前までの長さ）
+    - fired:         直前バーまでスクイーズが続き、現在バーで解放された
+    - direction:     'up'/'down'/'none'（モメンタムの符号）
+    - momentum:      モメンタム値（Close - (Donchian中央20 + SMA20) / 2）
+    - rising:        モメンタムが直前バーより拡大（勢い継続）しているか
+
+    必要列が無い/データ不足の場合は安全なデフォルト値を返す。
+    """
+    _empty = lambda: {
+        'squeeze_on': False, 'squeeze_bars': 0, 'fired': False,
+        'direction': 'none', 'momentum': 0.0, 'rising': False,
+    }
+    if df_m5 is None or len(df_m5) < 22:
+        return _empty()
+    if 'Squeeze_On' not in df_m5.columns or 'TTM_Momentum' not in df_m5.columns:
+        return _empty()
+
+    sq  = df_m5['Squeeze_On']
+    mom = df_m5['TTM_Momentum']
+    if mom.iloc[-2:].isna().any():
+        return _empty()
+
+    squeeze_on_now = bool(sq.iloc[-1])
+    if squeeze_on_now:
+        start = len(sq) - 1
+        was_squeezed = False
+    else:
+        start = len(sq) - 2
+        was_squeezed = bool(sq.iloc[-2])
+
+    squeeze_bars = 0
+    for i in range(start, -1, -1):
+        if bool(sq.iloc[i]):
+            squeeze_bars += 1
+        else:
+            break
+
+    mom_cur  = float(mom.iloc[-1])
+    mom_prev = float(mom.iloc[-2])
+    direction = 'up' if mom_cur > 0 else 'down' if mom_cur < 0 else 'none'
+
+    return {
+        'squeeze_on':   squeeze_on_now,
+        'squeeze_bars': squeeze_bars,
+        'fired':        (not squeeze_on_now) and was_squeezed and squeeze_bars > 0,
+        'direction':    direction,
+        'momentum':     round(mom_cur, 4),
+        'rising':       abs(mom_cur) > abs(mom_prev),
+    }
+
+
 def detect_big_move(df_m5: pd.DataFrame,
                     lookback: int = 12,
                     atr_multi: float = 2.0) -> str:

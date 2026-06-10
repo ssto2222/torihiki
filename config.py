@@ -43,6 +43,7 @@ INDICATOR = dict(
     surge_avoid_accel_threshold = 1.5,  # 急騰回避価格加速閾値
     bb_tp_sigma              = 2.0,    # H1 BB2σ を TP 初期位置に使う
     bb_tp_near_pct           = 0.85,   # H1 BB2σ 近傍判定（%）
+    kc_atr_multi             = 1.5,    # ケルトナーチャネル幅 = EMA20 ± ATR × この値（TTMスクイーズ判定用）
 )
 
 # ── H1 シグナル検出（SMA20 + RSI）────────────────────────────
@@ -222,6 +223,13 @@ SCALP = dict(
     nl_retest_margin_atr = 0.5,   # NLタッチ判定幅（ATR倍）：価格がNL±この範囲内でトリガー
     nl_retest_inval_atr  = 2.0,   # 価格逆行無効化距離（ATR倍）：逆方向にこれ以上動いたらキャンセル
     nl_retest_sl_atr     = 0.5,   # SLバッファ（ATR倍）：パターン極値 ± この幅でSL設定
+    # ── TTM スクイーズ（BB×ケルトナー収縮からの解放でブレイクアウト）─────────────
+    ttm_squeeze_enabled  = True,  # 有効/無効
+    ttm_squeeze_min_bars = 3,     # 発火と認める最小スクイーズ継続バー数（M5）
+    ttm_rsi_buy_min      = 45.0,  # 発火BUY: M5 RSI下限（モメンタム方向との整合チェック）
+    ttm_rsi_sell_max     = 55.0,  # 発火SELL: M5 RSI上限
+    ttm_tp_multi         = 1.6,   # TP倍率（通常スキャルプTP × この値）
+    ttm_sl_multi         = 0.9,   # SL倍率（通常スキャルプSL × この値）
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────

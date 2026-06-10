@@ -12,7 +12,7 @@ from core.strategy   import (detect_big_move, detect_early_surge, detect_pre_sur
                               should_avoid_entry_during_surge, detect_whipsaw,
                               detect_elliott_w2_buy, detect_elliott_w2_sell,
                               detect_volume_breakout, detect_d1_trendlines,
-                              detect_trendlines_tf)
+                              detect_trendlines_tf, detect_ttm_squeeze)
 from core.patterns   import detect_all_patterns, PatternResult
 
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
@@ -619,6 +619,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # ── 急騰初期検知と中段階回避 ─────────────────────────────
         surge_info      = detect_early_surge(df, cfg)
         pre_surge_info  = detect_pre_surge(df, cfg)
+        ttm_info        = detect_ttm_squeeze(df, cfg)
 
         # BUY 専用: RSI が高すぎる（急騰中段階）はエントリー見送り
         avoid_buy_surge = (should_avoid_entry_during_surge(df, cfg)
@@ -694,6 +695,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _direct_confirmed  = False  # EW2/H1パターン由来: 一部ゲートをスキップ
         _is_ew2_signal     = False  # EW2専用フラグ: RSIゲートをバイパスする
         _is_scalein_signal = False  # RSIスケールイン由来: M1 RSI極端値ゲートをスキップ
+        _is_ttm_signal     = False  # TTMスクイーズ発火由来: M1 BB/RSI極端値ゲートをスキップ
         _is_nl_retest      = False  # NLリテスト由来フラグ（SL/TP 上書きに使用）
         _nl_retest_sl: float | None = None  # NLリテスト SL 価格
         _nl_retest_tp: float | None = None  # NLリテスト TP 価格
@@ -1000,6 +1002,51 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 _vb_sl_multi = scalp.get('vol_bo_sl_multi', 0.8)
                 _logger.info(f'[VOL-BO-SELL] {symbol} RVOL={_vol_bo["rvol"]:.1f} '
                              f'body={_vol_bo["body_ratio"]:.2f} RSI={rsi_cur:.1f}')
+
+        # TP/SL TTMスクイーズ倍率（デフォルト 1.0 = 変更なし）
+        _ttm_tp_multi = 1.0
+        _ttm_sl_multi = 1.0
+
+        # ── TTMスクイーズ: BB×ケルトナー収縮からの解放(発火)でブレイクアウト方向確定 ──
+        # スクイーズ解放はバンド際への急伸を伴うため、M1 BB際ゲート・M1 RSI極端値ゲートは
+        # _is_ttm_signal で免除する（通常時の「伸び切り回避」目的のゲートと矛盾するため）。
+        _ttm_min_bars = scalp.get('ttm_squeeze_min_bars', 3)
+        if (scalp.get('ttm_squeeze_enabled', True) and confirmed_signal is None
+                and not _ws_block and ttm_info['fired']
+                and ttm_info['squeeze_bars'] >= _ttm_min_bars
+                and bar_time != state.ttm_fired_bar):
+            _ttm_rsi_buy_min  = scalp.get('ttm_rsi_buy_min',  45.0)
+            _ttm_rsi_sell_max = scalp.get('ttm_rsi_sell_max', 55.0)
+            if (ttm_info['direction'] == 'up'
+                    and buy_enabled and not avoid_buy_surge
+                    and mtf_buy_ok
+                    and rsi_cur >= _ttm_rsi_buy_min):
+                state.ttm_fired_bar = bar_time
+                state.ttm_fired_dir = 'up'
+                confirmed_signal = 'buy'
+                state.buy_scalein_rsi_done.clear()
+                crossed_level    = close_v
+                _ew2_signal_type = f'ttm_squeeze_up_bars{ttm_info["squeeze_bars"]}'
+                _is_ttm_signal   = True
+                _ttm_tp_multi = scalp.get('ttm_tp_multi', 1.6)
+                _ttm_sl_multi = scalp.get('ttm_sl_multi', 0.9)
+                _logger.info(f'[TTM-SQUEEZE-BUY] {symbol} bars={ttm_info["squeeze_bars"]} '
+                             f'momentum={ttm_info["momentum"]:.4f} RSI={rsi_cur:.1f}')
+            elif (ttm_info['direction'] == 'down'
+                    and sell_enabled and not avoid_sell_surge
+                    and mtf_sell_ok
+                    and rsi_cur <= _ttm_rsi_sell_max):
+                state.ttm_fired_bar = bar_time
+                state.ttm_fired_dir = 'down'
+                confirmed_signal = 'sell'
+                state.sell_scalein_rsi_done.clear()
+                crossed_level    = close_v
+                _ew2_signal_type = f'ttm_squeeze_down_bars{ttm_info["squeeze_bars"]}'
+                _is_ttm_signal   = True
+                _ttm_tp_multi = scalp.get('ttm_tp_multi', 1.6)
+                _ttm_sl_multi = scalp.get('ttm_sl_multi', 0.9)
+                _logger.info(f'[TTM-SQUEEZE-SELL] {symbol} bars={ttm_info["squeeze_bars"]} '
+                             f'momentum={ttm_info["momentum"]:.4f} RSI={rsi_cur:.1f}')
 
         # ── SMA 優先自動待機セット ─────────────────────────────────────────
         # RSI クロスを待たずに MTF 条件 + RSI50 方向フィルターで sma_pending を自動セット
@@ -1606,8 +1653,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             new_cross = None   # ゲートを通らせない（state.count 増加しない）
 
         # M1 BB ゲートを事前評価（elif チェーン外に出すことで後続ゲートが確実に評価される）
+        # TTMスクイーズ発火はバンド際への急伸そのものが根拠のためゲート対象外
         _bb_gate_skip = ''
-        if (new_cross and df_m1 is not None and not _is_ew2_signal
+        if (new_cross and df_m1 is not None and not _is_ew2_signal and not _is_ttm_signal
                 and 'BB_upper' in df_m1.columns and 'BB_lower' in df_m1.columns):
             _close_m1_g  = float(df_m1['Close'].iloc[-1])
             _bb_upper_m1 = float(df_m1['BB_upper'].iloc[-1])
@@ -1632,11 +1680,14 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
-            # M1 RSI 極端値ゲート: EW2・スケールイン免除
-            elif (not _is_ew2_signal and not _is_scalein_signal and not np.isnan(rsi_m1_cur)
+            # M1 RSI 極端値ゲート: EW2・スケールイン・TTMスクイーズ発火免除
+            # （ブレイクアウト発火は M1 RSI 急伸/急落そのものが伴うため）
+            elif (not _is_ew2_signal and not _is_scalein_signal and not _is_ttm_signal
+                  and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur >= scalp.get('m1_rsi_ob_gate', 70.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≥{scalp.get("m1_rsi_ob_gate", 70.0):.0f} 過熱 エントリー禁止'
-            elif (not _is_ew2_signal and not _is_scalein_signal and not np.isnan(rsi_m1_cur)
+            elif (not _is_ew2_signal and not _is_scalein_signal and not _is_ttm_signal
+                  and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur <= scalp.get('m1_rsi_os_gate', 30.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≤{scalp.get("m1_rsi_os_gate", 30.0):.0f} 売られすぎ エントリー禁止'
             # M1 SMA20 加速度ゲート（デフォルトOFF）
@@ -1742,6 +1793,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             else:
                 tp_price = close_v - _vb_tp_move
                 sl_price = close_v + _vb_sl_move
+
+        # TTMスクイーズ発火: TP拡大 + SL独立タイト（解放方向への勢いを活用）
+        if _ttm_tp_multi != 1.0 and action in ('buy', 'sell'):
+            _ttm_tp_move = tp_move * _ttm_tp_multi
+            _ttm_sl_move = sl_move * _ttm_sl_multi
+            if action == 'buy':
+                tp_price = close_v + _ttm_tp_move
+                sl_price = close_v - _ttm_sl_move
+            else:
+                tp_price = close_v - _ttm_tp_move
+                sl_price = close_v + _ttm_sl_move
 
         # パターンTP目標で tp_price を上書き（最低 1ATR 確保）
         if state.pattern_tp_target is not None and action in ('buy', 'sell'):
@@ -2047,6 +2109,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'rvol': (round(float(df['RVOL'].iloc[-1]), 2)
                      if 'RVOL' in df.columns and not np.isnan(float(df['RVOL'].iloc[-1]))
                      else 0.0),
+            'ttm_squeeze':        ttm_info,
             'macro_bias':         macro_state.bias       if macro_state else 0.0,
             'macro_bias_label':   macro_state.bias_label if macro_state else 'neutral',
             'macro_summary':      macro_state.summary    if macro_state else '',

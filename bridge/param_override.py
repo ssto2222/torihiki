@@ -336,6 +336,11 @@ PARAMS: dict[str, ParamSpec] = {
     'm1_ob':         ParamSpec('SCALP',  'm1_rsi_ob_gate',          float, 60.0,   95.0,   'M1 RSI過熱ブロックゲート'),
     'm1_os':         ParamSpec('SCALP',  'm1_rsi_os_gate',          float, 5.0,    40.0,   'M1 RSI売られ過ぎブロックゲート'),
     'pend_timeout':  ParamSpec('SCALP',  'sma_pending_timeout_min', int,   5,      120,    'SMAペンディングタイムアウト(分)'),
+    # ── TTM スクイーズ エイリアス ────────────────────────────────────────────
+    'ttm':           ParamSpec('SCALP',  'ttm_squeeze_enabled',     bool,  None,   None,   'TTMスクイーズ有効/無効'),
+    'ttm_bars':      ParamSpec('SCALP',  'ttm_squeeze_min_bars',    int,   1,      20,     'TTM発火に必要な最小スクイーズ継続バー数'),
+    'ttm_tp':        ParamSpec('SCALP',  'ttm_tp_multi',            float, 0.5,    5.0,    'TTM発火 TP倍率'),
+    'ttm_sl':        ParamSpec('SCALP',  'ttm_sl_multi',            float, 0.1,    3.0,    'TTM発火 SL倍率'),
 }
 
 
