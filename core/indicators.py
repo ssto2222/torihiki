@@ -39,13 +39,6 @@ def calc_price_acceleration(close: pd.Series, period: int = 5) -> pd.Series:
     return sma.pct_change(periods=1) * 100
 
 
-def calc_bb_width(close: pd.Series, period: int = 20, sigma: float = 2.0) -> pd.Series:
-    """BB幅（バンド幅/中心値）を返す。値が小さいほどスクイーズ（圧縮）状態"""
-    ma  = close.rolling(period).mean()
-    std = close.rolling(period).std()
-    return (2 * sigma * std) / ma.replace(0, np.nan)
-
-
 def detect_volume_surge(volume: pd.Series, rvol: pd.Series,
                         volume_threshold: float = 2.0,
                         rvol_threshold: float = 1.5) -> pd.Series:
@@ -172,17 +165,16 @@ def add_m5_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     df['ATR'] = calc_atr(df, ind.get('atr_period', 14))
     df['SMA20'] = df['Close'].rolling(20).mean()
 
-    # BB 幅（プレサージのスクイーズ検出用）
+    # BB(2σ): プレサージのスクイーズ検出（BB_Width）と TTM スクイーズ（BB_upper/lower）で共用
     bb_period = ind.get('bb_period', 20)
-    df['BB_Width'] = calc_bb_width(df['Close'], bb_period)
-
-    # ── TTM スクイーズ: BB(20,2σ) がケルトナーチャネル(EMA20±ATR×倍率)の内側に
-    # 収縮している状態を検出。収縮→解放(発火)でブレイクアウト方向を判定する。
     bb_ma  = df['Close'].rolling(bb_period).mean()
     bb_std = df['Close'].rolling(bb_period).std()
+    df['BB_Width'] = (2 * 2.0 * bb_std) / bb_ma.replace(0, np.nan)
     df['BB_upper'] = bb_ma + 2.0 * bb_std
     df['BB_lower'] = bb_ma - 2.0 * bb_std
 
+    # ── TTM スクイーズ: BB(20,2σ) がケルトナーチャネル(EMA20±ATR×倍率)の内側に
+    # 収縮している状態を検出。収縮→解放(発火)でブレイクアウト方向を判定する。
     kc_multi = ind.get('kc_atr_multi', 1.5)
     ema20    = df['Close'].ewm(span=20, adjust=False).mean()
     kc_upper = ema20 + kc_multi * df['ATR']

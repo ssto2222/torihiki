@@ -1680,13 +1680,17 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
-            # M1 RSI 極端値ゲート: EW2・スケールイン・TTMスクイーズ発火免除
-            # （ブレイクアウト発火は M1 RSI 急伸/急落そのものが伴うため）
-            elif (not _is_ew2_signal and not _is_scalein_signal and not _is_ttm_signal
+            # M1 RSI 極端値ゲート: EW2・スケールイン免除
+            # TTMスクイーズ発火は方向一致時（BUY×M1過熱 / SELL×M1売られ過ぎ）のみ免除
+            # （ブレイクアウト方向への M1 急伸/急落は根拠の一部）。
+            # 逆方向の極端値（M1とM5方向が矛盾）はフェイク濃厚のため通常通りブロック
+            elif (not _is_ew2_signal and not _is_scalein_signal
+                  and not (_is_ttm_signal and new_cross == 'buy')
                   and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur >= scalp.get('m1_rsi_ob_gate', 70.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≥{scalp.get("m1_rsi_ob_gate", 70.0):.0f} 過熱 エントリー禁止'
-            elif (not _is_ew2_signal and not _is_scalein_signal and not _is_ttm_signal
+            elif (not _is_ew2_signal and not _is_scalein_signal
+                  and not (_is_ttm_signal and new_cross == 'sell')
                   and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur <= scalp.get('m1_rsi_os_gate', 30.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≤{scalp.get("m1_rsi_os_gate", 30.0):.0f} 売られすぎ エントリー禁止'
@@ -1795,7 +1799,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 sl_price = close_v + _vb_sl_move
 
         # TTMスクイーズ発火: TP拡大 + SL独立タイト（解放方向への勢いを活用）
-        if _ttm_tp_multi != 1.0 and action in ('buy', 'sell'):
+        if _is_ttm_signal and action in ('buy', 'sell'):
             _ttm_tp_move = tp_move * _ttm_tp_multi
             _ttm_sl_move = sl_move * _ttm_sl_multi
             if action == 'buy':
