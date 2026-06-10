@@ -151,7 +151,7 @@ def add_m1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 
 def add_m5_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """M5 RSI・ATR・ADX・RVOL・価格加速 を付加して返す（M5 エントリーフィルタ・レジーム判定用）"""
+    """M5 RSI・ATR・ADX・RVOL・価格加速・TTMスクイーズ を付加して返す（M5 エントリーフィルタ・レジーム判定用）"""
     ind = cfg.get('INDICATOR', {})
 
     # 出来高データがある場合のみRVOL計算
@@ -168,12 +168,30 @@ def add_m5_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     else:
         df = df.copy()
 
-    # BB 幅（スクイーズ検出用）
-    df['BB_Width'] = calc_bb_width(df['Close'], ind.get('bb_period', 20))
-
     df['RSI'] = calc_rsi(df['Close'], ind.get('rsi_period', 14))
     df['ATR'] = calc_atr(df, ind.get('atr_period', 14))
     df['SMA20'] = df['Close'].rolling(20).mean()
+
+    # BB 幅（プレサージのスクイーズ検出用）
+    bb_period = ind.get('bb_period', 20)
+    df['BB_Width'] = calc_bb_width(df['Close'], bb_period)
+
+    # ── TTM スクイーズ: BB(20,2σ) がケルトナーチャネル(EMA20±ATR×倍率)の内側に
+    # 収縮している状態を検出。収縮→解放(発火)でブレイクアウト方向を判定する。
+    bb_ma  = df['Close'].rolling(bb_period).mean()
+    bb_std = df['Close'].rolling(bb_period).std()
+    df['BB_upper'] = bb_ma + 2.0 * bb_std
+    df['BB_lower'] = bb_ma - 2.0 * bb_std
+
+    kc_multi = ind.get('kc_atr_multi', 1.5)
+    ema20    = df['Close'].ewm(span=20, adjust=False).mean()
+    kc_upper = ema20 + kc_multi * df['ATR']
+    kc_lower = ema20 - kc_multi * df['ATR']
+    df['Squeeze_On'] = (df['BB_upper'] < kc_upper) & (df['BB_lower'] > kc_lower)
+
+    # モメンタム: 終値 - (Donchian中央20 + SMA20) / 2 → 符号で方向、絶対値で勢い
+    donchian_mid = (df['High'].rolling(20).max() + df['Low'].rolling(20).min()) / 2
+    df['TTM_Momentum'] = df['Close'] - (donchian_mid + df['SMA20']) / 2
 
     adx_df     = calc_adx(df, ind.get('adx_period', 14))
     df['ADX']      = adx_df['ADX']

@@ -208,7 +208,16 @@ def print_poll_status(
     _rvol_col = (_RED + _BOLD if rvol >= 3.0 else
                  _YELLOW       if rvol >= 1.5 else _DIM)
     _rvol_str = _c(f'RVOL {rvol:.1f}', _rvol_col)
-    print(f" {price_str}  {atr_str}  │  RSI_M5 {rsi5_str}  RSI_M1 {rsi1_str}  {_rvol_str}")
+    # TTMスクイーズ: ON=収縮中（黄）、OFF=解放済み（薄字）
+    _ttm = data.get('ttm_squeeze') or {}
+    if _ttm:
+        if _ttm.get('squeeze_on'):
+            _ttm_str = _c(f"SQ ON({_ttm.get('squeeze_bars', 0)})", _YELLOW, _BOLD)
+        else:
+            _ttm_str = _c(f"SQ OFF({_ttm.get('squeeze_bars', 0)})", _DIM)
+        print(f" {price_str}  {atr_str}  │  RSI_M5 {rsi5_str}  RSI_M1 {rsi1_str}  {_rvol_str}  {_ttm_str}")
+    else:
+        print(f" {price_str}  {atr_str}  │  RSI_M5 {rsi5_str}  RSI_M1 {rsi1_str}  {_rvol_str}")
 
     # ── レジーム行 ─────────────────────────────────────────────────────────
     h1_str = _c(regime_h1, _regime_color(regime_h1))
@@ -272,6 +281,8 @@ def print_poll_status(
         flags.append(_c(f'EW2 {sig_type}', _MAGENTA))
     if 'vol_bo' in sig_type:
         flags.append(_c(f'⚡ VOL-BO {sig_type}', _GREEN if 'up' in sig_type else _RED, _BOLD))
+    if 'ttm_squeeze' in sig_type:
+        flags.append(_c(f'💥 TTM-SQUEEZE {sig_type}', _GREEN if 'up' in sig_type else _RED, _BOLD))
     if flags:
         print(f" {' │ '.join(flags)}")
 
