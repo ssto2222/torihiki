@@ -317,7 +317,6 @@ PARAMS: dict[str, ParamSpec] = {
     'tp_frac':       ParamSpec('SCALP',  'tp_atr_fraction',         float, 0.1,    2.0,    'TP幅 = ATR × この値'),
     'buy':           ParamSpec('SCALP',  'buy_enabled',             bool,  None,   None,   'BUY有効/無効'),
     'sell':          ParamSpec('SCALP',  'sell_enabled',            bool,  None,   None,   'SELL有効/無効'),
-    'max_trades':    ParamSpec('SCALP',  'max_trades_day',          int,   1,      200,    '1日最大エントリー'),
     'cooldown':      ParamSpec('SCALP',  'cooldown_min',            int,   1,      240,    'クールダウン(分)'),
     'jpy_rate':      ParamSpec('SCALP',  'jpy_per_usd',             float, 100.0,  200.0,  'JPY/USDレート'),
     'lot':           ParamSpec('BRIDGE', 'lot_size',                float, 0.01,   10.0,   'フォールバックロット'),

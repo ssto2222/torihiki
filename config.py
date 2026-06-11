@@ -148,7 +148,6 @@ SCALP = dict(
     buy_enabled       = True,     # scalp buy を有効化 / 無効化
     sell_enabled      = True,     # scalp sell を有効化 / 無効化
     max_positions     = 3,       # 同時保有ポジション上限（0 = リスク比率から自動計算）
-    max_trades_day    = 30,      # 1日の最大エントリー回数
     cooldown_min      = 10,      # クールダウン時間（分）
     cooldown_trades   = 3,       # この回数トレードするごとにクールダウンを発動
     min_margin_level  = 200.0,   # 証拠金維持率の下限（%）。これを下回らないようlotを縮小

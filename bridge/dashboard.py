@@ -154,7 +154,6 @@ def print_poll_status(
         sys.stdout.flush()
 
     eff  = effective_cfg or {}
-    scalp_cfg = eff.get('SCALP', {})
     is_scalp  = (mode == 'scalp' and data.get('scalp_mode', True))
 
     sym    = data.get('symbol', '?')
@@ -430,17 +429,16 @@ def print_poll_status(
     avail    = data.get('available_slots', max_p)
     today    = data.get('trades_today',    0)
     sig_day  = data.get('signals_today',   0)
-    max_day  = scalp_cfg.get('max_trades_day', 20) if is_scalp else None
     bal_str  = _c(f'¥{bal}', _WHITE) if bal != 'N/A' else _c('N/A', _DIM)
     pos_str  = _c(f'{total_p}/{max_p}', _GREEN if avail > 0 else _RED)
     consec_str = (_c(str(consec_losses), _RED, _BOLD)
                   if consec_losses > 0 else _c('0', _DIM))
-    if max_day is not None:
+    if is_scalp:
         _cd_prog = _c(f'CD:{cd_cycle}/{cd_trades}', _YELLOW if cd_rem > 0 else _DIM)
         _cd_rem_str = _c(f'(残{cd_rem}分)', _YELLOW) if cd_rem > 0 else ''
         # シグナル点灯数 vs 実エントリー数を並べて表示
         _sig_str   = _c(f'SIG:{sig_day}', _CYAN)
-        trade_str  = f'ENT:{today}/{max_day} {_sig_str}  {_cd_prog}{_cd_rem_str}  '
+        trade_str  = f'ENT:{today} {_sig_str}  {_cd_prog}{_cd_rem_str}  '
     else:
         trade_str = ''
     print(f" 今日 {trade_str}ポジ {pos_str}(空き{avail})"
