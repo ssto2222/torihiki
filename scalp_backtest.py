@@ -12,7 +12,7 @@ MT5 接続あり / なし（合成データ）どちらでも動作。
 """
 import sys, argparse, json
 from pathlib import Path
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
@@ -174,7 +174,6 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
     slope_bars  = scalp.get('sma20_slope_bars', 5)
     slope_thr   = scalp.get('sma20_slope_atr_thr', 0.10)
     cooldown_m  = scalp.get('cooldown_min', 15)
-    max_day     = scalp.get('max_trades_day', 20)
     target_jpy  = scalp.get('target_profit_jpy', 1000)
     jpy_rate    = scalp.get('jpy_per_usd', 150.0)
     timeout_m1  = 30   # バー数 = 分
@@ -438,7 +437,6 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
     # ─ メインループ ─
     trades: list[dict] = []
     last_entry_ts: pd.Timestamp | None = None
-    day_counts: dict[date, int] = {}
     m5_rsi_prev: float = float('nan')
     crossing_ptr: int  = 0
     _crossings = list(h1_crossings or [])
@@ -458,11 +456,6 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
         # クールダウン
         if (last_entry_ts is not None and
                 (ts - last_entry_ts).total_seconds() < cooldown_m * 60):
-            continue
-
-        # 日次上限
-        dk = ts.date()
-        if day_counts.get(dk, 0) >= max_day:
             continue
 
         # レジーム
@@ -621,7 +614,6 @@ def run_scalp_bt(df_m5: pd.DataFrame, df_m1: pd.DataFrame,
         })
 
         last_entry_ts = entry_ts
-        day_counts[dk] = day_counts.get(dk, 0) + 1
 
     return trades
 

@@ -220,8 +220,7 @@ def run_bridge(cfg: dict, once: bool = False, mode: str = 'normal') -> None:
     print(f"  ポーリング   : {poll_sec}秒  （Ctrl+C で終了）")
     if mode == 'scalp':
         print(f"  目標利益     : {scalp_cfg.get('target_profit_jpy', 300)}円"
-              f"  クールダウン : {scalp_cfg.get('cooldown_min', 30)}分"
-              f"  日次上限     : {scalp_cfg.get('max_trades_day', 20)}回")
+              f"  クールダウン : {scalp_cfg.get('cooldown_min', 30)}分")
     else:
         print(f"  ロット数     : {lot_size}  最小スコア: {min_score}")
         print(f"  連続損失上限 : {max_consec}回")

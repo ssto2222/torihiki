@@ -172,7 +172,6 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         sell_thrs  = sorted(scalp.get('rsi_sell_thrs', [45.0, 40.0, 35.0]), reverse=True)
         buy_enabled  = bool(scalp.get('buy_enabled',  True))
         sell_enabled = bool(scalp.get('sell_enabled', True))
-        max_day         = scalp.get('max_trades_day',  20)
         cooldown        = scalp.get('cooldown_min',    15)
         cooldown_trades = int(scalp.get('cooldown_trades', 3))
 
@@ -1715,8 +1714,6 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = f'逆トレンドエントリー禁止(regime={regime_m5s})'
             elif eff_hour in {21}:
                 skip = f'forbidden_hour={eff_hour}'
-            elif state.count >= max_day:
-                skip = f'daily_limit={state.count}/{max_day}'
             elif (not _normal_variant and
                   state.cooldown_start_at is not None and
                   now < state.cooldown_start_at + timedelta(minutes=cooldown)):
