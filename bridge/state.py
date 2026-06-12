@@ -113,6 +113,12 @@ class ScalpState:
     pre_surge_armed: bool = False
     pre_surge_score: int  = 0   # アーム時のスコア（3 = ビッグチャンス解除判定に使用）
 
+    # MAクロス(M1 SMA80×SMA200)準備状態: SMA80がSMA200より上なら'buy'、下なら'sell'。
+    # 逆クロスでこの値が変わるまで「準備」とみなす（次の逆クロスまで有効）。
+    ma_cross_armed_dir: str = 'none'   # 'buy' | 'sell' | 'none'
+    # 現在の準備期間中にM1 SMA20タッチで執行済みか（準備期間中1回のみ発火）
+    ma_cross_fired: bool = False
+
     # 節目ラインクロス通知済みセット (round(price), 'up'|'down') のタプル
     key_level_crossed: set = field(default_factory=set)
 

@@ -228,8 +228,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         if atr_v <= 0 or np.isnan(atr_v):
             return None  # ATR 計算不能 → SL/TP が計算できないためスキップ
 
-        # M1 データ取得
-        df_m1_raw = fetch_ohlcv(symbol, 'M1', 50)
+        # M1 データ取得（SMA200 を末尾行で正しく計算するため 250本取得）
+        df_m1_raw = fetch_ohlcv(symbol, 'M1', 250)
         df_m1 = None
         rsi_m1_cur   = float('nan')
         sma20_m1_val = float('nan')
@@ -695,6 +695,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _is_ew2_signal     = False  # EW2専用フラグ: RSIゲートをバイパスする
         _is_scalein_signal = False  # RSIスケールイン由来: M1 RSI極端値ゲートをスキップ
         _is_ttm_signal     = False  # TTMスクイーズ発火由来: M1 BB/RSI極端値ゲートをスキップ
+        _is_ma_cross_signal = False # MAクロス(SMA80×SMA200)準備+SMA20タッチ由来: RSI/BB極端値・逆トレンドゲートをスキップ
         _is_nl_retest      = False  # NLリテスト由来フラグ（SL/TP 上書きに使用）
         _nl_retest_sl: float | None = None  # NLリテスト SL 価格
         _nl_retest_tp: float | None = None  # NLリテスト TP 価格
@@ -1046,6 +1047,52 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 _ttm_sl_multi = scalp.get('ttm_sl_multi', 0.9)
                 _logger.info(f'[TTM-SQUEEZE-SELL] {symbol} bars={ttm_info["squeeze_bars"]} '
                              f'momentum={ttm_info["momentum"]:.4f} RSI={rsi_cur:.1f}')
+
+        # ── MAクロス(M1 SMA80×SMA200)準備 + M1 SMA20タッチで執行 ──────────────
+        # SMA80>SMA200 を「BUY準備」、SMA80<SMA200 を「SELL準備」とし、
+        # 逆クロスでこの関係が反転するまで準備状態を維持する（次の逆クロスまで有効）。
+        # 準備中に価格がM1 SMA20に接近(margin内)したら、準備期間中1回だけ執行する。
+        # 独立シグナルのため RSI/BB極端値ゲート・逆トレンドゲートはバイパスする(TTM/EW2型)。
+        if (scalp.get('ma_cross_signal_enabled', True) and df_m1 is not None
+                and {'SMA80', 'SMA200', 'SMA20'}.issubset(df_m1.columns)):
+            _sma80_m1g  = float(df_m1['SMA80'].iloc[-1])
+            _sma200_m1g = float(df_m1['SMA200'].iloc[-1])
+            if not np.isnan(_sma80_m1g) and not np.isnan(_sma200_m1g):
+                _ma_cross_dir = 'buy' if _sma80_m1g > _sma200_m1g else 'sell'
+                if _ma_cross_dir != state.ma_cross_armed_dir:
+                    state.ma_cross_armed_dir = _ma_cross_dir
+                    state.ma_cross_fired     = False
+
+            if (confirmed_signal is None and not _ws_block and not state.ma_cross_fired
+                    and state.ma_cross_armed_dir in ('buy', 'sell')):
+                _sma20_m1g  = float(df_m1['SMA20'].iloc[-1])
+                _close_m1g  = float(df_m1['Close'].iloc[-1])
+                _atr_m1g    = float(df_m1['ATR'].iloc[-1]) if 'ATR' in df_m1.columns else atr_v
+                if not np.isnan(_sma20_m1g) and not np.isnan(_atr_m1g):
+                    _mc_margin = _atr_m1g * scalp.get('ma_cross_sma20_margin_atr', 0.3)
+                    if abs(_close_m1g - _sma20_m1g) <= _mc_margin:
+                        if (state.ma_cross_armed_dir == 'buy'
+                                and buy_enabled and not avoid_buy_surge):
+                            confirmed_signal    = 'buy'
+                            crossed_level       = _sma20_m1g
+                            state.buy_scalein_rsi_done.clear()
+                            _is_ma_cross_signal = True
+                            state.ma_cross_fired = True
+                            _ew2_signal_type = 'ma_cross_sma80x200_buy_sma20touch'
+                            _logger.info(f'[MA-CROSS-BUY] {symbol} SMA80={_sma80_m1g:.2f} '
+                                         f'SMA200={_sma200_m1g:.2f} SMA20={_sma20_m1g:.2f} '
+                                         f'close={_close_m1g:.2f}')
+                        elif (state.ma_cross_armed_dir == 'sell'
+                                and sell_enabled and not avoid_sell_surge):
+                            confirmed_signal    = 'sell'
+                            crossed_level       = _sma20_m1g
+                            state.sell_scalein_rsi_done.clear()
+                            _is_ma_cross_signal = True
+                            state.ma_cross_fired = True
+                            _ew2_signal_type = 'ma_cross_sma80x200_sell_sma20touch'
+                            _logger.info(f'[MA-CROSS-SELL] {symbol} SMA80={_sma80_m1g:.2f} '
+                                         f'SMA200={_sma200_m1g:.2f} SMA20={_sma20_m1g:.2f} '
+                                         f'close={_close_m1g:.2f}')
 
         # ── SMA 優先自動待機セット ─────────────────────────────────────────
         # RSI クロスを待たずに MTF 条件 + RSI50 方向フィルターで sma_pending を自動セット
@@ -1652,9 +1699,10 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             new_cross = None   # ゲートを通らせない（state.count 増加しない）
 
         # M1 BB ゲートを事前評価（elif チェーン外に出すことで後続ゲートが確実に評価される）
-        # TTMスクイーズ発火はバンド際への急伸そのものが根拠のためゲート対象外
+        # TTMスクイーズ発火・MAクロス由来はゲート対象外
         _bb_gate_skip = ''
         if (new_cross and df_m1 is not None and not _is_ew2_signal and not _is_ttm_signal
+                and not _is_ma_cross_signal
                 and 'BB_upper' in df_m1.columns and 'BB_lower' in df_m1.columns):
             _close_m1_g  = float(df_m1['Close'].iloc[-1])
             _bb_upper_m1 = float(df_m1['BB_upper'].iloc[-1])
@@ -1679,16 +1727,16 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI <35 追加SELL控え'
-            # M1 RSI 極端値ゲート: EW2・スケールイン免除
+            # M1 RSI 極端値ゲート: EW2・スケールイン・MAクロス免除
             # TTMスクイーズ発火は方向一致時（BUY×M1過熱 / SELL×M1売られ過ぎ）のみ免除
             # （ブレイクアウト方向への M1 急伸/急落は根拠の一部）。
             # 逆方向の極端値（M1とM5方向が矛盾）はフェイク濃厚のため通常通りブロック
-            elif (not _is_ew2_signal and not _is_scalein_signal
+            elif (not _is_ew2_signal and not _is_scalein_signal and not _is_ma_cross_signal
                   and not (_is_ttm_signal and new_cross == 'buy')
                   and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur >= scalp.get('m1_rsi_ob_gate', 70.0)):
                 skip = f'M1 RSI{rsi_m1_cur:.1f}≥{scalp.get("m1_rsi_ob_gate", 70.0):.0f} 過熱 エントリー禁止'
-            elif (not _is_ew2_signal and not _is_scalein_signal
+            elif (not _is_ew2_signal and not _is_scalein_signal and not _is_ma_cross_signal
                   and not (_is_ttm_signal and new_cross == 'sell')
                   and not np.isnan(rsi_m1_cur)
                   and rsi_m1_cur <= scalp.get('m1_rsi_os_gate', 30.0)):
@@ -1704,11 +1752,11 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 skip = 'M1 SMA20減速中 SELL禁止'
             elif _bb_gate_skip:
                 skip = _bb_gate_skip
-            elif new_cross == 'buy' and not _is_ew2_signal and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
+            elif new_cross == 'buy' and not _is_ew2_signal and not _is_ma_cross_signal and rsi_cur < scalp.get('rsi_buy_gate_min', 40.0):
                 skip = f'RSI{rsi_cur:.1f}<BUY最低閾値{scalp.get("rsi_buy_gate_min", 40.0):.0f} 禁止'
-            elif new_cross == 'sell' and not _is_ew2_signal and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
+            elif new_cross == 'sell' and not _is_ew2_signal and not _is_ma_cross_signal and rsi_cur > scalp.get('rsi_sell_gate_max', 60.0):
                 skip = f'RSI{rsi_cur:.1f}>SELL最高閾値{scalp.get("rsi_sell_gate_max", 60.0):.0f} 禁止'
-            elif (not _direct_confirmed and
+            elif (not _direct_confirmed and not _is_ma_cross_signal and
                   ((regime_m5s == 'trend_up'   and new_cross == 'sell') or
                    (regime_m5s == 'trend_down' and new_cross == 'buy'))):
                 skip = f'逆トレンドエントリー禁止(regime={regime_m5s})'
@@ -2111,6 +2159,12 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                      if 'RVOL' in df.columns and not np.isnan(float(df['RVOL'].iloc[-1]))
                      else 0.0),
             'ttm_squeeze':        ttm_info,
+            'ma_cross_armed_dir': state.ma_cross_armed_dir,
+            'ma_cross_fired':     state.ma_cross_fired,
+            'sma80_m1':  (round(float(df_m1['SMA80'].iloc[-1]), 2)
+                          if df_m1 is not None and 'SMA80' in df_m1.columns else 0.0),
+            'sma200_m1': (round(float(df_m1['SMA200'].iloc[-1]), 2)
+                          if df_m1 is not None and 'SMA200' in df_m1.columns else 0.0),
             'macro_bias':         macro_state.bias       if macro_state else 0.0,
             'macro_bias_label':   macro_state.bias_label if macro_state else 'neutral',
             'macro_summary':      macro_state.summary    if macro_state else '',
