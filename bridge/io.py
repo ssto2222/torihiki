@@ -48,3 +48,14 @@ def read_ea_state(path: str) -> dict:
             return json.load(f)
     except Exception:
         return {}
+
+
+def append_entry_log(record: dict, path: str) -> None:
+    """エントリーログ (JSONL) に1行追記する。
+
+    ディレクトリが存在しなければ作成する。失敗時は例外を呼び出し元へ
+    伝播するので、非クリティカルな処理として呼び出し側で try/except する。
+    """
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'a', encoding='ascii') as f:
+        f.write(json.dumps(record, ensure_ascii=True) + '\n')

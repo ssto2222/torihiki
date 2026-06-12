@@ -2,6 +2,7 @@
 from __future__ import annotations
 import logging
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -20,6 +21,7 @@ from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _has_positions_in_direction,
                               detect_bidirectional_loss)
 from bridge.notify   import send_discord, _build_key_level_cross_msg, _build_mtf_cross_msg
+from bridge.io       import append_entry_log
 if TYPE_CHECKING:
     from bridge.state import ScalpState, SignalState, JpyRateCache, Sma20TouchCache, MacroBiasState
 
@@ -2061,7 +2063,18 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                     _logger.info(f'[MTF節目/下抜け] {symbol} {_ml["label"]} '
                                  f'price={_ml_price:.2f} close={close_v:.2f}')
 
-        return {
+        _signal_type_val = (_ew2_signal_type if (_ew2_signal_type and action != 'none')
+                            else (f'{"normal" if _normal_variant else "scalp"}_{action}_scalein_{int(crossed_level or 0)}'
+                                  if (_is_scalein_signal and action != 'none')
+                                  else (f'{"normal" if _normal_variant else "scalp"}_{action}_{int(crossed_level or (state.buy_sma_level if action == "buy" else state.sell_sma_level))}'
+                                        if action != 'none' else 'none')))
+
+        _sma80_m1_out  = (round(float(df_m1['SMA80'].iloc[-1]), 2)
+                          if df_m1 is not None and 'SMA80' in df_m1.columns else 0.0)
+        _sma200_m1_out = (round(float(df_m1['SMA200'].iloc[-1]), 2)
+                          if df_m1 is not None and 'SMA200' in df_m1.columns else 0.0)
+
+        _result = {
             'timestamp':          now.strftime('%Y.%m.%d %H:%M:%S'),
             'symbol':             symbol,
             'close':              round(close_v, 2),
@@ -2077,11 +2090,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'sma20':              round(sma20_m5_val, 2) if not np.isnan(sma20_m5_val) else 0.0,
             'sl_multi':           round(sl_ratio, 2),
             'action':             action,
-            'signal_type':        (_ew2_signal_type if (_ew2_signal_type and action != 'none')
-                                   else (f'{"normal" if _normal_variant else "scalp"}_{action}_scalein_{int(crossed_level or 0)}'
-                                         if (_is_scalein_signal and action != 'none')
-                                         else (f'{"normal" if _normal_variant else "scalp"}_{action}_{int(crossed_level or (state.buy_sma_level if action == "buy" else state.sell_sma_level))}'
-                                               if action != 'none' else 'none'))),
+            'signal_type':        _signal_type_val,
             'execution_tf':       'm5',
             'signal_valid_until': '',
             'downtrend_ok':       False,
@@ -2161,10 +2170,8 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'ttm_squeeze':        ttm_info,
             'ma_cross_armed_dir': state.ma_cross_armed_dir,
             'ma_cross_fired':     state.ma_cross_fired,
-            'sma80_m1':  (round(float(df_m1['SMA80'].iloc[-1]), 2)
-                          if df_m1 is not None and 'SMA80' in df_m1.columns else 0.0),
-            'sma200_m1': (round(float(df_m1['SMA200'].iloc[-1]), 2)
-                          if df_m1 is not None and 'SMA200' in df_m1.columns else 0.0),
+            'sma80_m1':           _sma80_m1_out,
+            'sma200_m1':          _sma200_m1_out,
             'macro_bias':         macro_state.bias       if macro_state else 0.0,
             'macro_bias_label':   macro_state.bias_label if macro_state else 'neutral',
             'macro_summary':      macro_state.summary    if macro_state else '',
@@ -2196,6 +2203,35 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 for a in state.nl_retest_arms
             ],
         }
+
+        # ── エントリーログ: 発火してエントリーしたシグナルを後で分析できるよう記録 ──
+        if action in ('buy', 'sell'):
+            try:
+                _entry_log_dir = cfg.get('BRIDGE', {}).get('log_dir', '') or 'logs'
+                _entry_log_path = str(Path(_entry_log_dir) / f'entries_{symbol}.jsonl')
+                append_entry_log({
+                    'timestamp':          now.strftime('%Y.%m.%d %H:%M:%S'),
+                    'symbol':             symbol,
+                    'action':             action,
+                    'signal_type':        _signal_type_val,
+                    'close':              round(close_v, 2),
+                    'sl_price':           round(sl_price, 2),
+                    'tp_price':           round(tp_price, 2),
+                    'lot_size':           lot,
+                    'atr':                round(atr_v, 2),
+                    'rsi_m5':             round(rsi_cur, 1),
+                    'rsi_m1':             round(rsi_m1_cur, 1) if not np.isnan(rsi_m1_cur) else None,
+                    'regime_m5':          regime_m5s,
+                    'regime_h1':          regime_h1s,
+                    'sma80_m1':           _sma80_m1_out,
+                    'sma200_m1':          _sma200_m1_out,
+                    'sma20_m1':           round(sma20_m1_val, 2) if not np.isnan(sma20_m1_val) else None,
+                    'ma_cross_armed_dir': state.ma_cross_armed_dir,
+                }, _entry_log_path)
+            except Exception as _log_err:
+                _logger.warning(f'[エントリーログ] 書き込み失敗: {_log_err}')
+
+        return _result
 
     except Exception:
         _logger.exception("[スキャルプ] compute_scalp_signal 例外")
