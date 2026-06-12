@@ -127,12 +127,17 @@ def add_h1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 
 def add_m1_indicators(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """M1 SMA20・BB・RSI・ATR を付加して返す"""
+    """M1 SMA20・SMA80・SMA200・BB・RSI・ATR を付加して返す"""
     ind = cfg.get('INDICATOR', {})
     bp  = ind.get('bb_period', 20)
     bs  = ind.get('bb_sigma',  2.0)
     df  = df.copy()
     df['SMA20']    = df['Close'].rolling(ind.get('sma_m1', 20)).mean()
+    # min_periods=1: 200本未満のデータでもNaNにせず dropna() で全行欠落させない
+    # （短期データを使う他の呼び出し元との互換性維持。SMA80/200が
+    #  本来の期間で計算されるのは200本以上のデータを渡した場合の末尾行のみ）
+    df['SMA80']    = df['Close'].rolling(80,  min_periods=1).mean()
+    df['SMA200']   = df['Close'].rolling(200, min_periods=1).mean()
     df['RSI']      = calc_rsi(df['Close'], ind.get('rsi_period', 14))
     df['ATR']      = calc_atr(df, ind.get('atr_period', 14))
     bb_ma          = df['Close'].rolling(bp).mean()

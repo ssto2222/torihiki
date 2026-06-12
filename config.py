@@ -229,6 +229,11 @@ SCALP = dict(
     ttm_rsi_sell_max     = 55.0,  # 発火SELL: M5 RSI上限
     ttm_tp_multi         = 1.6,   # TP倍率（通常スキャルプTP × この値）
     ttm_sl_multi         = 0.9,   # SL倍率（通常スキャルプSL × この値）
+    # ── MAクロス(M1 SMA80×SMA200)準備 + SMA20タッチ執行 ─────────────────
+    # SMA80>SMA200='buy'準備、SMA80<SMA200='sell'準備。逆クロスまで準備状態が継続し、
+    # 準備中に価格がM1 SMA20に接近(margin内)したら準備期間中1回だけ執行する。
+    ma_cross_signal_enabled   = True,  # 有効/無効
+    ma_cross_sma20_margin_atr = 0.3,   # M1 SMA20接近判定マージン = M1_ATR × この値
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────
