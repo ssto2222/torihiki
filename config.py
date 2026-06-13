@@ -234,6 +234,11 @@ SCALP = dict(
     # 準備中に価格がM1 SMA20に接近(margin内)したら準備期間中1回だけ執行する。
     ma_cross_signal_enabled   = True,  # 有効/無効
     ma_cross_sma20_margin_atr = 0.3,   # M1 SMA20接近判定マージン = M1_ATR × この値
+    # ── シグナル別パフォーマンスレポート（定期 Discord 通知）─────────────
+    perf_report_enabled     = True,  # 有効/無効
+    perf_report_interval_h  = 24,    # レポート送信間隔（時間）
+    perf_report_lookback_h  = 24,    # 集計対象期間（時間）
+    perf_report_min_winrate = 0.40,  # 決済済み件数に対する勝率がこの値未満かつ損益マイナスなら見直しを提案
 )
 
 # ── エリオット波動 Wave2 エントリー ───────────────────────────────
