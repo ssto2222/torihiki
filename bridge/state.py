@@ -134,6 +134,9 @@ class ScalpState:
     #          'break_bars', 'armed_at'}
     nl_retest_arms: list = field(default_factory=list)
 
+    # シグナル別パフォーマンスレポートの最終送信時刻（time.time() の値）
+    last_perf_report_at: float = 0.0
+
 
 @dataclass
 class TimeBiasState:

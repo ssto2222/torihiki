@@ -1,6 +1,7 @@
 """bridge/signal_scalp.py — スキャルプモード シグナル計算"""
 from __future__ import annotations
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,6 +23,7 @@ from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               detect_bidirectional_loss)
 from bridge.notify   import send_discord, _build_key_level_cross_msg, _build_mtf_cross_msg
 from bridge.io       import append_entry_log
+from bridge.perf_report import build_performance_report
 if TYPE_CHECKING:
     from bridge.state import ScalpState, SignalState, JpyRateCache, Sma20TouchCache, MacroBiasState
 
@@ -2230,6 +2232,19 @@ def compute_scalp_signal(symbol: str, cfg: dict,
                 }, _entry_log_path)
             except Exception as _log_err:
                 _logger.warning(f'[エントリーログ] 書き込み失敗: {_log_err}')
+
+        # ── パフォーマンスレポート: シグナル別の発火件数・勝率・損益を定期的にDiscordへ通知 ──
+        if scalp.get('perf_report_enabled', True):
+            _report_interval_h = scalp.get('perf_report_interval_h', 24)
+            _report_elapsed_h  = (time.time() - state.last_perf_report_at) / 3600
+            if state.last_perf_report_at == 0.0 or _report_elapsed_h >= max(_report_interval_h, 0.1):
+                state.last_perf_report_at = time.time()
+                try:
+                    _report_msg = build_performance_report(symbol, cfg, mt5=mt5)
+                    if _report_msg:
+                        send_discord(_report_msg)
+                except Exception as _report_err:
+                    _logger.warning(f'[パフォーマンスレポート] 生成失敗: {_report_err}')
 
         return _result
 
