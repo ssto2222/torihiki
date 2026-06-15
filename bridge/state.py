@@ -137,6 +137,10 @@ class ScalpState:
     # シグナル別パフォーマンスレポートの最終送信時刻（time.time() の値）
     last_perf_report_at: float = 0.0
 
+    # N連勝後クールダウン: クールダウン終了時刻、および直近トリガーとなったクローズ約定のtime
+    win_streak_cooldown_until: Optional[datetime] = None
+    win_streak_last_deal_time: float = 0.0
+
 
 @dataclass
 class TimeBiasState:

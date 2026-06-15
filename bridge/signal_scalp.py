@@ -20,7 +20,7 @@ from core.patterns   import detect_all_patterns, PatternResult
 from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _position_status, _get_jpy_per_usd,
                               _has_positions_in_direction,
-                              detect_bidirectional_loss)
+                              detect_bidirectional_loss, detect_consecutive_wins)
 from bridge.notify   import send_discord, _build_key_level_cross_msg, _build_mtf_cross_msg
 from bridge.io       import append_entry_log
 from bridge.perf_report import build_performance_report
@@ -537,6 +537,25 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         _ws_block     = _is_whipsaw or _is_bidir
         _ws_reason    = (f'ウィップソー(ratio={_ws_ratio:.1f}≥{_ws_thr})' if _is_whipsaw
                          else '双方向損失検出')
+
+        # ── N連勝後クールダウン ─────────────────────────────────────
+        # 直近 win_streak_count 件のクローズトレードが全勝なら win_streak_cooldown_h
+        # 時間エントリーを控える（勝ちすぎ後の過信エントリー回避）。
+        # 同一の連勝で重複してクールダウンを再発火させないよう、最新クローズの
+        # time を記録し、前回トリガー時と同じなら無視する。
+        _rules_risk    = cfg.get('RULES', {})
+        _win_streak_n  = _rules_risk.get('win_streak_count', 5)
+        _win_streak_h  = _rules_risk.get('win_streak_cooldown_h', 4)
+        if _win_streak_n > 0:
+            _streak_win, _streak_last_time = detect_consecutive_wins(
+                symbol, cfg['MT5'].get('magic', 20240101), _win_streak_n, mt5=mt5)
+            if _streak_win and _streak_last_time != state.win_streak_last_deal_time:
+                state.win_streak_last_deal_time = _streak_last_time
+                state.win_streak_cooldown_until = now + timedelta(hours=_win_streak_h)
+                _logger.info(f'[{_win_streak_n}連勝] {symbol} '
+                             f'クールダウン{_win_streak_h}時間開始')
+        _win_streak_block = (state.win_streak_cooldown_until is not None
+                              and now < state.win_streak_cooldown_until)
 
         # 確定トレンド転換時に逆方向の待機状態をキャンセル
         # M5（短期）ではなく H1（中期）確定トレンドのみでキャンセル
@@ -1727,6 +1746,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
 
             if _ws_block:
                 skip = _ws_reason
+            elif _win_streak_block:
+                rem = int((state.win_streak_cooldown_until - now).total_seconds() / 60)
+                skip = f'{_win_streak_n}連勝後クールダウン残{rem}分'
             elif state.m1_rsi_above_65 and new_cross == 'buy' and pos_st['total_positions'] > 0:
                 skip = 'M1 RSI >65 追加BUY控え'
             elif state.m1_rsi_below_35 and new_cross == 'sell' and pos_st['total_positions'] > 0:
@@ -2166,6 +2188,9 @@ def compute_scalp_signal(symbol: str, cfg: dict,
             'pattern_tp_target':  state.pattern_tp_target,
             'ws_blocked':         _ws_block,
             'ws_ratio':           round(_ws_ratio, 2),
+            'win_streak_blocked': _win_streak_block,
+            'win_streak_cooldown_until': (state.win_streak_cooldown_until.strftime('%Y.%m.%d %H:%M:%S')
+                                           if state.win_streak_cooldown_until else ''),
             'rvol': (round(float(df['RVOL'].iloc[-1]), 2)
                      if 'RVOL' in df.columns and not np.isnan(float(df['RVOL'].iloc[-1]))
                      else 0.0),
