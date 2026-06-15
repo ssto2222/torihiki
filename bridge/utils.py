@@ -182,6 +182,33 @@ def detect_bidirectional_loss(symbol: str, magic: int,
         return False
 
 
+def detect_consecutive_wins(symbol: str, magic: int, n: int = 5,
+                             lookback_h: int = 168, *, mt5) -> 'tuple[bool, float]':
+    """直近 n 件のクローズトレードが全勝なら (True, 最新クローズのtime) を返す。
+
+    n 件未満、または全勝でない場合は (False, 0.0)。
+    呼び出し側は最新クローズの time を保持し、同じ time で再判定された場合は
+    クールダウンを再発火させない（同一の連勝に対する重複トリガー防止）。
+    """
+    try:
+        now   = datetime.now(timezone.utc)
+        since = now - timedelta(hours=lookback_h)
+        deals = mt5.history_deals_get(since, now)
+        if not deals:
+            return False, 0.0
+        close_deals = [d for d in deals
+                       if d.symbol == symbol
+                       and d.magic == magic
+                       and d.entry == mt5.DEAL_ENTRY_OUT]
+        if len(close_deals) < n:
+            return False, 0.0
+        last_n  = sorted(close_deals, key=lambda d: d.time)[-n:]
+        all_win = all(d.profit + d.commission + d.swap > 0 for d in last_n)
+        return all_win, float(last_n[-1].time)
+    except Exception:
+        return False, 0.0
+
+
 def _close_profitable_positions(symbol: str, magic: int, deviation: int, *, mt5) -> int:
     """MT5 の含み益ポジション（magic 一致）を全決済する。決済した件数を返す。"""
     closed = 0

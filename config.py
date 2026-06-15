@@ -97,6 +97,8 @@ RULES_RISK = dict(
     max_consecutive_losses   = 10,     # 連続損失この回数でその日の取引停止
     cooldown_large_loss_min  = 1440,  # 大損失後のクールダウン（分）= 翌日まで
     large_loss_threshold_usd = -10000,
+    win_streak_count         = 5,    # この回数連続で勝った直後にクールダウン（0=無効）
+    win_streak_cooldown_h    = 4,    # 連勝後クールダウン時間（時間）
 )
 
 RULES_EXIT = dict(
