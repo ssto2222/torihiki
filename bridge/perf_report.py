@@ -2,7 +2,9 @@
 from __future__ import annotations
 import json
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
+
+from bridge.io import entry_log_path
+from bridge.utils import _deal_net_profit
 
 
 def _read_entries(path: str, since: datetime) -> list[dict]:
@@ -43,7 +45,7 @@ def _closed_profit(entry: dict, deals: list, magic: int, *, mt5) -> 'float | Non
               if d.position_id == open_deal.position_id and d.entry == mt5.DEAL_ENTRY_OUT]
     if not closes:
         return None
-    return sum(d.profit + d.commission + d.swap for d in closes)
+    return sum(_deal_net_profit(d) for d in closes)
 
 
 def build_performance_report(symbol: str, cfg: dict, *, mt5) -> 'str | None':
@@ -55,8 +57,7 @@ def build_performance_report(symbol: str, cfg: dict, *, mt5) -> 'str | None':
     lookback_h  = scalp.get('perf_report_lookback_h', 24)
     min_winrate = scalp.get('perf_report_min_winrate', 0.40)
 
-    log_dir  = cfg['BRIDGE'].get('log_dir', '') or 'logs'
-    log_path = str(Path(log_dir) / f'entries_{symbol}.jsonl')
+    log_path = entry_log_path(cfg['BRIDGE'].get('log_dir', ''), symbol)
 
     since   = datetime.now(timezone.utc) - timedelta(hours=lookback_h)
     entries = _read_entries(log_path, since)
