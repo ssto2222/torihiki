@@ -152,6 +152,25 @@ def _has_positions_in_direction(symbol: str, magic: int, direction: str, *, mt5)
         return False
 
 
+def _deal_net_profit(d) -> float:
+    """MT5 約定 (deal) のスプレッド/手数料/スワップを含めた純損益。"""
+    return d.profit + d.commission + d.swap
+
+
+def _recent_close_deals(symbol: str, magic: int, lookback_h: float, *, mt5) -> list:
+    """直近 lookback_h 時間の指定シンボル・magic のクローズ約定一覧を時刻昇順で返す。"""
+    now   = datetime.now(timezone.utc)
+    since = now - timedelta(hours=lookback_h)
+    deals = mt5.history_deals_get(since, now)
+    if not deals:
+        return []
+    close_deals = [d for d in deals
+                   if d.symbol == symbol
+                   and d.magic == magic
+                   and d.entry == mt5.DEAL_ENTRY_OUT]
+    return sorted(close_deals, key=lambda d: d.time)
+
+
 def detect_bidirectional_loss(symbol: str, magic: int,
                                lookback_h: int = 4, *, mt5) -> bool:
     """直近3件のクローズトレードが全損失かつ両方向を含む場合（行ってこい相場の痕跡）。
@@ -163,19 +182,11 @@ def detect_bidirectional_loss(symbol: str, magic: int,
     DEAL_TYPE_BUY (=0) でクローズ → 売りポジを決済
     """
     try:
-        now   = datetime.now(timezone.utc)
-        since = now - timedelta(hours=lookback_h)
-        deals = mt5.history_deals_get(since, now)
-        if not deals:
-            return False
-        close_deals = [d for d in deals
-                       if d.symbol == symbol
-                       and d.magic == magic
-                       and d.entry == mt5.DEAL_ENTRY_OUT]
+        close_deals = _recent_close_deals(symbol, magic, lookback_h, mt5=mt5)
         if len(close_deals) < 3:
             return False
-        last3     = sorted(close_deals, key=lambda d: d.time)[-3:]
-        all_loss  = all(d.profit + d.commission + d.swap < 0 for d in last3)
+        last3     = close_deals[-3:]
+        all_loss  = all(_deal_net_profit(d) < 0 for d in last3)
         both_dirs = len({d.type for d in last3}) >= 2  # 買いポジ決済(0)と売りポジ決済(1)が混在
         return all_loss and both_dirs
     except Exception:
@@ -191,19 +202,11 @@ def detect_consecutive_wins(symbol: str, magic: int, n: int = 5,
     クールダウンを再発火させない（同一の連勝に対する重複トリガー防止）。
     """
     try:
-        now   = datetime.now(timezone.utc)
-        since = now - timedelta(hours=lookback_h)
-        deals = mt5.history_deals_get(since, now)
-        if not deals:
-            return False, 0.0
-        close_deals = [d for d in deals
-                       if d.symbol == symbol
-                       and d.magic == magic
-                       and d.entry == mt5.DEAL_ENTRY_OUT]
+        close_deals = _recent_close_deals(symbol, magic, lookback_h, mt5=mt5)
         if len(close_deals) < n:
             return False, 0.0
-        last_n  = sorted(close_deals, key=lambda d: d.time)[-n:]
-        all_win = all(d.profit + d.commission + d.swap > 0 for d in last_n)
+        last_n  = close_deals[-n:]
+        all_win = all(_deal_net_profit(d) > 0 for d in last_n)
         return all_win, float(last_n[-1].time)
     except Exception:
         return False, 0.0

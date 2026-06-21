@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -22,7 +21,7 @@ from bridge.utils    import (_detect_regime, _regime_lot_multi,
                               _has_positions_in_direction,
                               detect_bidirectional_loss, detect_consecutive_wins)
 from bridge.notify   import send_discord, _build_key_level_cross_msg, _build_mtf_cross_msg
-from bridge.io       import append_entry_log
+from bridge.io       import append_entry_log, entry_log_path
 from bridge.perf_report import build_performance_report
 if TYPE_CHECKING:
     from bridge.state import ScalpState, SignalState, JpyRateCache, Sma20TouchCache, MacroBiasState
@@ -2234,8 +2233,7 @@ def compute_scalp_signal(symbol: str, cfg: dict,
         # ── エントリーログ: 発火してエントリーしたシグナルを後で分析できるよう記録 ──
         if action in ('buy', 'sell'):
             try:
-                _entry_log_dir = cfg.get('BRIDGE', {}).get('log_dir', '') or 'logs'
-                _entry_log_path = str(Path(_entry_log_dir) / f'entries_{symbol}.jsonl')
+                _entry_log_path = entry_log_path(cfg.get('BRIDGE', {}).get('log_dir', ''), symbol)
                 append_entry_log({
                     'timestamp':          now.strftime('%Y.%m.%d %H:%M:%S'),
                     'symbol':             symbol,

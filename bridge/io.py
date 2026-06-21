@@ -50,6 +50,11 @@ def read_ea_state(path: str) -> dict:
         return {}
 
 
+def entry_log_path(log_dir: str, symbol: str) -> str:
+    """エントリーログ (JSONL) のパスを返す（log_dir 未設定時は 'logs' を既定とする）"""
+    return str(Path(log_dir or 'logs') / f'entries_{symbol}.jsonl')
+
+
 def append_entry_log(record: dict, path: str) -> None:
     """エントリーログ (JSONL) に1行追記する。
 
